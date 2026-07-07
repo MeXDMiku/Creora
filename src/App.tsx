@@ -2,19 +2,24 @@ import { useEffect, useRef, useCallback, useState, useMemo } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { useSetAtom, useAtom, useAtomValue, useStore } from 'jotai'
-import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType } from './state/atoms'
+import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, allBlockIdsAtom } from './state/atoms'
 import { ButtonBlock } from './blocks/ButtonBlock'
 import { NumberDisplayBlock } from './blocks/NumberDisplayBlock'
 import { TextLabelBlock } from './blocks/TextLabelBlock'
 import { ToggleBlock } from './blocks/ToggleBlock'
 import { InputBlock } from './blocks/InputBlock'
+import { FormulaDisplayBlock } from './blocks/FormulaDisplayBlock'
 import { WireOverlay } from './components/WireOverlay'
 import { supabase } from './lib/supabase'
+import { recalculateAllFormulas } from './lib/bindingEngine'
+import type { FormulaBinding } from './types/creora'
 import './App.css'
 
 function InspectorControls({ blockId, editor }: { blockId: string; editor: any }) {
   const [runtimeState, setRuntimeState] = useAtom(blockRuntimeAtom(blockId))
   const triggerSave = useSetAtom(triggerSaveAtom)
+  const store = useStore()
+  const [formulas, setFormulas] = useAtom(formulasAtom)
 
   // Determine current block's type
   let blockType: string | null = null
@@ -27,8 +32,52 @@ function InspectorControls({ blockId, editor }: { blockId: string; editor: any }
     })
   }
 
-  const showTextControls = blockType === 'buttonBlock' || blockType === 'numberDisplayBlock' || blockType === 'textLabelBlock'
+  const showTextControls = blockType === 'buttonBlock' || blockType === 'numberDisplayBlock' || blockType === 'textLabelBlock' || blockType === 'formulaDisplayBlock'
   const showNumericConstraints = blockType === 'numberDisplayBlock'
+
+  const canvasBlocks = useMemo(() => {
+    if (!editor) return []
+    const list: { id: string; type: string; label: string }[] = []
+    editor.state.doc.descendants((node: any) => {
+      const bId = node.attrs?.blockId
+      const typeName = node.type.name
+      if (bId && bId !== blockId && (
+        typeName === 'buttonBlock' || 
+        typeName === 'numberDisplayBlock' || 
+        typeName === 'formulaDisplayBlock' ||
+        typeName === 'toggleBlock' || 
+        typeName === 'inputBlock' || 
+        typeName === 'textLabelBlock'
+      )) {
+        let label = ''
+        if (typeName === 'buttonBlock') {
+          label = `Button (${node.attrs.label || bId})`
+        } else if (typeName === 'numberDisplayBlock') {
+          label = `Number Display (${bId})`
+        } else if (typeName === 'formulaDisplayBlock') {
+          label = `Formula Display (${bId})`
+        } else if (typeName === 'toggleBlock') {
+          label = `Toggle (${bId})`
+        } else if (typeName === 'inputBlock') {
+          label = `Input (${bId})`
+        } else if (typeName === 'textLabelBlock') {
+          label = `Text Label (${bId})`
+        }
+        list.push({ id: bId, type: typeName, label })
+      }
+    })
+    return list
+  }, [editor, blockId])
+
+  const [selectedVarBlockId, setSelectedVarBlockId] = useState('')
+  useEffect(() => {
+    if (canvasBlocks.length > 0 && !selectedVarBlockId) {
+      setSelectedVarBlockId(canvasBlocks[0].id)
+    }
+  }, [canvasBlocks, selectedVarBlockId])
+
+  const currentFormulaBinding = formulas.find(f => f.targetBlockId === blockId && f.targetProperty === 'value')
+  const formulaValue = currentFormulaBinding?.formula || ''
 
   return (
     <div key={blockId}>
@@ -159,6 +208,88 @@ function InspectorControls({ blockId, editor }: { blockId: string; editor: any }
             />
           </label>
         </>
+      )}
+
+      {/* Formula controls */}
+      {blockType === 'formulaDisplayBlock' && (
+        <div style={{ marginTop: '12px', borderTop: '1px solid #e5e7eb', paddingTop: '12px' }}>
+          <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>
+            Formula
+            <input
+              type="text"
+              value={formulaValue}
+              onChange={(e) => {
+                const newFormula = e.target.value
+                setFormulas(prev => {
+                  const existing = prev.find(f => f.targetBlockId === blockId && f.targetProperty === 'value')
+                  if (existing) {
+                    return prev.map(f => f.targetBlockId === blockId && f.targetProperty === 'value' ? { ...f, formula: newFormula } : f)
+                  } else {
+                    return [...prev, {
+                      id: `fb_${blockId}`,
+                      targetBlockId: blockId,
+                      targetProperty: 'value',
+                      formula: newFormula,
+                      pageId: PAGE_ID
+                    }]
+                  }
+                })
+                // Recalculate immediately
+                setTimeout(() => {
+                  recalculateAllFormulas(store)
+                  triggerSave(prev => prev + 1)
+                }, 0)
+              }}
+              placeholder="e.g. test_num_1 * 5"
+              style={{ display: 'block', marginTop: '4px', width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #ccc', boxSizing: 'border-box', background: '#f8fafc', color: '#0f172a', outline: 'none' }}
+            />
+          </label>
+
+          {canvasBlocks.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '8px' }}>
+              <span style={{ fontSize: '12px', fontWeight: 500, color: '#475569' }}>Insert block variable</span>
+              <div style={{ display: 'flex', gap: '4px' }}>
+                <select
+                  value={selectedVarBlockId}
+                  onChange={(e) => setSelectedVarBlockId(e.target.value)}
+                  style={{ flex: 1, padding: '4px', borderRadius: '4px', border: '1px solid #ccc', fontSize: '12px', background: '#fff', color: '#0f172a' }}
+                >
+                  {canvasBlocks.map(b => (
+                    <option key={b.id} value={b.id}>{b.label}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => {
+                    if (selectedVarBlockId) {
+                      const newFormula = formulaValue ? `${formulaValue} + ${selectedVarBlockId}` : selectedVarBlockId
+                      setFormulas(prev => {
+                        const existing = prev.find(f => f.targetBlockId === blockId && f.targetProperty === 'value')
+                        if (existing) {
+                          return prev.map(f => f.targetBlockId === blockId && f.targetProperty === 'value' ? { ...f, formula: newFormula } : f)
+                        } else {
+                          return [...prev, {
+                            id: `fb_${blockId}`,
+                            targetBlockId: blockId,
+                            targetProperty: 'value',
+                            formula: newFormula,
+                            pageId: PAGE_ID
+                          }]
+                        }
+                      })
+                      setTimeout(() => {
+                        recalculateAllFormulas(store)
+                        triggerSave(prev => prev + 1)
+                      }, 0)
+                    }
+                  }}
+                  style={{ padding: '4px 8px', background: '#6366f1', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}
+                >
+                  Insert
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       )}
     </div>
   )
@@ -404,7 +535,7 @@ function ConnectionPopup({ editor }: { editor: any }) {
     const newWorkflow = {
       id: wfId,
       sourceId: pending.sourceBlockId,
-      sourceEvent: 'onClick',
+      sourceEvent: 'onClick' as const,
       permission: 'public' as const,
       pageId: 'page_1',
       steps: [stepStep],
@@ -592,6 +723,8 @@ function ConnectionPopup({ editor }: { editor: any }) {
 }
 
 function ContextMenu({ editor }: { editor: any }) {
+  const store = useStore()
+  const setFormulas = useSetAtom(formulasAtom)
   const [menu, setMenu] = useAtom(contextMenuAtom)
   const setConnections = useSetAtom(connectionsAtom)
   const setWorkflows = useSetAtom(workflowsAtom)
@@ -608,7 +741,7 @@ function ContextMenu({ editor }: { editor: any }) {
       editor.commands.command(({ tr, dispatch }: any) => {
         let foundPos = -1
         tr.doc.descendants((node: any, pos: number) => {
-          if ((node.type.name === 'buttonBlock' || node.type.name === 'numberDisplayBlock' || node.type.name === 'toggleBlock' || node.type.name === 'inputBlock' || node.type.name === 'textLabelBlock') && node.attrs.blockId === blockId) {
+          if ((node.type.name === 'buttonBlock' || node.type.name === 'numberDisplayBlock' || node.type.name === 'formulaDisplayBlock' || node.type.name === 'toggleBlock' || node.type.name === 'inputBlock' || node.type.name === 'textLabelBlock') && node.attrs.blockId === blockId) {
             foundPos = pos
             return false
           }
@@ -626,6 +759,8 @@ function ContextMenu({ editor }: { editor: any }) {
     // 2. Clean up atoms
     blockPositionAtom.remove(blockId)
     blockRuntimeAtom.remove(blockId)
+    store.set(allBlockIdsAtom, (prev: string[]) => prev.filter((id: string) => id !== blockId))
+    setFormulas((prev: FormulaBinding[]) => prev.filter((f: FormulaBinding) => f.targetBlockId !== blockId))
 
     // 3. Clean up connections and workflows
     setConnections(prev => prev.filter(c => c.sourceBlockId !== blockId && c.targetBlockId !== blockId))
@@ -737,7 +872,7 @@ function App() {
     y: number;
     message: string;
   } | null>(null)
-  const mismatchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const mismatchTimeoutRef = useRef<any | null>(null)
 
   useEffect(() => {
     return () => {
@@ -767,7 +902,7 @@ function App() {
   // Loading and Saving State
   const [isLoading, setIsLoading] = useState(true)
   const [saveStatus, setSaveStatus] = useState<'Saved' | 'Saving...' | 'Error saving' | 'Ready'>('Ready')
-  const debouncedSaveRef = useRef<NodeJS.Timeout | null>(null)
+  const debouncedSaveRef = useRef<any | null>(null)
   const [triggerSaveValue, setTriggerSave] = useAtom(triggerSaveAtom)
 
   // Ref to hold saveToSupabase callback to break mutual dependency with editor hook
@@ -781,10 +916,26 @@ function App() {
       TextLabelBlock,
       ToggleBlock,
       InputBlock,
+      FormulaDisplayBlock,
     ],
     content: '',
     onUpdate: ({ editor }) => {
       saveToSupabaseRef.current?.()
+
+      // Synchronize allBlockIdsAtom
+      const blockIds: string[] = []
+      editor.state.doc.descendants((node: any) => {
+        const typeName = node.type.name
+        if (typeName === 'buttonBlock' || typeName === 'numberDisplayBlock' || typeName === 'formulaDisplayBlock' || typeName === 'toggleBlock' || typeName === 'inputBlock' || typeName === 'textLabelBlock') {
+          if (node.attrs?.blockId) {
+            blockIds.push(node.attrs.blockId)
+          }
+        }
+      })
+      store.set(allBlockIdsAtom, blockIds)
+
+      // Live recalculate all formulas
+      recalculateAllFormulas(store)
 
       const { selection } = editor.state
       const { $from } = selection
@@ -873,7 +1024,7 @@ function App() {
       }
     },
     editorProps: {
-      handleKeyDown: (view, event) => {
+      handleKeyDown: (_, event) => {
         if (slashMenuOpenRef.current) {
           if (event.key === 'ArrowDown') {
             event.preventDefault()
@@ -1001,6 +1152,24 @@ function App() {
           insertTextLabel2()
         }
       }
+    },
+    {
+      id: 'formula',
+      title: 'Formula Display',
+      description: 'Insert a formula display that evaluates math expression bindings',
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M4 19L8 5L12 19L16 5" />
+          <line x1="12" y1="12" x2="20" y2="12" />
+        </svg>
+      ),
+      action: () => {
+        if (!blockExists('test_frm_1')) {
+          insertFormulaDisplay()
+        } else {
+          insertFormulaDisplay2()
+        }
+      }
     }
   ], [editor])
 
@@ -1058,7 +1227,7 @@ function App() {
         // Extract all block IDs from editor content
         const blockIds: string[] = []
         const traverse = (node: any) => {
-          if (node.type === 'buttonBlock' || node.type === 'numberDisplayBlock' || node.type === 'toggleBlock' || node.type === 'inputBlock' || node.type === 'textLabelBlock') {
+          if (node.type === 'buttonBlock' || node.type === 'numberDisplayBlock' || node.type === 'formulaDisplayBlock' || node.type === 'toggleBlock' || node.type === 'inputBlock' || node.type === 'textLabelBlock') {
             if (node.attrs?.blockId) {
               blockIds.push(node.attrs.blockId)
             }
@@ -1079,12 +1248,14 @@ function App() {
 
         const workflows = store.get(workflowsAtom)
         const connections = store.get(connectionsAtom)
+        const formulas = store.get(formulasAtom)
 
         const blocksPayload = {
           documentContent: docJson,
           positions,
           runtimeStates,
           connections,
+          formulas,
         }
 
         const { error } = await supabase
@@ -1291,7 +1462,7 @@ function App() {
     }
   }, [triggerSaveValue, saveToSupabase])
 
-  // Save when workflows or connections change
+  // Save when workflows, connections, or formulas change
   useEffect(() => {
     if (isLoading) return
     const unsubWorkflows = store.sub(workflowsAtom, () => {
@@ -1300,9 +1471,13 @@ function App() {
     const unsubConnections = store.sub(connectionsAtom, () => {
       saveToSupabase()
     })
+    const unsubFormulas = store.sub(formulasAtom, () => {
+      saveToSupabase()
+    })
     return () => {
       unsubWorkflows()
       unsubConnections()
+      unsubFormulas()
     }
   }, [store, saveToSupabase, isLoading])
 
@@ -1380,6 +1555,13 @@ function App() {
             store.set(connectionsAtom, blocksData.connections)
           }
 
+          // 3b. Populate formulas
+          if (blocksData.formulas) {
+            store.set(formulasAtom, blocksData.formulas)
+          } else {
+            store.set(formulasAtom, [])
+          }
+
           // 4. Populate workflows
           store.set(workflowsAtom, workflowsData)
 
@@ -1396,6 +1578,24 @@ function App() {
             }
             migrateNodes(blocksData.documentContent)
             editor.commands.setContent(blocksData.documentContent)
+
+            // Extract all block IDs to populate allBlockIdsAtom
+            const blockIds: string[] = []
+            const traverse = (node: any) => {
+              if (node.type === 'buttonBlock' || node.type === 'numberDisplayBlock' || node.type === 'formulaDisplayBlock' || node.type === 'toggleBlock' || node.type === 'inputBlock' || node.type === 'textLabelBlock') {
+                if (node.attrs?.blockId) {
+                  blockIds.push(node.attrs.blockId)
+                }
+              }
+              if (node.content) {
+                node.content.forEach(traverse)
+              }
+            }
+            traverse(blocksData.documentContent)
+            store.set(allBlockIdsAtom, blockIds)
+
+            // Recalculate all formulas with loaded states
+            recalculateAllFormulas(store)
           }
         }
       } catch (err) {
@@ -1533,6 +1733,28 @@ function App() {
       }
     }).run()
     store.set(blockPositionAtom('test_inp_2'), { x: 520, y: 200 })
+  }
+
+  function insertFormulaDisplay() {
+    if (!editor || blockExists('test_frm_1')) return
+    editor.chain().focus('end').insertContent({
+      type: 'formulaDisplayBlock',
+      attrs: {
+        blockId: 'test_frm_1'
+      }
+    }).run()
+    store.set(blockPositionAtom('test_frm_1'), { x: 300, y: 340 })
+  }
+
+  function insertFormulaDisplay2() {
+    if (!editor || blockExists('test_frm_2')) return
+    editor.chain().focus('end').insertContent({
+      type: 'formulaDisplayBlock',
+      attrs: {
+        blockId: 'test_frm_2'
+      }
+    }).run()
+    store.set(blockPositionAtom('test_frm_2'), { x: 300, y: 440 })
   }
 
 

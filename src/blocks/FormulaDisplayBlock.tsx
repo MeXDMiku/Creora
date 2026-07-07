@@ -2,18 +2,16 @@ import { Node } from '@tiptap/core';
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
 import type { NodeViewProps } from '@tiptap/react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
-import { blockRuntimeAtom, activeWireAtom, snapTargetAtom, contextMenuAtom, getPortBadge } from '../state/atoms';
-import { useMemo, useRef, useState } from 'react';
+import { blockRuntimeAtom, activeWireAtom, contextMenuAtom, getPortBadge } from '../state/atoms';
+import { useMemo, useRef, useState, useEffect, useCallback } from 'react';
 import { useBlockDrag } from '../hooks/useBlockDrag';
 
-const TextLabelBlockComponent = (props: NodeViewProps) => {
+const FormulaDisplayBlockComponent = (props: NodeViewProps) => {
   const store = useStore();
   const { node } = props;
   const { blockId } = node.attrs;
   const [isHovered, setIsHovered] = useState(false);
   const setActiveWire = useSetAtom(activeWireAtom);
-  const activeWire = useAtomValue(activeWireAtom);
-  const snapTarget = useAtomValue(snapTargetAtom);
   const setContextMenu = useSetAtom(contextMenuAtom);
   
   const atomInstance = useMemo(() => blockRuntimeAtom(blockId), [blockId]);
@@ -26,9 +24,13 @@ const TextLabelBlockComponent = (props: NodeViewProps) => {
 
   const { position, handlePointerDown, handlePointerMove, handlePointerUp } = useBlockDrag(blockId, containerRef as React.RefObject<HTMLElement>);
 
-  const onContextMenu = (e: React.MouseEvent) => {
+  // Native DOM ref for context menu — bypasses React's synthetic events entirely
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+
+  const handleContextMenu = useCallback((e: MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    e.stopImmediatePropagation();
     const container = containerRef.current;
     if (!container) return;
     const containerRect = container.getBoundingClientRect();
@@ -40,7 +42,16 @@ const TextLabelBlockComponent = (props: NodeViewProps) => {
       y,
       visible: true,
     });
-  };
+  }, [blockId, setContextMenu]);
+
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el) return;
+    el.addEventListener('contextmenu', handleContextMenu, true);
+    return () => {
+      el.removeEventListener('contextmenu', handleContextMenu, true);
+    };
+  }, [handleContextMenu]);
 
   const onOutputPortPointerDown = (e: React.PointerEvent) => {
     e.stopPropagation();
@@ -60,16 +71,13 @@ const TextLabelBlockComponent = (props: NodeViewProps) => {
     });
   };
 
-  const isWireActive = activeWire !== null;
-  const isWireSource = isWireActive && activeWire.sourceBlockId === blockId;
-  const showLeftPort = isHovered || (isWireActive && !isWireSource);
-  const isSnapTarget = snapTarget === blockId;
   const showRightPort = isHovered;
 
   return (
     <NodeViewWrapper 
+      ref={wrapperRef}
       as="div" 
-      className="text-label-block-wrapper" 
+      className="formula-display-block-wrapper" 
       style={{ 
         display: 'block', 
         position: 'absolute', 
@@ -83,19 +91,18 @@ const TextLabelBlockComponent = (props: NodeViewProps) => {
       onPointerUp={handlePointerUp}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
-      onContextMenu={onContextMenu}
     >
       <div
         contentEditable={false}
         style={{
-          fontSize: runtimeState?.fontSize !== undefined ? `${runtimeState.fontSize}px` : '1.2rem',
-          fontWeight: 500,
+          fontSize: runtimeState?.fontSize !== undefined ? `${runtimeState.fontSize}px` : '1.8rem',
+          fontWeight: 700,
           color: runtimeState?.textColor || '#ffffff',
-          background: runtimeState?.backgroundColor || '#0f172a', // beautiful deep slate background by default
-          borderRadius: runtimeState?.borderRadius !== undefined ? `${runtimeState.borderRadius}px` : '6px',
+          background: runtimeState?.backgroundColor || '#7c3aed', // Beautiful deep violet for formula blocks
+          borderRadius: runtimeState?.borderRadius !== undefined ? `${runtimeState.borderRadius}px` : '8px',
           padding: '10px 20px',
-          minWidth: '100px',
-          minHeight: '38px',
+          minWidth: '90px',
+          minHeight: '44px',
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -103,44 +110,24 @@ const TextLabelBlockComponent = (props: NodeViewProps) => {
           boxSizing: 'border-box',
           userSelect: 'none',
           cursor: 'move',
+          gap: '8px',
+          boxShadow: '0 4px 6px -1px rgba(124, 58, 237, 0.2), 0 2px 4px -1px rgba(124, 58, 237, 0.1)',
         }}
       >
-        {String(runtimeState?.value ?? '')}
-      </div>
-      {/* Left (input) port */}
-      <div
-        contentEditable={false}
-        data-port-input={blockId}
-        style={{
-          position: 'absolute',
-          left: '-5px',
-          top: '50%',
-          transform: isSnapTarget ? 'translateY(-50%) scale(1.5)' : 'translateY(-50%)',
-          width: '10px',
-          height: '10px',
-          borderRadius: '50%',
-          backgroundColor: '#22c55e',
-          border: '2px solid white',
-          boxShadow: isSnapTarget ? '0 0 8px 2px #22c55e' : 'none',
-          opacity: showLeftPort ? 1 : 0,
-          pointerEvents: showLeftPort ? 'all' as const : 'none' as const,
-          transition: 'transform 0.15s, box-shadow 0.15s, opacity 0.15s',
-        }}
-      >
-        <span style={{
-          position: 'absolute',
-          left: '12px',
-          top: '50%',
-          transform: 'translateY(-50%)',
-          fontSize: '10px',
+        <span style={{ 
+          fontSize: '11px', 
+          background: 'rgba(255, 255, 255, 0.2)', 
+          padding: '2px 6px', 
+          borderRadius: '4px',
+          textTransform: 'uppercase',
           fontWeight: 'bold',
-          color: '#22c55e',
-          pointerEvents: 'none',
-          userSelect: 'none',
+          letterSpacing: '0.5px'
         }}>
-          {getPortBadge('string')}
+          fx
         </span>
+        {String(runtimeState?.value ?? '0')}
       </div>
+
       {/* Right (output) port */}
       <div
         contentEditable={false}
@@ -173,15 +160,15 @@ const TextLabelBlockComponent = (props: NodeViewProps) => {
           pointerEvents: 'none',
           userSelect: 'none',
         }}>
-          {getPortBadge('string')}
+          {getPortBadge('number')}
         </span>
       </div>
     </NodeViewWrapper>
   );
 };
 
-export const TextLabelBlock = Node.create({
-  name: 'textLabelBlock',
+export const FormulaDisplayBlock = Node.create({
+  name: 'formulaDisplayBlock',
   group: 'block',
   atom: true,
   selectable: true,
@@ -189,7 +176,7 @@ export const TextLabelBlock = Node.create({
   addAttributes() {
     return {
       blockId: {
-        default: () => 'lbl_' + Math.random().toString(36).substring(2, 11),
+        default: () => 'frm_' + Math.random().toString(36).substring(2, 11),
       },
     };
   },
@@ -197,16 +184,16 @@ export const TextLabelBlock = Node.create({
   parseHTML() {
     return [
       {
-        tag: 'div[data-type="text-label-block"]',
+        tag: 'div[data-type="formula-display-block"]',
       },
     ];
   },
 
   renderHTML({ HTMLAttributes }) {
-    return ['div', { 'data-type': 'text-label-block', ...HTMLAttributes }];
+    return ['div', { 'data-type': 'formula-display-block', ...HTMLAttributes }];
   },
 
   addNodeView() {
-    return ReactNodeViewRenderer(TextLabelBlockComponent, { as: 'div' });
+    return ReactNodeViewRenderer(FormulaDisplayBlockComponent, { as: 'div' });
   },
 });

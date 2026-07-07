@@ -1,6 +1,8 @@
 import { getDefaultStore } from 'jotai';
+import jsep from 'jsep';
 import type { TriggerEvent } from '../types/creora';
-import { blockRuntimeAtom, workflowsAtom } from '../state/atoms';
+import { blockRuntimeAtom, workflowsAtom, formulasAtom, allBlockIdsAtom } from '../state/atoms';
+
 
 export function executeWorkflow(
   sourceId: string,
@@ -151,4 +153,85 @@ export function executeWorkflow(
       }
     }
   }
+
+  // Live recalculate all formulas
+  recalculateAllFormulas(store);
 }
+
+export function evaluateFormula(formula: string, scope: Record<string, any>): number {
+  if (!formula || formula.trim() === '') return 0;
+  try {
+    const ast = jsep(formula);
+    const evalNode = (node: any): any => {
+      switch (node.type) {
+        case 'Literal':
+          return Number(node.value);
+        case 'Identifier':
+          const val = scope[node.name];
+          return val !== undefined ? Number(val) : 0;
+        case 'UnaryExpression': {
+          const arg = evalNode(node.argument);
+          if (node.operator === '-') return -arg;
+          if (node.operator === '+') return +arg;
+          return arg;
+        }
+        case 'BinaryExpression': {
+          const left = evalNode(node.left);
+          const right = evalNode(node.right);
+          switch (node.operator) {
+            case '+': return left + right;
+            case '-': return left - right;
+            case '*': return left * right;
+            case '/': return right !== 0 ? left / right : 0;
+            case '%': return right !== 0 ? left % right : 0;
+            default: return 0;
+          }
+        }
+        default:
+          return 0;
+      }
+    };
+    const result = evalNode(ast);
+    return isNaN(result) ? 0 : result;
+  } catch (e) {
+    console.error('Error evaluating formula:', formula, e);
+    return 0;
+  }
+}
+
+export function recalculateAllFormulas(store: any) {
+  const allBlockIds = store.get(allBlockIdsAtom);
+  const formulas = store.get(formulasAtom);
+
+  // 1. Build variables scope
+  const scope: Record<string, number> = {};
+  for (const blockId of allBlockIds) {
+    const runtimeState = store.get(blockRuntimeAtom(blockId));
+    let val = runtimeState?.value;
+    if (typeof val === 'boolean') {
+      val = val ? 1 : 0;
+    } else if (typeof val === 'string') {
+      const num = Number(val);
+      val = isNaN(num) ? 0 : num;
+    }
+    scope[blockId] = val ?? 0;
+  }
+
+  // 2. Evaluate all formula bindings
+  for (const binding of formulas) {
+    // Only calculate if the target block exists
+    if (allBlockIds.includes(binding.targetBlockId)) {
+      const calculatedValue = evaluateFormula(binding.formula, scope);
+      const targetAtom = blockRuntimeAtom(binding.targetBlockId);
+      const currentTargetState = store.get(targetAtom);
+
+      if (currentTargetState.value !== calculatedValue) {
+        store.set(targetAtom, {
+          ...currentTargetState,
+          value: calculatedValue,
+        });
+      }
+    }
+  }
+}
+

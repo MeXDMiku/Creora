@@ -17,7 +17,8 @@ export type TriggerEvent =
 export type Permission = 'public' | 'authenticated' | 'author' | 'admin';
 
 export type ConditionOperator =
-  | 'equals' | 'notEquals' | 'greaterThan' | 'lessThan' | 'contains' | 'isEmpty';
+  | 'equals' | 'notEquals' | 'greaterThan' | 'lessThan' | 'contains' | 'isEmpty'
+  | 'is ON' | 'is_ON' | 'is OFF' | 'is_OFF' | 'greater than' | 'less than';
 
 export interface ShadowConfig {
   x: number; y: number; blur: number; spread: number; color: string;

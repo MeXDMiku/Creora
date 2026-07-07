@@ -1,8 +1,8 @@
 import { Node } from '@tiptap/core';
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
 import type { NodeViewProps } from '@tiptap/react';
-import { useAtomValue, useSetAtom, useStore, useAtom } from 'jotai';
-import { blockRuntimeAtom, blockPositionAtom, activeWireAtom, snapTargetAtom, selectedBlockIdAtom, connectionsAtom, workflowsAtom, triggerSaveAtom, contextMenuAtom, getPortBadge } from '../state/atoms';
+import { useAtomValue, useSetAtom, useStore } from 'jotai';
+import { blockRuntimeAtom, activeWireAtom, snapTargetAtom, contextMenuAtom, getPortBadge } from '../state/atoms';
 import { useMemo, useRef, useState } from 'react';
 import { useBlockDrag } from '../hooks/useBlockDrag';
 
@@ -14,10 +14,6 @@ const NumberDisplayBlockComponent = (props: NodeViewProps) => {
   const setActiveWire = useSetAtom(activeWireAtom);
   const activeWire = useAtomValue(activeWireAtom);
   const snapTarget = useAtomValue(snapTargetAtom);
-  const [selectedBlockId, setSelectedBlockId] = useAtom(selectedBlockIdAtom);
-  const setConnections = useSetAtom(connectionsAtom);
-  const setWorkflows = useSetAtom(workflowsAtom);
-  const triggerSave = useSetAtom(triggerSaveAtom);
   const setContextMenu = useSetAtom(contextMenuAtom);
   
   const atomInstance = useMemo(() => blockRuntimeAtom(blockId), [blockId]);

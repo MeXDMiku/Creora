@@ -1,9 +1,9 @@
 import { Node } from '@tiptap/core';
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
 import type { NodeViewProps } from '@tiptap/react';
-import { useAtomValue, useSetAtom, useStore, useAtom } from 'jotai';
-import { executeWorkflow } from '../lib/bindingEngine';
-import { blockRuntimeAtom, activeWireAtom, snapTargetAtom, triggerSaveAtom, selectedBlockIdAtom, contextMenuAtom, getPortBadge } from '../state/atoms';
+import { useAtomValue, useSetAtom, useStore } from 'jotai';
+import { executeWorkflow, recalculateAllFormulas } from '../lib/bindingEngine';
+import { blockRuntimeAtom, activeWireAtom, triggerSaveAtom, contextMenuAtom, getPortBadge } from '../state/atoms';
 import { useMemo, useRef, useState, useEffect, useCallback } from 'react';
 import { useBlockDrag } from '../hooks/useBlockDrag';
 
@@ -13,7 +13,6 @@ const InputBlockComponent = (props: NodeViewProps) => {
   const store = useStore();
   const [isHovered, setIsHovered] = useState(false);
   const setActiveWire = useSetAtom(activeWireAtom);
-  const activeWire = useAtomValue(activeWireAtom);
   const triggerSave = useSetAtom(triggerSaveAtom);
   const setContextMenu = useSetAtom(contextMenuAtom);
 
@@ -140,6 +139,7 @@ const InputBlockComponent = (props: NodeViewProps) => {
             value: e.target.value
           });
           executeWorkflow(blockId, 'onChange', store);
+          recalculateAllFormulas(store);
           triggerSave(prev => prev + 1);
         }}
         style={{

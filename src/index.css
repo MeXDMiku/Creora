@@ -114,11 +114,13 @@ code {
    don't shift when the document structure changes (insert/delete). */
 [class^="node-buttonBlock"],
 [class^="node-numberDisplayBlock"],
+[class^="node-formulaDisplayBlock"],
 [class^="node-toggleBlock"],
 [class^="node-inputBlock"],
 [class^="node-textLabelBlock"],
 div[data-node-view-wrapper][class*="button-block-wrapper"],
 div[data-node-view-wrapper][class*="number-display-block-wrapper"],
+div[data-node-view-wrapper][class*="formula-display-block-wrapper"],
 div[data-node-view-wrapper][class*="toggle-block-wrapper"],
 div[data-node-view-wrapper][class*="input-block-wrapper"],
 div[data-node-view-wrapper][class*="text-label-block-wrapper"] {

@@ -17,6 +17,7 @@
     "@tiptap/starter-kit": "^3.27.1",
     "framer-motion": "^12.42.2",
     "jotai": "^2.20.1",
+    "jsep": "^1.4.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },

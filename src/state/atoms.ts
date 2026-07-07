@@ -62,12 +62,15 @@ export const contextMenuAtom = atom<{
   visible: boolean;
 } | null>(null);
 
+export const allBlockIdsAtom = atom<string[]>([]);
+
 export type BlockDataType = 'trigger' | 'number' | 'boolean' | 'string' | 'unknown';
 
 export function getBlockDataType(nodeType: string): BlockDataType {
   switch (nodeType) {
     case 'buttonBlock': return 'trigger';
     case 'numberDisplayBlock': return 'number';
+    case 'formulaDisplayBlock': return 'number';
     case 'toggleBlock': return 'boolean';
     case 'inputBlock': return 'string';
     case 'textLabelBlock': return 'string';
