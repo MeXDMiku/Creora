@@ -126,6 +126,9 @@ export interface BlockRuntimeState {
   width?: number;
   fontSize?: number;
   textColor?: string;
+  mode?: 'countdown' | 'interval';
+  duration?: number;
+  autoStart?: boolean;
 }
 
 export interface DatabaseField {

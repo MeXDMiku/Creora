@@ -69,6 +69,7 @@ export type BlockDataType = 'trigger' | 'number' | 'boolean' | 'string' | 'unkno
 export function getBlockDataType(nodeType: string): BlockDataType {
   switch (nodeType) {
     case 'buttonBlock': return 'trigger';
+    case 'timerBlock': return 'trigger';
     case 'numberDisplayBlock': return 'number';
     case 'formulaDisplayBlock': return 'number';
     case 'toggleBlock': return 'boolean';

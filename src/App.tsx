@@ -9,6 +9,7 @@ import { TextLabelBlock } from './blocks/TextLabelBlock'
 import { ToggleBlock } from './blocks/ToggleBlock'
 import { InputBlock } from './blocks/InputBlock'
 import { FormulaDisplayBlock } from './blocks/FormulaDisplayBlock'
+import { TimerBlock } from './blocks/TimerBlock'
 import { WireOverlay } from './components/WireOverlay'
 import { supabase } from './lib/supabase'
 import { recalculateAllFormulas } from './lib/bindingEngine'
@@ -66,6 +67,7 @@ function ConnectionPopup({ editor }: { editor: any }) {
   const [action, setAction] = useState<string>('increment')
   const [amount, setAmount] = useState<number>(1)
   const [value, setValue] = useState<string>('')
+  const [timerEvent, setTimerEvent] = useState<'onTick' | 'onComplete'>('onTick')
 
   // Conditional state
   const [isConditional, setIsConditional] = useState(false)
@@ -79,6 +81,20 @@ function ConnectionPopup({ editor }: { editor: any }) {
     const traverse = (node: any) => {
       if (node.attrs?.blockId === pending.targetBlockId) {
         targetNodeType = node.type
+      }
+      if (node.content) {
+        node.content.forEach(traverse)
+      }
+    }
+    editor.getJSON().content?.forEach(traverse)
+  }
+
+  // Determine source block node type
+  let sourceNodeType: string | null = null
+  if (pending && editor) {
+    const traverse = (node: any) => {
+      if (node.attrs?.blockId === pending.sourceBlockId) {
+        sourceNodeType = node.type
       }
       if (node.content) {
         node.content.forEach(traverse)
@@ -104,7 +120,8 @@ function ConnectionPopup({ editor }: { editor: any }) {
         typeName === 'numberDisplayBlock' || 
         typeName === 'toggleBlock' || 
         typeName === 'inputBlock' || 
-        typeName === 'textLabelBlock'
+        typeName === 'textLabelBlock' ||
+        typeName === 'timerBlock'
       )) {
         const dataType = getBlockDataType(typeName)
         let label = ''
@@ -118,6 +135,8 @@ function ConnectionPopup({ editor }: { editor: any }) {
           label = `Input (${bId})`
         } else if (typeName === 'textLabelBlock') {
           label = `Text Label (${bId})`
+        } else if (typeName === 'timerBlock') {
+          label = `Timer (${bId})`
         }
         list.push({ id: bId, type: typeName, label, dataType })
       }
@@ -210,21 +229,34 @@ function ConnectionPopup({ editor }: { editor: any }) {
     boxSizing: 'border-box'
   }
 
-  // Place it slightly offset from the target port (x2, y2)
+  // Calculate coordinates relative to viewport (fixed positioning)
+  const canvasEl = document.getElementById('editor-container')
+  const canvasRect = canvasEl ? canvasEl.getBoundingClientRect() : { left: 0, top: 0 }
+  
+  const popupWidth = 260
+  const popupExpectedHeight = isConditional ? 420 : 300
+  
+  const targetViewportX = canvasRect.left + pending.x2
+  const targetViewportY = canvasRect.top + pending.y2
+
+  // Clamp positioning inside the viewport boundaries
+  const leftPos = targetViewportX > window.innerWidth - 300 ? targetViewportX - popupWidth - 10 : targetViewportX + 10
+  const topPos = Math.max(10, Math.min(targetViewportY - 80, window.innerHeight - popupExpectedHeight - 10))
+
   const popupStyle: React.CSSProperties = {
-    position: 'absolute',
-    left: `${pending.x2 + 10}px`,
-    top: `${pending.y2 - 80}px`,
-    zIndex: 1000,
+    position: 'fixed',
+    left: `${leftPos}px`,
+    top: `${topPos}px`,
+    zIndex: 9999, // Render above canvas boundary layer
     background: 'white',
-    border: '1px solid #d1d5db',
-    borderRadius: '8px',
-    boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
-    padding: '16px',
-    width: '260px',
+    border: '1px solid #cbd5e1',
+    borderRadius: '12px',
+    boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.05)',
+    padding: '24px',
+    width: `${popupWidth}px`,
     display: 'flex',
     flexDirection: 'column',
-    gap: '10px',
+    gap: '12px',
     fontSize: '14px',
   }
 
@@ -283,7 +315,7 @@ function ConnectionPopup({ editor }: { editor: any }) {
     const newWorkflow = {
       id: wfId,
       sourceId: pending.sourceBlockId,
-      sourceEvent: 'onClick' as const,
+      sourceEvent: sourceNodeType === 'timerBlock' ? timerEvent : ('onClick' as const),
       permission: 'public' as const,
       pageId: 'page_1',
       steps: [stepStep],
@@ -304,6 +336,20 @@ function ConnectionPopup({ editor }: { editor: any }) {
     <div style={popupStyle} onPointerDown={(e) => e.stopPropagation()}>
       <div style={{ fontWeight: 'bold', fontSize: '15px', color: '#1e293b', marginBottom: '4px' }}>Configure Action</div>
       
+      {sourceNodeType === 'timerBlock' && (
+        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontWeight: 500, color: '#475569', fontSize: '13px' }}>
+          Trigger Event
+          <select 
+            value={timerEvent} 
+            onChange={(e) => setTimerEvent(e.target.value as any)}
+            style={selectStyle}
+          >
+            <option value="onTick">On Tick (every second)</option>
+            <option value="onComplete">On Complete (reaches zero)</option>
+          </select>
+        </label>
+      )}
+
       <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontWeight: 500, color: '#475569', fontSize: '13px' }}>
         Action
         <select 
@@ -470,59 +516,17 @@ function ConnectionPopup({ editor }: { editor: any }) {
   )
 }
 
-function ContextMenu({ editor }: { editor: any }) {
+function ContextMenu({ editor, deleteBlock }: { editor: any; deleteBlock: (blockId: string) => void }) {
   const store = useStore()
-  const setFormulas = useSetAtom(formulasAtom)
   const [menu, setMenu] = useAtom(contextMenuAtom)
   const setConnections = useSetAtom(connectionsAtom)
   const setWorkflows = useSetAtom(workflowsAtom)
-  const [selectedBlockId, setSelectedBlockId] = useAtom(selectedBlockIdAtom)
   const triggerSave = useSetAtom(triggerSaveAtom)
 
   if (!menu || !menu.visible) return null
 
   const handleDelete = () => {
-    const blockId = menu.blockId
-
-    // 1. Delete node from TipTap editor
-    if (editor) {
-      editor.commands.command(({ tr, dispatch }: any) => {
-        let foundPos = -1
-        tr.doc.descendants((node: any, pos: number) => {
-          if ((node.type.name === 'buttonBlock' || node.type.name === 'numberDisplayBlock' || node.type.name === 'formulaDisplayBlock' || node.type.name === 'toggleBlock' || node.type.name === 'inputBlock' || node.type.name === 'textLabelBlock') && node.attrs.blockId === blockId) {
-            foundPos = pos
-            return false
-          }
-        })
-        if (foundPos !== -1) {
-          if (dispatch) {
-            tr.delete(foundPos, foundPos + 1)
-          }
-          return true
-        }
-        return false
-      })
-    }
-
-    // 2. Clean up atoms
-    blockPositionAtom.remove(blockId)
-    blockRuntimeAtom.remove(blockId)
-    store.set(allBlockIdsAtom, (prev: string[]) => prev.filter((id: string) => id !== blockId))
-    setFormulas((prev: FormulaBinding[]) => prev.filter((f: FormulaBinding) => f.targetBlockId !== blockId))
-
-    // 3. Clean up connections and workflows
-    setConnections(prev => prev.filter(c => c.sourceBlockId !== blockId && c.targetBlockId !== blockId))
-    setWorkflows(prev => prev.filter(w => w.sourceId !== blockId && !w.steps.some(step => step.targetId === blockId)))
-
-    // 4. Clear selection if this block was selected
-    if (selectedBlockId === blockId) {
-      setSelectedBlockId(null)
-    }
-
-    // 5. Trigger save
-    triggerSave(prev => prev + 1)
-
-    // 6. Close menu
+    deleteBlock(menu.blockId)
     setMenu(null)
   }
 
@@ -698,6 +702,7 @@ function App() {
   const setSnapTarget = useSetAtom(snapTargetAtom)
   const [pendingConnection, setPendingConnection] = useAtom(pendingConnectionAtom)
   const [contextMenu, setContextMenu] = useAtom(contextMenuAtom)
+  const setSelectedBlockId = useSetAtom(selectedBlockIdAtom)
 
   // Type mismatch notification state
   const [typeMismatch, setTypeMismatch] = useState<{
@@ -750,6 +755,7 @@ function App() {
       ToggleBlock,
       InputBlock,
       FormulaDisplayBlock,
+      TimerBlock,
     ],
     content: '',
     onUpdate: ({ editor }) => {
@@ -759,7 +765,15 @@ function App() {
       const blockIds: string[] = []
       editor.state.doc.descendants((node: any) => {
         const typeName = node.type.name
-        if (typeName === 'buttonBlock' || typeName === 'numberDisplayBlock' || typeName === 'formulaDisplayBlock' || typeName === 'toggleBlock' || typeName === 'inputBlock' || typeName === 'textLabelBlock') {
+        if (
+          typeName === 'buttonBlock' || 
+          typeName === 'numberDisplayBlock' || 
+          typeName === 'formulaDisplayBlock' || 
+          typeName === 'toggleBlock' || 
+          typeName === 'inputBlock' || 
+          typeName === 'textLabelBlock' ||
+          typeName === 'timerBlock'
+        ) {
           if (node.attrs?.blockId) {
             blockIds.push(node.attrs.blockId)
           }
@@ -910,7 +924,8 @@ function App() {
         typeName === 'formulaDisplayBlock' ||
         typeName === 'toggleBlock' || 
         typeName === 'inputBlock' || 
-        typeName === 'textLabelBlock'
+        typeName === 'textLabelBlock' ||
+        typeName === 'timerBlock'
       ) {
         const blockId = node.attrs?.blockId
         if (blockId) {
@@ -928,6 +943,7 @@ function App() {
 
           let type: BlockType = 'text'
           if (typeName === 'buttonBlock') type = 'button'
+          else if (typeName === 'timerBlock') type = 'timer'
           else if (typeName === 'numberDisplayBlock') type = 'number'
           else if (typeName === 'formulaDisplayBlock') type = 'number'
           else if (typeName === 'toggleBlock') type = 'toggle'
@@ -1100,6 +1116,8 @@ function App() {
             if (b.type === 'button') {
               typeName = 'buttonBlock'
               attrs.label = b.props?.label || 'Button'
+            } else if (b.type === 'timer') {
+              typeName = 'timerBlock'
             } else if (b.type === 'toggle') {
               typeName = 'toggleBlock'
             } else if (b.type === 'input') {
@@ -1167,6 +1185,96 @@ function App() {
 
     e.target.value = ''
   }
+
+  const deleteBlock = useCallback((blockId: string) => {
+    // 1. Delete node from TipTap editor
+    if (editor) {
+      editor.commands.command(({ tr, dispatch }: any) => {
+        let foundPos = -1
+        tr.doc.descendants((node: any, pos: number) => {
+          if (
+            (
+              node.type.name === 'buttonBlock' || 
+              node.type.name === 'timerBlock' ||
+              node.type.name === 'numberDisplayBlock' || 
+              node.type.name === 'formulaDisplayBlock' || 
+              node.type.name === 'toggleBlock' || 
+              node.type.name === 'inputBlock' || 
+              node.type.name === 'textLabelBlock'
+            ) && node.attrs.blockId === blockId
+          ) {
+            foundPos = pos
+            return false
+          }
+        })
+        if (foundPos !== -1) {
+          if (dispatch) {
+            tr.delete(foundPos, foundPos + 1)
+          }
+          return true
+        }
+        return false
+      })
+    }
+
+    // 2. Clean up atoms
+    blockPositionAtom.remove(blockId)
+    blockRuntimeAtom.remove(blockId)
+    store.set(allBlockIdsAtom, (prev: string[]) => prev.filter((id: string) => id !== blockId))
+    store.set(formulasAtom, (prev: FormulaBinding[]) => prev.filter((f: FormulaBinding) => f.targetBlockId !== blockId))
+
+    // 3. Clean up connections and workflows
+    setConnections(prev => prev.filter(c => c.sourceBlockId !== blockId && c.targetBlockId !== blockId))
+    setWorkflows(prev => prev.filter(w => w.sourceId !== blockId && !w.steps.some(step => step.targetId === blockId)))
+
+    // 4. Clear selection if this block was selected
+    if (store.get(selectedBlockIdAtom) === blockId) {
+      setSelectedBlockId(null)
+    }
+
+    // 5. Trigger save
+    setTriggerSave(prev => prev + 1)
+  }, [editor, store, setConnections, setWorkflows, setTriggerSave, setSelectedBlockId])
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement
+      if (activeEl) {
+        const tagName = activeEl.tagName.toLowerCase()
+        if (tagName === 'input' || tagName === 'textarea') {
+          return
+        }
+        if (activeEl.classList.contains('ProseMirror')) {
+          // If focus is inside the TipTap editor, only allow deletion if a block node is currently selected in ProseMirror
+          const isNodeSelection = editor && (editor.state.selection as any).node
+          if (!isNodeSelection) {
+            return
+          }
+        }
+      }
+
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        const selectedId = store.get(selectedBlockIdAtom)
+        if (selectedId) {
+          e.preventDefault()
+          deleteBlock(selectedId)
+        }
+      }
+
+      if (e.key === 'Escape') {
+        const selectedId = store.get(selectedBlockIdAtom)
+        if (selectedId) {
+          e.preventDefault()
+          setSelectedBlockId(null)
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [editor, store, deleteBlock, setSelectedBlockId])
 
   const commands = useMemo(() => [
     {
@@ -1280,6 +1388,24 @@ function App() {
           insertFormulaDisplay2()
         }
       }
+    },
+    {
+      id: 'timer',
+      title: 'Timer',
+      description: 'Insert a timer block that ticks and fires events',
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10" />
+          <polyline points="12 6 12 12 16 14" />
+        </svg>
+      ),
+      action: () => {
+        if (!blockExists('test_tmr_1')) {
+          insertTimerBlock()
+        } else {
+          insertTimerBlock2()
+        }
+      }
     }
   ], [editor])
 
@@ -1337,7 +1463,7 @@ function App() {
         // Extract all block IDs from editor content
         const blockIds: string[] = []
         const traverse = (node: any) => {
-          if (node.type === 'buttonBlock' || node.type === 'numberDisplayBlock' || node.type === 'formulaDisplayBlock' || node.type === 'toggleBlock' || node.type === 'inputBlock' || node.type === 'textLabelBlock') {
+          if (node.type === 'buttonBlock' || node.type === 'timerBlock' || node.type === 'numberDisplayBlock' || node.type === 'formulaDisplayBlock' || node.type === 'toggleBlock' || node.type === 'inputBlock' || node.type === 'textLabelBlock') {
             if (node.attrs?.blockId) {
               blockIds.push(node.attrs.blockId)
             }
@@ -1563,7 +1689,8 @@ function App() {
     if (contextMenu) {
       setContextMenu(null)
     }
-  }, [pendingConnection, setPendingConnection, contextMenu, setContextMenu])
+    setSelectedBlockId(null)
+  }, [pendingConnection, setPendingConnection, contextMenu, setContextMenu, setSelectedBlockId])
 
   // Save when triggerSaveValue changes
   useEffect(() => {
@@ -1692,7 +1819,15 @@ function App() {
             // Extract all block IDs to populate allBlockIdsAtom
             const blockIds: string[] = []
             const traverse = (node: any) => {
-              if (node.type === 'buttonBlock' || node.type === 'numberDisplayBlock' || node.type === 'formulaDisplayBlock' || node.type === 'toggleBlock' || node.type === 'inputBlock' || node.type === 'textLabelBlock') {
+              if (
+                node.type === 'buttonBlock' || 
+                node.type === 'timerBlock' ||
+                node.type === 'numberDisplayBlock' || 
+                node.type === 'formulaDisplayBlock' || 
+                node.type === 'toggleBlock' || 
+                node.type === 'inputBlock' || 
+                node.type === 'textLabelBlock'
+              ) {
                 if (node.attrs?.blockId) {
                   blockIds.push(node.attrs.blockId)
                 }
@@ -1867,6 +2002,52 @@ function App() {
     store.set(blockPositionAtom('test_frm_2'), { x: 300, y: 440 })
   }
 
+  function insertTimerBlock() {
+    if (!editor || blockExists('test_tmr_1')) return
+    editor.chain().focus('end').insertContent({
+      type: 'timerBlock',
+      attrs: {
+        blockId: 'test_tmr_1'
+      }
+    }).run()
+    store.set(blockPositionAtom('test_tmr_1'), { x: 80, y: 340 })
+    store.set(blockRuntimeAtom('test_tmr_1'), {
+      value: false,
+      visible: true,
+      disabled: false,
+      loading: false,
+      error: null,
+      mode: 'countdown',
+      duration: 10,
+      autoStart: false,
+      backgroundColor: '#10b981',
+      textColor: '#ffffff'
+    })
+  }
+
+  function insertTimerBlock2() {
+    if (!editor || blockExists('test_tmr_2')) return
+    editor.chain().focus('end').insertContent({
+      type: 'timerBlock',
+      attrs: {
+        blockId: 'test_tmr_2'
+      }
+    }).run()
+    store.set(blockPositionAtom('test_tmr_2'), { x: 300, y: 340 })
+    store.set(blockRuntimeAtom('test_tmr_2'), {
+      value: false,
+      visible: true,
+      disabled: false,
+      loading: false,
+      error: null,
+      mode: 'countdown',
+      duration: 10,
+      autoStart: false,
+      backgroundColor: '#10b981',
+      textColor: '#ffffff'
+    })
+  }
+
 
 
   return (
@@ -1984,7 +2165,7 @@ function App() {
           <EditorContent editor={editor} />
           <WireOverlay />
           <ConnectionPopup editor={editor} />
-          <ContextMenu editor={editor} />
+          <ContextMenu editor={editor} deleteBlock={deleteBlock} />
           {typeMismatch && (
             <div
               style={{
