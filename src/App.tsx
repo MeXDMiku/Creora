@@ -12,7 +12,7 @@ import { FormulaDisplayBlock } from './blocks/FormulaDisplayBlock'
 import { WireOverlay } from './components/WireOverlay'
 import { supabase } from './lib/supabase'
 import { recalculateAllFormulas } from './lib/bindingEngine'
-import type { FormulaBinding } from './types/creora'
+import type { FormulaBinding, CreoraFile, Page, Block, BlockProps, StyleConfig, AnimationConfig, BlockType } from './types/creora'
 import './App.css'
 
 const inspectorModules = import.meta.glob<{ default: React.ComponentType<{ blockId: string; editor: any }> }>('./blocks/*.inspector.tsx', { eager: true })
@@ -526,6 +526,79 @@ function ContextMenu({ editor }: { editor: any }) {
     setMenu(null)
   }
 
+  const handleDuplicate = () => {
+    const blockId = menu.blockId
+
+    let nodeToDuplicate: any = null
+    if (editor) {
+      editor.state.doc.descendants((node: any) => {
+        if (node.attrs?.blockId === blockId) {
+          nodeToDuplicate = node
+          return false
+        }
+      })
+    }
+
+    if (!nodeToDuplicate) {
+      setMenu(null)
+      return
+    }
+
+    const typeName = nodeToDuplicate.type.name
+    const newBlockId = `block_${Math.random().toString(36).substring(2, 9)}`
+
+    const origRuntime = store.get(blockRuntimeAtom(blockId))
+
+    let defaultValue: any = 0
+    if (typeName === 'toggleBlock') defaultValue = false
+    else if (typeName === 'inputBlock' || typeName === 'textLabelBlock') defaultValue = ''
+
+    const newRuntime = {
+      value: defaultValue,
+      visible: origRuntime?.opacity !== 0,
+      disabled: false,
+      loading: false,
+      error: null,
+      backgroundColor: origRuntime?.backgroundColor,
+      borderRadius: origRuntime?.borderRadius,
+      textColor: origRuntime?.textColor,
+      fontSize: origRuntime?.fontSize,
+      opacity: origRuntime?.opacity,
+      width: origRuntime?.width,
+      min: origRuntime?.min,
+      max: origRuntime?.max
+    }
+
+    store.set(blockRuntimeAtom(newBlockId), newRuntime)
+
+    const origPos = store.get(blockPositionAtom(blockId)) || { x: 100, y: 100 }
+    const newPos = { x: origPos.x + 30, y: origPos.y + 30 }
+    store.set(blockPositionAtom(newBlockId), newPos)
+
+    if (editor) {
+      editor.commands.command(({ tr, dispatch }: any) => {
+        let foundPos = -1
+        tr.doc.descendants((node: any, pos: number) => {
+          if (node.attrs?.blockId === blockId) {
+            foundPos = pos
+            return false
+          }
+        })
+        if (foundPos !== -1 && dispatch) {
+          const nodeType = tr.doc.type.schema.nodes[typeName]
+          const newAttrs = { ...nodeToDuplicate.attrs, blockId: newBlockId }
+          const newNode = nodeType.create(newAttrs)
+          tr.insert(foundPos + nodeToDuplicate.nodeSize, newNode)
+          return true
+        }
+        return false
+      })
+    }
+
+    triggerSave(prev => prev + 1)
+    setMenu(null)
+  }
+
   const handleDisconnectAll = () => {
     const blockId = menu.blockId
 
@@ -573,16 +646,16 @@ function ContextMenu({ editor }: { editor: any }) {
   return (
     <div style={menuStyle} onPointerDown={(e) => e.stopPropagation()}>
       <button 
-        onClick={handleDelete}
-        style={{ ...optionStyle, color: '#ef4444' }}
+        onClick={handleDuplicate}
+        style={optionStyle}
         onMouseEnter={(e) => {
-          e.currentTarget.style.background = '#fee2e2'
+          e.currentTarget.style.background = '#f3f4f6'
         }}
         onMouseLeave={(e) => {
           e.currentTarget.style.background = 'transparent'
         }}
       >
-        Delete Block
+        Duplicate Block
       </button>
       <button 
         onClick={handleDisconnectAll}
@@ -595,6 +668,18 @@ function ContextMenu({ editor }: { editor: any }) {
         }}
       >
         Disconnect all wires
+      </button>
+      <button 
+        onClick={handleDelete}
+        style={{ ...optionStyle, color: '#ef4444' }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = '#fee2e2'
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = 'transparent'
+        }}
+      >
+        Delete Block
       </button>
     </div>
   )
@@ -805,6 +890,283 @@ function App() {
       }
     }
   })
+
+  // Export and Import state/handlers
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [importError, setImportError] = useState<string | null>(null)
+
+  const handleExport = useCallback(() => {
+    if (!editor) return
+
+    const blocksArray: Block[] = []
+    const positionsRecord: Record<string, { x: number; y: number }> = {}
+    const runtimeStatesRecord: Record<string, any> = {}
+
+    editor.state.doc.descendants((node: any) => {
+      const typeName = node.type.name
+      if (
+        typeName === 'buttonBlock' || 
+        typeName === 'numberDisplayBlock' || 
+        typeName === 'formulaDisplayBlock' ||
+        typeName === 'toggleBlock' || 
+        typeName === 'inputBlock' || 
+        typeName === 'textLabelBlock'
+      ) {
+        const blockId = node.attrs?.blockId
+        if (blockId) {
+          const pos = store.get(blockPositionAtom(blockId)) || { x: 100, y: 100 }
+          const runtime = store.get(blockRuntimeAtom(blockId)) || {
+            value: '',
+            visible: true,
+            disabled: false,
+            loading: false,
+            error: null
+          }
+
+          positionsRecord[blockId] = pos
+          runtimeStatesRecord[blockId] = runtime
+
+          let type: BlockType = 'text'
+          if (typeName === 'buttonBlock') type = 'button'
+          else if (typeName === 'numberDisplayBlock') type = 'number'
+          else if (typeName === 'formulaDisplayBlock') type = 'number'
+          else if (typeName === 'toggleBlock') type = 'toggle'
+          else if (typeName === 'inputBlock') type = 'input'
+          else if (typeName === 'textLabelBlock') type = 'text'
+
+          const blockProps: BlockProps = {
+            label: node.attrs?.label,
+            defaultValue: runtime.value
+          }
+
+          const blockStyles: StyleConfig = {
+            backgroundColor: runtime.backgroundColor || '#6366f1',
+            color: runtime.textColor || '#ffffff',
+            borderRadius: runtime.borderRadius ?? 8,
+            fontSize: runtime.fontSize ?? 14,
+            fontWeight: 400,
+            paddingTop: 0, paddingRight: 0, paddingBottom: 0, paddingLeft: 0,
+            opacity: runtime.opacity ?? 100,
+            width: runtime.width ?? 'auto',
+            height: 'auto',
+            borderWidth: 0,
+            borderColor: '#ffffff',
+            borderStyle: 'none',
+            shadow: null
+          }
+
+          const blockAnimations: AnimationConfig = {
+            entrance: 'none',
+            entranceDuration: 0,
+            entranceDelay: 0,
+            entranceTrigger: 'onLoad',
+            hover: null,
+            click: null
+          }
+
+          blocksArray.push({
+            id: blockId,
+            type,
+            x: pos.x,
+            y: pos.y,
+            width: runtime.width || 120,
+            height: 40,
+            props: blockProps,
+            styles: blockStyles,
+            animations: blockAnimations,
+            parentId: null,
+            children: [],
+            pageId: PAGE_ID
+          })
+        }
+      }
+    })
+
+    const workflows = store.get(workflowsAtom)
+    const formulas = store.get(formulasAtom)
+    const connections = store.get(connectionsAtom)
+
+    const page: Page & { 
+      documentContent: any;
+      positions: Record<string, { x: number; y: number }>;
+      runtimeStates: Record<string, any>;
+      connections: any[];
+    } = {
+      id: PAGE_ID,
+      name: 'Main Page',
+      route: '/main',
+      layoutTemplateId: null,
+      blocks: blocksArray,
+      workflows,
+      formulas,
+      databases: [],
+      documentContent: editor.getJSON(),
+      positions: positionsRecord,
+      runtimeStates: runtimeStatesRecord,
+      connections
+    }
+
+    const creoraFile: CreoraFile = {
+      version: '1.0',
+      metadata: {
+        name: 'Exported Creora Page',
+        created: new Date().toISOString(),
+        modified: new Date().toISOString()
+      },
+      pages: [page],
+      layoutTemplates: []
+    }
+
+    const blob = new Blob([JSON.stringify(creoraFile, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `page-export_${new Date().toISOString().slice(0, 10)}.creora`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }, [editor, store])
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click()
+  }
+
+  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    const reader = new FileReader()
+    reader.onload = async (event) => {
+      try {
+        const text = event.target?.result as string
+        if (!text) {
+          throw new Error('File is empty.')
+        }
+
+        let parsed: any
+        try {
+          parsed = JSON.parse(text)
+        } catch {
+          throw new Error('Failed to parse file as JSON. Please ensure it is a valid .creora file.')
+        }
+
+        if (!parsed || typeof parsed !== 'object') {
+          throw new Error('Invalid file format. Parsed object is empty.')
+        }
+        if (parsed.version !== '1.0') {
+          throw new Error('Unsupported CreoraFile version. Expected version "1.0".')
+        }
+        if (!Array.isArray(parsed.pages) || parsed.pages.length === 0) {
+          throw new Error('Invalid CreoraFile. Missing pages data.')
+        }
+
+        const importedPage = parsed.pages[0]
+        if (!importedPage || typeof importedPage !== 'object') {
+          throw new Error('Invalid page data inside CreoraFile.')
+        }
+
+        setIsLoading(true)
+        setImportError(null)
+
+        store.set(connectionsAtom, [])
+        store.set(workflowsAtom, [])
+        store.set(formulasAtom, [])
+        store.set(allBlockIdsAtom, [])
+        editor?.commands.clearContent()
+
+        let docContent = importedPage.documentContent
+        const positions = importedPage.positions || {}
+        const runtimeStates = importedPage.runtimeStates || {}
+        const connections = importedPage.connections || []
+
+        if (!docContent) {
+          const contentList: any[] = [
+            {
+              type: 'heading',
+              attrs: { level: 3 },
+              content: [{ type: 'text', text: 'Imported Canvas' }]
+            },
+            {
+              type: 'paragraph',
+              content: [{ type: 'text', text: 'Below are the blocks imported from the file.' }]
+            }
+          ]
+
+          const blocks = importedPage.blocks || []
+          blocks.forEach((b: any) => {
+            let typeName = ''
+            const attrs: any = { blockId: b.id }
+            if (b.type === 'button') {
+              typeName = 'buttonBlock'
+              attrs.label = b.props?.label || 'Button'
+            } else if (b.type === 'toggle') {
+              typeName = 'toggleBlock'
+            } else if (b.type === 'input') {
+              typeName = 'inputBlock'
+            } else if (b.type === 'text') {
+              typeName = 'textLabelBlock'
+            } else if (b.type === 'number') {
+              const hasFormula = (importedPage.formulas || []).some((f: any) => f.targetBlockId === b.id)
+              typeName = hasFormula ? 'formulaDisplayBlock' : 'numberDisplayBlock'
+            }
+
+            if (typeName) {
+              contentList.push({ type: typeName, attrs })
+              positions[b.id] = { x: b.x || 100, y: b.y || 100 }
+              runtimeStates[b.id] = {
+                value: b.props?.defaultValue ?? '',
+                visible: b.styles?.opacity !== 0,
+                disabled: false,
+                loading: false,
+                error: null,
+                backgroundColor: b.styles?.backgroundColor,
+                borderRadius: b.styles?.borderRadius,
+                textColor: b.styles?.color,
+                fontSize: b.styles?.fontSize,
+                opacity: b.styles?.opacity,
+                width: typeof b.styles?.width === 'number' ? b.styles.width : undefined
+              }
+            }
+          })
+
+          docContent = {
+            type: 'doc',
+            content: contentList
+          }
+        }
+
+        Object.entries(positions).forEach(([id, pos]: [string, any]) => {
+          store.set(blockPositionAtom(id), pos)
+        })
+
+        Object.entries(runtimeStates).forEach(([id, state]: [string, any]) => {
+          store.set(blockRuntimeAtom(id), state)
+        })
+
+        store.set(connectionsAtom, connections)
+        store.set(workflowsAtom, importedPage.workflows || [])
+        store.set(formulasAtom, importedPage.formulas || [])
+
+        if (editor) {
+          editor.commands.setContent(docContent)
+        }
+
+        recalculateAllFormulas(store)
+        setTriggerSave(prev => prev + 1)
+        setIsLoading(false)
+      } catch (err: any) {
+        setIsLoading(false)
+        setImportError(err?.message || 'Failed to import the file.')
+      }
+    }
+    reader.onerror = () => {
+      setImportError('Failed to read the file.')
+    }
+    reader.readAsText(file)
+
+    e.target.value = ''
+  }
 
   const commands = useMemo(() => [
     {
@@ -1529,7 +1891,86 @@ function App() {
               {saveStatus}
             </span>
           )}
+
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px' }}>
+            <button
+              onClick={handleExport}
+              style={{
+                padding: '6px 12px',
+                background: '#4f46e5',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                fontWeight: 500,
+                transition: 'background 0.2s',
+              }}
+              onMouseOver={(e) => (e.currentTarget.style.background = '#4338ca')}
+              onMouseOut={(e) => (e.currentTarget.style.background = '#4f46e5')}
+            >
+              Export .creora
+            </button>
+            <button
+              onClick={handleImportClick}
+              style={{
+                padding: '6px 12px',
+                background: '#10b981',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                fontWeight: 500,
+                transition: 'background 0.2s',
+              }}
+              onMouseOver={(e) => (e.currentTarget.style.background = '#059669')}
+              onMouseOut={(e) => (e.currentTarget.style.background = '#10b981')}
+            >
+              Import .creora
+            </button>
+            <input
+              type="file"
+              ref={fileInputRef}
+              accept=".creora"
+              onChange={handleImportFile}
+              style={{ display: 'none' }}
+            />
+          </div>
         </div>
+
+        {importError && (
+          <div style={{
+            background: '#fee2e2',
+            color: '#b91c1c',
+            padding: '10px 16px',
+            borderRadius: '6px',
+            marginBottom: '16px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            fontSize: '14px',
+            fontWeight: 500,
+            border: '1px solid #fca5a5'
+          }}>
+            <span>⚠️ {importError}</span>
+            <button
+              onClick={() => setImportError(null)}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: '#b91c1c',
+                cursor: 'pointer',
+                fontSize: '18px',
+                fontWeight: 'bold',
+                lineHeight: 1,
+                padding: '0 4px'
+              }}
+            >
+              ×
+            </button>
+          </div>
+        )}
 
 
         <div
