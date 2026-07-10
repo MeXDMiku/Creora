@@ -1,7 +1,7 @@
 import { getDefaultStore } from 'jotai';
 import jsep from 'jsep';
 import type { TriggerEvent } from '../types/creora';
-import { blockRuntimeAtom, workflowsAtom, formulasAtom, allBlockIdsAtom } from '../state/atoms';
+import { blockRuntimeAtom, workflowsAtom, formulasAtom, allBlockIdsAtom, getBlockDefaultValue } from '../state/atoms';
 
 
 export function executeWorkflow(
@@ -144,6 +144,17 @@ export function executeWorkflow(
           store.set(targetAtom, {
             ...currentTargetState,
             visible: false,
+          });
+          break;
+        }
+        case 'reset': {
+          let newVal = getBlockDefaultValue(step.targetId);
+          if (currentTargetState.min !== undefined && typeof newVal === 'number') {
+            newVal = currentTargetState.min;
+          }
+          store.set(targetAtom, {
+            ...currentTargetState,
+            value: newVal,
           });
           break;
         }

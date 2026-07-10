@@ -2,7 +2,7 @@ import { useEffect, useRef, useCallback, useState, useMemo } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { useSetAtom, useAtom, useAtomValue, useStore } from 'jotai'
-import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, allBlockIdsAtom } from './state/atoms'
+import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom } from './state/atoms'
 import { ButtonBlock } from './blocks/ButtonBlock'
 import { NumberDisplayBlock } from './blocks/NumberDisplayBlock'
 import { TextLabelBlock } from './blocks/TextLabelBlock'
@@ -285,15 +285,21 @@ function ConnectionPopup({ editor }: { editor: any }) {
       } else if (action === 'turnOff') {
         stepStep.action = 'set'
         stepStep.value = false
+      } else if (action === 'reset') {
+        stepStep.action = 'reset'
       } else {
         stepStep.action = 'toggle'
       }
     } else {
-      if (action === 'increment' || action === 'decrement') {
+      if (action === 'reset') {
+        stepStep.action = 'reset'
+      } else if (action === 'increment' || action === 'decrement') {
         stepStep.amount = amount
       } else if (action === 'set') {
         const parsedNum = Number(value)
         stepStep.value = isNaN(parsedNum) || value.trim() === '' ? value : parsedNum
+      } else {
+        stepStep.action = 'toggle'
       }
     }
 
@@ -362,6 +368,7 @@ function ConnectionPopup({ editor }: { editor: any }) {
               <option value="turnOn">Turn On</option>
               <option value="turnOff">Turn Off</option>
               <option value="toggle">Toggle</option>
+              <option value="reset">Reset</option>
             </>
           ) : (
             <>
@@ -369,6 +376,7 @@ function ConnectionPopup({ editor }: { editor: any }) {
               <option value="decrement">Decrement</option>
               <option value="set">Set to value</option>
               <option value="toggle">Toggle</option>
+              <option value="reset">Reset</option>
             </>
           )}
         </select>
@@ -553,9 +561,7 @@ function ContextMenu({ editor, deleteBlock }: { editor: any; deleteBlock: (block
 
     const origRuntime = store.get(blockRuntimeAtom(blockId))
 
-    let defaultValue: any = 0
-    if (typeName === 'toggleBlock') defaultValue = false
-    else if (typeName === 'inputBlock' || typeName === 'textLabelBlock') defaultValue = ''
+    const defaultValue = getBlockDefaultValue(typeName)
 
     const newRuntime = {
       value: defaultValue,
@@ -689,6 +695,74 @@ function ContextMenu({ editor, deleteBlock }: { editor: any; deleteBlock: (block
   )
 }
 
+function ConnectionContextMenu() {
+  const [menu, setMenu] = useAtom(connectionContextMenuAtom)
+  const setConnections = useSetAtom(connectionsAtom)
+  const setWorkflows = useSetAtom(workflowsAtom)
+  const triggerSave = useSetAtom(triggerSaveAtom)
+
+  if (!menu || !menu.visible) return null
+
+  const handleDelete = () => {
+    // Remove connection
+    setConnections(prev => prev.filter(c => c.id !== menu.connectionId))
+    
+    // Remove workflow
+    setWorkflows(prev => prev.filter(w => w.id !== `wf_${menu.connectionId}`))
+
+    // Trigger save
+    triggerSave(prev => prev + 1)
+
+    // Close menu
+    setMenu(null)
+  }
+
+  const menuStyle: React.CSSProperties = {
+    position: 'absolute',
+    left: `${menu.x}px`,
+    top: `${menu.y}px`,
+    zIndex: 2000,
+    background: 'white',
+    border: '1px solid #e5e7eb',
+    borderRadius: '6px',
+    boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
+    padding: '4px 0',
+    width: '180px',
+    display: 'flex',
+    flexDirection: 'column',
+  }
+
+  const optionStyle: React.CSSProperties = {
+    background: 'transparent',
+    border: 'none',
+    textAlign: 'left',
+    padding: '8px 12px',
+    cursor: 'pointer',
+    fontSize: '13px',
+    color: '#ef4444',
+    display: 'flex',
+    alignItems: 'center',
+    width: '100%',
+  }
+
+  return (
+    <div style={menuStyle} onPointerDown={(e) => e.stopPropagation()}>
+      <button 
+        onClick={handleDelete}
+        style={optionStyle}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = '#fee2e2'
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = 'transparent'
+        }}
+      >
+        Delete this connection
+      </button>
+    </div>
+  )
+}
+
 const PAGE_ID = '00000000-0000-0000-0000-000000000001'
 
 
@@ -702,6 +776,7 @@ function App() {
   const setSnapTarget = useSetAtom(snapTargetAtom)
   const [pendingConnection, setPendingConnection] = useAtom(pendingConnectionAtom)
   const [contextMenu, setContextMenu] = useAtom(contextMenuAtom)
+  const [connectionContextMenu, setConnectionContextMenu] = useAtom(connectionContextMenuAtom)
   const setSelectedBlockId = useSetAtom(selectedBlockIdAtom)
 
   // Type mismatch notification state
@@ -1689,8 +1764,11 @@ function App() {
     if (contextMenu) {
       setContextMenu(null)
     }
+    if (connectionContextMenu) {
+      setConnectionContextMenu(null)
+    }
     setSelectedBlockId(null)
-  }, [pendingConnection, setPendingConnection, contextMenu, setContextMenu, setSelectedBlockId])
+  }, [pendingConnection, setPendingConnection, contextMenu, setContextMenu, connectionContextMenu, setConnectionContextMenu, setSelectedBlockId])
 
   // Save when triggerSaveValue changes
   useEffect(() => {
@@ -2166,6 +2244,7 @@ function App() {
           <WireOverlay />
           <ConnectionPopup editor={editor} />
           <ContextMenu editor={editor} deleteBlock={deleteBlock} />
+          <ConnectionContextMenu />
           {typeMismatch && (
             <div
               style={{

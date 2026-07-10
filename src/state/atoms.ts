@@ -2,9 +2,17 @@ import { atom } from 'jotai';
 import { atomFamily } from 'jotai/utils';
 import type { Workflow, FormulaBinding, Page, BlockRuntimeState } from '../types/creora';
 
-export const blockRuntimeAtom = atomFamily((_blockId: string) =>
+export function getBlockDefaultValue(identifier: string): any {
+  const id = identifier.toLowerCase();
+  if (id.includes('tgl') || id.includes('toggle')) return false;
+  if (id.includes('inp') || id.includes('input') || id.includes('lbl') || id.includes('label')) return '';
+  if (id.includes('tmr') || id.includes('timer')) return false;
+  return 0;
+}
+
+export const blockRuntimeAtom = atomFamily((blockId: string) =>
   atom<BlockRuntimeState>({
-    value: 0,
+    value: getBlockDefaultValue(blockId),
     visible: true,
     disabled: false,
     loading: false,
@@ -57,6 +65,13 @@ export const triggerSaveAtom = atom<number>(0);
 
 export const contextMenuAtom = atom<{
   blockId: string;
+  x: number;
+  y: number;
+  visible: boolean;
+} | null>(null);
+
+export const connectionContextMenuAtom = atom<{
+  connectionId: string;
   x: number;
   y: number;
   visible: boolean;

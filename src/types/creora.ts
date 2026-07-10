@@ -4,7 +4,7 @@ export type BlockType =
   | 'chart' | 'form' | 'video' | 'embed' | 'apiBlock';
 
 export type ActionType =
-  | 'increment' | 'decrement' | 'set' | 'toggle'
+  | 'increment' | 'decrement' | 'set' | 'toggle' | 'reset'
   | 'setVisible' | 'setHidden' | 'navigate'
   | 'addRow' | 'deleteRow' | 'updateField'
   | 'callAPI' | 'playAnimation' | 'submitForm';

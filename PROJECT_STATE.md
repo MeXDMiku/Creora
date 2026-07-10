@@ -15,6 +15,7 @@ All blocks are implemented as custom TipTap nodes in `src/blocks/` and render th
 | [`NumberDisplayBlock.tsx`](file:///d:/A/src/blocks/NumberDisplayBlock.tsx) | `numberDisplayBlock` | `number` | **Both** (Left input: number, Right output: number) | Background Color, Border Radius (0-24px slider), Opacity (0-100% slider), Width (px), Text Color, Font Size (px), Minimum value (number), Maximum value (number) |
 | [`TextLabelBlock.tsx`](file:///d:/A/src/blocks/TextLabelBlock.tsx) | `textLabelBlock` | `string` | **Both** (Left input: string/text, Right output: string/text) | Background Color, Border Radius (0-24px slider), Opacity (0-100% slider), Width (px), Text Color, Font Size (px) |
 | [`ToggleBlock.tsx`](file:///d:/A/src/blocks/ToggleBlock.tsx) | `toggleBlock` | `boolean` | **Both** (Left input: boolean, Right output: boolean) | Background Color, Border Radius (0-24px slider), Opacity (0-100% slider), Width (px) |
+| [`TimerBlock.tsx`](file:///d:/A/src/blocks/TimerBlock.tsx) | `timerBlock` | `trigger` | **Both** (Left input: trigger, Right output: trigger) | Mode (Dropdown), Duration (Number), AutoStart (Checkbox), Background Color, Border Radius, Opacity, Width, Font Size, Text Color |
 
 ---
 
@@ -85,7 +86,9 @@ d:/A/src/
 │   ├── InputBlock.tsx      # String text box block.
 │   ├── NumberDisplayBlock.tsx # Numeric block displaying current value.
 │   ├── TextLabelBlock.tsx  # String label block displaying value text.
-│   └── ToggleBlock.tsx     # Boolean switch block.
+│   ├── ToggleBlock.tsx     # Boolean switch block.
+│   ├── TimerBlock.tsx      # Trigger block representing a ticking timer.
+│   └── TimerBlock.inspector.tsx # Inspector configurations for TimerBlock.
 ├── components/
 │   └── WireOverlay.tsx     # Renders the SVG paths for connections between active block ports.
 ├── hooks/
