@@ -99,6 +99,7 @@ export interface WorkflowStep {
   amount?: number;
   fieldId?: string;
   condition: ConditionConfig | null;
+  mappings?: Record<string, { source: 'fixed' | 'block'; value: string }>;
 }
 
 export interface Workflow {

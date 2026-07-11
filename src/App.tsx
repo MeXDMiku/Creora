@@ -107,6 +107,21 @@ function ConnectionPopup({ editor }: { editor: any }) {
   }
 
   const isToggleBlock = targetNodeType === 'toggleBlock'
+  const isDatabaseBlock = targetNodeType === 'databaseBlock'
+  const targetState = pending ? store.get(blockRuntimeAtom(pending.targetBlockId)) : null
+  const databaseColumns = targetState?.columns || []
+
+  const [mappings, setMappings] = useState<Record<string, { source: 'fixed' | 'block'; value: string }>>({})
+
+  useEffect(() => {
+    if (isDatabaseBlock && databaseColumns.length > 0) {
+      const initialMappings: Record<string, { source: 'fixed' | 'block'; value: string }> = {}
+      databaseColumns.forEach((col: any) => {
+        initialMappings[col.name] = { source: 'fixed', value: '' }
+      })
+      setMappings(initialMappings)
+    }
+  }, [isDatabaseBlock, databaseColumns])
 
   // Get all OTHER blocks on the canvas
   const canvasBlocks = useMemo(() => {
@@ -130,6 +145,8 @@ function ConnectionPopup({ editor }: { editor: any }) {
 
       if (type === 'toggleBlock') {
         setAction('toggle')
+      } else if (type === 'databaseBlock') {
+        setAction('addRow')
       } else {
         setAction('increment')
       }
@@ -253,6 +270,9 @@ function ConnectionPopup({ editor }: { editor: any }) {
       } else {
         stepStep.action = 'toggle'
       }
+    } else if (isDatabaseBlock) {
+      stepStep.action = 'addRow'
+      stepStep.mappings = mappings
     } else {
       if (action === 'reset') {
         stepStep.action = 'reset'
@@ -333,6 +353,10 @@ function ConnectionPopup({ editor }: { editor: any }) {
               <option value="toggle">Toggle</option>
               <option value="reset">Reset</option>
             </>
+          ) : isDatabaseBlock ? (
+            <>
+              <option value="addRow">Add Row</option>
+            </>
           ) : (
             <>
               <option value="increment">Increment</option>
@@ -345,7 +369,7 @@ function ConnectionPopup({ editor }: { editor: any }) {
         </select>
       </label>
 
-      {!isToggleBlock && (action === 'increment' || action === 'decrement') && (
+      {!isToggleBlock && !isDatabaseBlock && (action === 'increment' || action === 'decrement') && (
         <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontWeight: 500, color: '#475569', fontSize: '13px' }}>
           Amount
           <input 
@@ -357,7 +381,7 @@ function ConnectionPopup({ editor }: { editor: any }) {
         </label>
       )}
 
-      {!isToggleBlock && action === 'set' && (
+      {!isToggleBlock && !isDatabaseBlock && action === 'set' && (
         <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontWeight: 500, color: '#475569', fontSize: '13px' }}>
           Value
           <input 
@@ -368,6 +392,68 @@ function ConnectionPopup({ editor }: { editor: any }) {
             style={inputStyle}
           />
         </label>
+      )}
+
+      {isDatabaseBlock && action === 'addRow' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '180px', overflowY: 'auto', paddingRight: '4px' }}>
+          <div style={{ fontWeight: 600, color: '#475569', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Column Mappings</div>
+          {databaseColumns.map((col: any) => {
+            const currentMap = mappings[col.name] || { source: 'fixed', value: '' };
+            return (
+              <div key={col.name} style={{ display: 'flex', flexDirection: 'column', gap: '4px', border: '1px solid #cbd5e1', padding: '6px 8px', borderRadius: '6px', background: '#f8fafc' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '4px' }}>
+                  <span style={{ fontWeight: 600, fontSize: '11px', color: '#1e293b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100px' }} title={col.name}>
+                    {col.name} <span style={{ fontSize: '9px', fontWeight: 500, color: '#64748b' }}>({col.type})</span>
+                  </span>
+                  <select
+                    value={currentMap.source}
+                    onChange={(e) => {
+                      setMappings(prev => ({
+                        ...prev,
+                        [col.name]: { source: e.target.value as any, value: e.target.value === 'fixed' ? '' : (canvasBlocks[0]?.id || '') }
+                      }));
+                    }}
+                    style={{ ...selectStyle, width: '90px', padding: '2px 20px 2px 6px', fontSize: '10px', height: '22px' }}
+                  >
+                    <option value="fixed">Fixed value</option>
+                    <option value="block">From block</option>
+                  </select>
+                </div>
+                {currentMap.source === 'fixed' ? (
+                  <input
+                    type="text"
+                    value={currentMap.value}
+                    onChange={(e) => {
+                      setMappings(prev => ({
+                        ...prev,
+                        [col.name]: { ...currentMap, value: e.target.value }
+                      }));
+                    }}
+                    placeholder={`Fixed ${col.type}`}
+                    style={{ ...inputStyle, padding: '4px 6px', fontSize: '11px', height: '24px' }}
+                  />
+                ) : (
+                  <select
+                    value={currentMap.value}
+                    onChange={(e) => {
+                      setMappings(prev => ({
+                        ...prev,
+                        [col.name]: { ...currentMap, value: e.target.value }
+                      }));
+                    }}
+                    style={{ ...selectStyle, padding: '2px 24px 2px 6px', fontSize: '11px', height: '24px' }}
+                  >
+                    {canvasBlocks.map(b => (
+                      <option key={b.id} value={b.id}>
+                        {b.label}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            );
+          })}
+        </div>
       )}
 
       {/* Divider */}
@@ -1751,6 +1837,7 @@ function App() {
         else if (sourceDataType === 'boolean' && targetDataType === 'boolean') isCompatible = true
         else if (sourceDataType === 'trigger' && targetDataType === 'number') isCompatible = true
         else if (sourceDataType === 'trigger' && targetDataType === 'boolean') isCompatible = true
+        else if (sourceDataType === 'trigger' && targetDataType === 'database') isCompatible = true
 
         if (!isCompatible) {
           const srcLbl = sourceDataType === 'string' ? 'text' : sourceDataType

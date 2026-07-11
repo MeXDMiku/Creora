@@ -2,6 +2,7 @@ import { getDefaultStore } from 'jotai';
 import jsep from 'jsep';
 import type { TriggerEvent } from '../types/creora';
 import { blockRuntimeAtom, workflowsAtom, formulasAtom, allBlockIdsAtom, getBlockDefaultValue } from '../state/atoms';
+import { supabase } from './supabase';
 
 
 export function executeWorkflow(
@@ -124,6 +125,75 @@ export function executeWorkflow(
             ...currentTargetState,
             value: targetValue,
           });
+          break;
+        }
+        case 'addRow': {
+          const targetState = store.get(targetAtom);
+          const columns = targetState?.columns || [];
+          const currentRows = targetState?.rows || [];
+          const outputMode = targetState?.outputMode || 'row_count';
+
+          const rowId = `row_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+          const defaultData: Record<string, any> = {};
+
+          columns.forEach((col: any) => {
+            const mapping = step.mappings?.[col.name] || { source: 'fixed', value: '' };
+            let evaluatedValue: any = '';
+
+            if (mapping.source === 'fixed') {
+              evaluatedValue = mapping.value;
+            } else {
+              const refAtom = blockRuntimeAtom(mapping.value);
+              const refState = store.get(refAtom);
+              evaluatedValue = refState?.value;
+            }
+
+            if (col.type === 'number') {
+              const num = Number(evaluatedValue);
+              evaluatedValue = isNaN(num) ? 0 : num;
+            } else if (col.type === 'boolean') {
+              evaluatedValue = evaluatedValue === 'true' || evaluatedValue === true;
+            } else {
+              evaluatedValue = String(evaluatedValue === undefined || evaluatedValue === null ? '' : evaluatedValue);
+            }
+
+            defaultData[col.name] = evaluatedValue;
+          });
+
+          const updatedRows = [...currentRows, { id: rowId, ...defaultData }];
+
+          let nextValue = 0;
+          if (outputMode === 'row_count') {
+            nextValue = updatedRows.length;
+          } else {
+            const lastRow = updatedRows[updatedRows.length - 1];
+            nextValue = lastRow ? lastRow[outputMode] : 0;
+          }
+
+          store.set(targetAtom, {
+            ...targetState,
+            rows: updatedRows,
+            value: nextValue
+          });
+
+          // Insert into Supabase
+          try {
+            supabase
+              .from('database_rows')
+              .insert({
+                id: rowId,
+                database_block_id: step.targetId,
+                row_data: defaultData,
+                created_at: new Date().toISOString()
+              })
+              .then(({ error }: any) => {
+                if (error) {
+                  console.warn('[Supabase execute info]: Could not insert row via workflow action, falling back to local state.', error.message);
+                }
+              });
+          } catch (err) {
+            console.error('Error inserting row in Supabase via workflow:', err);
+          }
           break;
         }
         case 'toggle': {

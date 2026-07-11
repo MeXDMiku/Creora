@@ -3,7 +3,7 @@ import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
 import type { NodeViewProps } from '@tiptap/react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { executeWorkflow, recalculateAllFormulas } from '../lib/bindingEngine';
-import { blockRuntimeAtom, activeWireAtom, triggerSaveAtom, contextMenuAtom, getPortBadge, getBlockTypeDisplayName } from '../state/atoms';
+import { blockRuntimeAtom, activeWireAtom, snapTargetAtom, triggerSaveAtom, contextMenuAtom, getPortBadge, getBlockTypeDisplayName } from '../state/atoms';
 import { useMemo, useRef, useState, useEffect, useCallback } from 'react';
 import { useBlockDrag } from '../hooks/useBlockDrag';
 import { supabase } from '../lib/supabase';
@@ -15,6 +15,7 @@ const DatabaseBlockComponent = (props: NodeViewProps) => {
   const [isHovered, setIsHovered] = useState(false);
   const setActiveWire = useSetAtom(activeWireAtom);
   const activeWire = useAtomValue(activeWireAtom);
+  const snapTarget = useAtomValue(snapTargetAtom);
   const triggerSave = useSetAtom(triggerSaveAtom);
   const setContextMenu = useSetAtom(contextMenuAtom);
 
@@ -254,6 +255,8 @@ const DatabaseBlockComponent = (props: NodeViewProps) => {
 
   const isWireActive = activeWire !== null;
   const isWireSource = isWireActive && activeWire.sourceBlockId === blockId;
+  const isSnapTarget = snapTarget === blockId;
+  const showLeftPort = isHovered || (isWireActive && !isWireSource);
   const showRightPort = isHovered || isWireSource;
 
   // Native DOM ref for context menu — bypasses React's synthetic events entirely
@@ -508,6 +511,41 @@ const DatabaseBlockComponent = (props: NodeViewProps) => {
           userSelect: 'none',
         }}>
           {getPortBadge(outputDataType)}
+        </span>
+      </div>
+
+      {/* Left (input) port */}
+      <div
+        contentEditable={false}
+        data-port-input={blockId}
+        style={{
+          position: 'absolute',
+          left: '-5px',
+          top: '50%',
+          transform: isSnapTarget ? 'translateY(-50%) scale(1.5)' : 'translateY(-50%)',
+          width: '10px',
+          height: '10px',
+          borderRadius: '50%',
+          backgroundColor: '#22c55e',
+          border: '2px solid white',
+          boxShadow: isSnapTarget ? '0 0 8px 2px #22c55e' : 'none',
+          opacity: showLeftPort ? 1 : 0,
+          pointerEvents: showLeftPort ? 'all' as const : 'none' as const,
+          transition: 'transform 0.15s, box-shadow 0.15s, opacity 0.15s',
+        }}
+      >
+        <span style={{
+          position: 'absolute',
+          left: '12px',
+          top: '50%',
+          transform: 'translateY(-50%)',
+          fontSize: '10px',
+          fontWeight: 'bold',
+          color: '#22c55e',
+          pointerEvents: 'none',
+          userSelect: 'none',
+        }}>
+          {getPortBadge('database')}
         </span>
       </div>
     </NodeViewWrapper>

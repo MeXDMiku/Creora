@@ -113,7 +113,7 @@ export const connectionContextMenuAtom = atom<{
 
 export const allBlockIdsAtom = atom<string[]>([]);
 
-export type BlockDataType = 'trigger' | 'number' | 'boolean' | 'string' | 'unknown';
+export type BlockDataType = 'trigger' | 'number' | 'boolean' | 'string' | 'database' | 'unknown';
 
 export function getBlockDataType(nodeType: string): BlockDataType {
   switch (nodeType) {
@@ -125,7 +125,7 @@ export function getBlockDataType(nodeType: string): BlockDataType {
     case 'inputBlock': return 'string';
     case 'textLabelBlock': return 'string';
     case 'historyChartBlock': return 'unknown';
-    case 'databaseBlock': return 'number';
+    case 'databaseBlock': return 'database';
     default: return 'unknown';
   }
 }
@@ -135,6 +135,7 @@ export function getPortBadge(dataType: BlockDataType): string {
     case 'number': return '#';
     case 'string': return 'T';
     case 'boolean': return '?';
+    case 'database': return 'DB';
     default: return '';
   }
 }
