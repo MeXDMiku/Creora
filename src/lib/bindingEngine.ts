@@ -256,5 +256,30 @@ export function recalculateAllFormulas(store: any) {
       }
     }
   }
+
+  // 3. Update all History Chart blocks
+  for (const blockId of allBlockIds) {
+    if (blockId.toLowerCase().includes('chart') || blockId.toLowerCase().includes('history')) {
+      const chartAtom = blockRuntimeAtom(blockId);
+      const chartState = store.get(chartAtom);
+      const trackedId = chartState?.trackedBlockId;
+      if (trackedId && allBlockIds.includes(trackedId)) {
+        const trackedVal = scope[trackedId] ?? 0;
+        const currentHistory = chartState?.history || [];
+        const lastVal = currentHistory[currentHistory.length - 1];
+        if (currentHistory.length === 0 || lastVal !== trackedVal) {
+          // Append new value and enforce the 20-entry maximum cap
+          let newHistory = [...currentHistory, trackedVal];
+          if (newHistory.length > 20) {
+            newHistory = newHistory.slice(newHistory.length - 20);
+          }
+          store.set(chartAtom, {
+            ...chartState,
+            history: newHistory,
+          });
+        }
+      }
+    }
+  }
 }
 

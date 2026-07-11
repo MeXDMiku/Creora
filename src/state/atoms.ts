@@ -19,6 +19,7 @@ export function getBlockTypeDisplayName(nodeType: string): string {
   if (type.includes('text') || type.includes('label')) return 'Text Label';
   if (type.includes('formula')) return 'Formula';
   if (type.includes('timer')) return 'Timer';
+  if (type.includes('history') || type.includes('chart')) return 'History Chart';
   return 'Block';
 }
 
@@ -28,15 +29,17 @@ export function isGarbageName(name: string | undefined | null): boolean {
   return false;
 }
 
-export const blockRuntimeAtom = atomFamily((blockId: string) =>
-  atom<BlockRuntimeState>({
+export const blockRuntimeAtom = atomFamily((blockId: string) => {
+  const isChart = blockId.toLowerCase().includes('chart') || blockId.toLowerCase().includes('history');
+  return atom<BlockRuntimeState>({
     value: getBlockDefaultValue(blockId),
     visible: true,
     disabled: false,
     loading: false,
     error: null,
-  })
-);
+    ...(isChart ? { history: [], trackedBlockId: '' } : {}),
+  });
+});
 
 export const blockPositionAtom = atomFamily((_blockId: string) => {
   return atom({ x: 100, y: 100 });
@@ -108,6 +111,7 @@ export function getBlockDataType(nodeType: string): BlockDataType {
     case 'toggleBlock': return 'boolean';
     case 'inputBlock': return 'string';
     case 'textLabelBlock': return 'string';
+    case 'historyChartBlock': return 'unknown';
     default: return 'unknown';
   }
 }
@@ -119,5 +123,31 @@ export function getPortBadge(dataType: BlockDataType): string {
     case 'boolean': return '?';
     default: return '';
   }
+}
+
+export function getCanvasBlocks(editor: any, store: any, excludeBlockId?: string): { id: string; type: string; label: string; dataType: BlockDataType }[] {
+  if (!editor) return [];
+  const list: { id: string; type: string; label: string; dataType: BlockDataType }[] = [];
+  editor.state.doc.descendants((node: any) => {
+    const bId = node.attrs?.blockId;
+    const typeName = node.type.name;
+    if (bId && bId !== excludeBlockId && (
+      typeName === 'buttonBlock' || 
+      typeName === 'numberDisplayBlock' || 
+      typeName === 'formulaDisplayBlock' || 
+      typeName === 'toggleBlock' || 
+      typeName === 'inputBlock' || 
+      typeName === 'textLabelBlock' ||
+      typeName === 'timerBlock' ||
+      typeName === 'historyChartBlock'
+    )) {
+      const dataType = getBlockDataType(typeName);
+      const runtime = store.get(blockRuntimeAtom(bId));
+      const name = runtime?.blockName || getBlockTypeDisplayName(typeName);
+      const label = `${name} (${bId})`;
+      list.push({ id: bId, type: typeName, label, dataType });
+    }
+  });
+  return list;
 }
 

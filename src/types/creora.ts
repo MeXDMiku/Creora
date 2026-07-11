@@ -63,6 +63,8 @@ export interface BlockProps {
   content?: string;
   defaultValue?: any;
   boundToFieldId?: string | null;
+  trackedBlockId?: string;
+  history?: number[];
 }
 
 export interface Block {
@@ -131,6 +133,8 @@ export interface BlockRuntimeState {
   mode?: 'countdown' | 'interval';
   duration?: number;
   autoStart?: boolean;
+  trackedBlockId?: string;
+  history?: number[];
 }
 
 export interface DatabaseField {

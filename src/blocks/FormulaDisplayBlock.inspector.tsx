@@ -1,5 +1,5 @@
 import { useAtom, useSetAtom, useStore } from 'jotai'
-import { blockRuntimeAtom, triggerSaveAtom, formulasAtom, getBlockTypeDisplayName } from '../state/atoms'
+import { blockRuntimeAtom, triggerSaveAtom, formulasAtom, getBlockTypeDisplayName, getCanvasBlocks } from '../state/atoms'
 import { recalculateAllFormulas } from '../lib/bindingEngine'
 import { useMemo, useState, useEffect } from 'react'
 
@@ -12,28 +12,8 @@ export default function FormulaDisplayBlockInspector({ blockId, editor }: { bloc
   const [formulas, setFormulas] = useAtom(formulasAtom)
 
   const canvasBlocks = useMemo(() => {
-    if (!editor) return []
-    const list: { id: string; type: string; label: string }[] = []
-    editor.state.doc.descendants((node: any) => {
-      const bId = node.attrs?.blockId
-      const typeName = node.type.name
-      if (bId && bId !== blockId && (
-        typeName === 'buttonBlock' || 
-        typeName === 'numberDisplayBlock' || 
-        typeName === 'formulaDisplayBlock' ||
-        typeName === 'toggleBlock' || 
-        typeName === 'inputBlock' || 
-        typeName === 'textLabelBlock' ||
-        typeName === 'timerBlock'
-      )) {
-        const runtime = store.get(blockRuntimeAtom(bId))
-        const name = runtime?.blockName || getBlockTypeDisplayName(typeName)
-        const label = `${name} (${bId})`
-        list.push({ id: bId, type: typeName, label })
-      }
-    })
-    return list
-  }, [editor, blockId])
+    return getCanvasBlocks(editor, store, blockId)
+  }, [editor, blockId, store])
 
   const [selectedVarBlockId, setSelectedVarBlockId] = useState('')
   useEffect(() => {

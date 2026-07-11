@@ -2,7 +2,7 @@ import { useEffect, useRef, useCallback, useState, useMemo } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { useSetAtom, useAtom, useAtomValue, useStore } from 'jotai'
-import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName } from './state/atoms'
+import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, getCanvasBlocks } from './state/atoms'
 import { ButtonBlock } from './blocks/ButtonBlock'
 import { NumberDisplayBlock } from './blocks/NumberDisplayBlock'
 import { TextLabelBlock } from './blocks/TextLabelBlock'
@@ -10,6 +10,7 @@ import { ToggleBlock } from './blocks/ToggleBlock'
 import { InputBlock } from './blocks/InputBlock'
 import { FormulaDisplayBlock } from './blocks/FormulaDisplayBlock'
 import { TimerBlock } from './blocks/TimerBlock'
+import { HistoryChartBlock } from './blocks/HistoryChartBlock'
 import { WireOverlay } from './components/WireOverlay'
 import { supabase } from './lib/supabase'
 import { recalculateAllFormulas } from './lib/bindingEngine'
@@ -109,37 +110,8 @@ function ConnectionPopup({ editor }: { editor: any }) {
   // Get all OTHER blocks on the canvas
   const canvasBlocks = useMemo(() => {
     if (!editor || !pending) return []
-    const list: { id: string; type: string; label: string; dataType: string }[] = []
-    
-    const docJson = editor.getJSON()
-    const traverse = (node: any) => {
-      if (!node) return
-      const bId = node.attrs?.blockId
-      const typeName = node.type
-      if (bId && bId !== pending.targetBlockId && (
-        typeName === 'buttonBlock' || 
-        typeName === 'numberDisplayBlock' || 
-        typeName === 'toggleBlock' || 
-        typeName === 'inputBlock' || 
-        typeName === 'textLabelBlock' ||
-        typeName === 'timerBlock'
-      )) {
-        const dataType = getBlockDataType(typeName)
-        const runtime = store.get(blockRuntimeAtom(bId))
-        const name = runtime?.blockName || getBlockTypeDisplayName(typeName)
-        const label = `${name} (${bId})`
-        list.push({ id: bId, type: typeName, label, dataType })
-      }
-      if (node.content) {
-        node.content.forEach(traverse)
-      }
-    }
-    
-    if (docJson && docJson.content) {
-      docJson.content.forEach(traverse)
-    }
-    return list
-  }, [editor, pending])
+    return getCanvasBlocks(editor, store, pending.targetBlockId)
+  }, [editor, pending, store])
 
   // Sync action default state when pending connection loads
   useEffect(() => {
@@ -566,7 +538,9 @@ function ContextMenu({ editor, deleteBlock }: { editor: any; deleteBlock: (block
       opacity: origRuntime?.opacity,
       width: origRuntime?.width,
       min: origRuntime?.min,
-      max: origRuntime?.max
+      max: origRuntime?.max,
+      trackedBlockId: origRuntime?.trackedBlockId,
+      history: origRuntime?.history ? [] : undefined,
     }
 
     store.set(blockRuntimeAtom(newBlockId), newRuntime)
@@ -822,6 +796,7 @@ function App() {
       InputBlock,
       FormulaDisplayBlock,
       TimerBlock,
+      HistoryChartBlock,
     ],
     content: '',
     onUpdate: ({ editor }) => {
@@ -838,7 +813,8 @@ function App() {
           typeName === 'toggleBlock' || 
           typeName === 'inputBlock' || 
           typeName === 'textLabelBlock' ||
-          typeName === 'timerBlock'
+          typeName === 'timerBlock' ||
+          typeName === 'historyChartBlock'
         ) {
           if (node.attrs?.blockId) {
             blockIds.push(node.attrs.blockId)
@@ -991,7 +967,8 @@ function App() {
         typeName === 'toggleBlock' || 
         typeName === 'inputBlock' || 
         typeName === 'textLabelBlock' ||
-        typeName === 'timerBlock'
+        typeName === 'timerBlock' ||
+        typeName === 'historyChartBlock'
       ) {
         const blockId = node.attrs?.blockId
         if (blockId) {
@@ -1015,11 +992,14 @@ function App() {
           else if (typeName === 'toggleBlock') type = 'toggle'
           else if (typeName === 'inputBlock') type = 'input'
           else if (typeName === 'textLabelBlock') type = 'text'
+          else if (typeName === 'historyChartBlock') type = 'chart'
 
           const blockProps: BlockProps = {
             blockName: runtime.blockName,
             label: node.attrs?.label,
-            defaultValue: runtime.value
+            defaultValue: runtime.value,
+            trackedBlockId: runtime.trackedBlockId,
+            history: runtime.history
           }
 
           const blockStyles: StyleConfig = {
@@ -1191,6 +1171,8 @@ function App() {
               typeName = 'inputBlock'
             } else if (b.type === 'text') {
               typeName = 'textLabelBlock'
+            } else if (b.type === 'chart') {
+              typeName = 'historyChartBlock'
             } else if (b.type === 'number') {
               const hasFormula = (importedPage.formulas || []).some((f: any) => f.targetBlockId === b.id)
               typeName = hasFormula ? 'formulaDisplayBlock' : 'numberDisplayBlock'
@@ -1211,7 +1193,9 @@ function App() {
                 textColor: b.styles?.color,
                 fontSize: b.styles?.fontSize,
                 opacity: b.styles?.opacity,
-                width: typeof b.styles?.width === 'number' ? b.styles.width : undefined
+                width: typeof b.styles?.width === 'number' ? b.styles.width : undefined,
+                trackedBlockId: b.props?.trackedBlockId,
+                history: b.props?.history || []
               }
             }
           })
@@ -1268,7 +1252,8 @@ function App() {
               node.type.name === 'formulaDisplayBlock' || 
               node.type.name === 'toggleBlock' || 
               node.type.name === 'inputBlock' || 
-              node.type.name === 'textLabelBlock'
+              node.type.name === 'textLabelBlock' ||
+              node.type.name === 'historyChartBlock'
             ) && node.attrs.blockId === blockId
           ) {
             foundPos = pos
@@ -1472,6 +1457,25 @@ function App() {
           insertTimerBlock()
         } else {
           insertTimerBlock2()
+        }
+      }
+    },
+    {
+      id: 'historyChart',
+      title: 'History Chart',
+      description: 'Insert a history chart block that records and graphs values over time',
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="18" y1="20" x2="18" y2="10" />
+          <line x1="12" y1="20" x2="12" y2="4" />
+          <line x1="6" y1="20" x2="6" y2="14" />
+        </svg>
+      ),
+      action: () => {
+        if (!blockExists('test_chart_1')) {
+          insertHistoryChart()
+        } else {
+          insertHistoryChart2()
         }
       }
     }
@@ -1785,7 +1789,8 @@ function App() {
         typeName === 'toggleBlock' ||
         typeName === 'inputBlock' ||
         typeName === 'textLabelBlock' ||
-        typeName === 'timerBlock'
+        typeName === 'timerBlock' ||
+        typeName === 'historyChartBlock'
       )) {
         currentBlocks.push({ id: bId, type: typeName })
       }
@@ -2180,6 +2185,50 @@ function App() {
       duration: 10,
       autoStart: false,
       backgroundColor: '#10b981',
+      textColor: '#ffffff'
+    })
+  }
+
+  function insertHistoryChart() {
+    if (!editor || blockExists('test_chart_1')) return
+    editor.chain().focus('end').insertContent({
+      type: 'historyChartBlock',
+      attrs: {
+        blockId: 'test_chart_1'
+      }
+    }).run()
+    store.set(blockPositionAtom('test_chart_1'), { x: 300, y: 340 })
+    store.set(blockRuntimeAtom('test_chart_1'), {
+      value: 0,
+      visible: true,
+      disabled: false,
+      loading: false,
+      error: null,
+      trackedBlockId: '',
+      history: [],
+      backgroundColor: '#1e293b',
+      textColor: '#ffffff'
+    })
+  }
+
+  function insertHistoryChart2() {
+    if (!editor || blockExists('test_chart_2')) return
+    editor.chain().focus('end').insertContent({
+      type: 'historyChartBlock',
+      attrs: {
+        blockId: 'test_chart_2'
+      }
+    }).run()
+    store.set(blockPositionAtom('test_chart_2'), { x: 300, y: 440 })
+    store.set(blockRuntimeAtom('test_chart_2'), {
+      value: 0,
+      visible: true,
+      disabled: false,
+      loading: false,
+      error: null,
+      trackedBlockId: '',
+      history: [],
+      backgroundColor: '#1e293b',
       textColor: '#ffffff'
     })
   }
