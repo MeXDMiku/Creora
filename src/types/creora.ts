@@ -65,6 +65,9 @@ export interface BlockProps {
   boundToFieldId?: string | null;
   trackedBlockId?: string;
   history?: number[];
+  columns?: { name: string; type: 'text' | 'number' | 'boolean' }[];
+  rows?: { id: string; [key: string]: any }[];
+  outputMode?: string;
 }
 
 export interface Block {
@@ -135,6 +138,9 @@ export interface BlockRuntimeState {
   autoStart?: boolean;
   trackedBlockId?: string;
   history?: number[];
+  columns?: { name: string; type: 'text' | 'number' | 'boolean' }[];
+  rows?: { id: string; [key: string]: any }[];
+  outputMode?: string;
 }
 
 export interface DatabaseField {

@@ -7,6 +7,7 @@ export function getBlockDefaultValue(identifier: string): any {
   if (id.includes('tgl') || id.includes('toggle')) return false;
   if (id.includes('inp') || id.includes('input') || id.includes('lbl') || id.includes('label')) return '';
   if (id.includes('tmr') || id.includes('timer')) return false;
+  if (id.includes('db') || id.includes('database')) return 0;
   return 0;
 }
 
@@ -20,6 +21,7 @@ export function getBlockTypeDisplayName(nodeType: string): string {
   if (type.includes('formula')) return 'Formula';
   if (type.includes('timer')) return 'Timer';
   if (type.includes('history') || type.includes('chart')) return 'History Chart';
+  if (type.includes('database')) return 'Database';
   return 'Block';
 }
 
@@ -31,6 +33,7 @@ export function isGarbageName(name: string | undefined | null): boolean {
 
 export const blockRuntimeAtom = atomFamily((blockId: string) => {
   const isChart = blockId.toLowerCase().includes('chart') || blockId.toLowerCase().includes('history');
+  const isDb = blockId.toLowerCase().includes('db') || blockId.toLowerCase().includes('database');
   return atom<BlockRuntimeState>({
     value: getBlockDefaultValue(blockId),
     visible: true,
@@ -38,6 +41,16 @@ export const blockRuntimeAtom = atomFamily((blockId: string) => {
     loading: false,
     error: null,
     ...(isChart ? { history: [], trackedBlockId: '' } : {}),
+    ...(isDb ? {
+      columns: [
+        { name: 'Name', type: 'text' },
+        { name: 'Age', type: 'number' }
+      ],
+      rows: [],
+      outputMode: 'row_count',
+      backgroundColor: '#ffffff',
+      borderRadius: 8
+    } : {}),
   });
 });
 
@@ -112,6 +125,7 @@ export function getBlockDataType(nodeType: string): BlockDataType {
     case 'inputBlock': return 'string';
     case 'textLabelBlock': return 'string';
     case 'historyChartBlock': return 'unknown';
+    case 'databaseBlock': return 'number';
     default: return 'unknown';
   }
 }
@@ -139,7 +153,8 @@ export function getCanvasBlocks(editor: any, store: any, excludeBlockId?: string
       typeName === 'inputBlock' || 
       typeName === 'textLabelBlock' ||
       typeName === 'timerBlock' ||
-      typeName === 'historyChartBlock'
+      typeName === 'historyChartBlock' ||
+      typeName === 'databaseBlock'
     )) {
       const dataType = getBlockDataType(typeName);
       const runtime = store.get(blockRuntimeAtom(bId));

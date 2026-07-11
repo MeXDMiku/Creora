@@ -1,0 +1,418 @@
+import { useAtom, useSetAtom } from 'jotai';
+import { blockRuntimeAtom, triggerSaveAtom, getBlockTypeDisplayName } from '../state/atoms';
+import { recalculateAllFormulas } from '../lib/bindingEngine';
+
+export default function DatabaseBlockInspector({ blockId }: { blockId: string; editor: any }) {
+  const [runtimeState, setRuntimeState] = useAtom(blockRuntimeAtom(blockId));
+  const triggerSave = useSetAtom(triggerSaveAtom);
+
+  const columns = runtimeState?.columns || [];
+  const rows = runtimeState?.rows || [];
+  const outputMode = runtimeState?.outputMode || 'row_count';
+
+  const handleUpdateColumns = (newCols: typeof columns) => {
+    // When columns are updated, map existing rows to align keys if name changes or types change
+    const updatedRows: { id: string; [key: string]: any }[] = rows.map(row => {
+      const updatedRowData: { id: string; [key: string]: any } = { id: row.id };
+      newCols.forEach(col => {
+        // Find if old column existed
+        const oldCol = columns.find(c => c.name === col.name);
+        if (oldCol) {
+          updatedRowData[col.name] = row[col.name];
+        } else {
+          // Initialize with default
+          if (col.type === 'number') updatedRowData[col.name] = 0;
+          else if (col.type === 'boolean') updatedRowData[col.name] = false;
+          else updatedRowData[col.name] = '';
+        }
+      });
+      return updatedRowData;
+    });
+
+    // Make sure outputMode is still valid
+    let nextOutputMode = outputMode;
+    if (outputMode !== 'row_count' && !newCols.some(c => c.name === outputMode)) {
+      nextOutputMode = 'row_count';
+    }
+
+    // Re-evaluate output value
+    let nextValue = 0;
+    if (nextOutputMode === 'row_count') {
+      nextValue = updatedRows.length;
+    } else {
+      const lastRow = updatedRows[updatedRows.length - 1];
+      nextValue = lastRow ? lastRow[nextOutputMode] : 0;
+    }
+
+    setRuntimeState(prev => ({
+      ...prev,
+      columns: newCols,
+      rows: updatedRows,
+      outputMode: nextOutputMode,
+      value: nextValue
+    }));
+    triggerSave(prev => prev + 1);
+    recalculateAllFormulas(null); // Recalculate bindings in background
+  };
+
+  const handleAddColumn = () => {
+    // Find unique default column name
+    let colIndex = columns.length + 1;
+    let colName = `Column ${colIndex}`;
+    while (columns.some(c => c.name === colName)) {
+      colIndex++;
+      colName = `Column ${colIndex}`;
+    }
+
+    const newCols = [...columns, { name: colName, type: 'text' as const }];
+    handleUpdateColumns(newCols);
+  };
+
+  const handleRenameColumn = (index: number, newName: string) => {
+    if (newName.trim() === '') return;
+    const oldName = columns[index].name;
+
+    const newCols = columns.map((c, i) => {
+      if (i === index) {
+        return { ...c, name: newName };
+      }
+      return c;
+    });
+
+    // Rename keys in rows
+    const updatedRows: { id: string; [key: string]: any }[] = rows.map(row => {
+      const { [oldName]: oldVal, ...rest } = row;
+      return { ...rest, [newName]: oldVal } as { id: string; [key: string]: any };
+    });
+
+    // Update outputMode if it matched oldName
+    let nextOutputMode = outputMode;
+    if (outputMode === oldName) {
+      nextOutputMode = newName;
+    }
+
+    // Re-evaluate output value
+    let nextValue = 0;
+    if (nextOutputMode === 'row_count') {
+      nextValue = updatedRows.length;
+    } else {
+      const lastRow = updatedRows[updatedRows.length - 1];
+      nextValue = lastRow ? lastRow[nextOutputMode] : 0;
+    }
+
+    setRuntimeState(prev => ({
+      ...prev,
+      columns: newCols,
+      rows: updatedRows,
+      outputMode: nextOutputMode,
+      value: nextValue
+    }));
+    triggerSave(prev => prev + 1);
+    recalculateAllFormulas(null);
+  };
+
+  const handleChangeColumnType = (index: number, newType: 'text' | 'number' | 'boolean') => {
+    const colName = columns[index].name;
+    const newCols = columns.map((c, i) => {
+      if (i === index) {
+        return { ...c, type: newType };
+      }
+      return c;
+    });
+
+    // Cast types in rows
+    const updatedRows: { id: string; [key: string]: any }[] = rows.map(row => {
+      let val = row[colName];
+      if (newType === 'number') {
+        const parsed = Number(val);
+        val = isNaN(parsed) ? 0 : parsed;
+      } else if (newType === 'boolean') {
+        val = !!val;
+      } else {
+        val = String(val === undefined || val === null ? '' : val);
+      }
+      return { ...row, [colName]: val };
+    });
+
+    // Re-evaluate output value
+    let nextValue = 0;
+    if (outputMode === 'row_count') {
+      nextValue = updatedRows.length;
+    } else {
+      const lastRow = updatedRows[updatedRows.length - 1];
+      nextValue = lastRow ? lastRow[outputMode] : 0;
+    }
+
+    setRuntimeState(prev => ({
+      ...prev,
+      columns: newCols,
+      rows: updatedRows,
+      value: nextValue
+    }));
+    triggerSave(prev => prev + 1);
+    recalculateAllFormulas(null);
+  };
+
+  const handleDeleteColumn = (index: number) => {
+    const colName = columns[index].name;
+    const newCols = columns.filter((_, i) => i !== index);
+
+    // Delete keys in rows
+    const updatedRows: { id: string; [key: string]: any }[] = rows.map(row => {
+      const { [colName]: _, ...rest } = row;
+      return rest as { id: string; [key: string]: any };
+    });
+
+    // Check if outputMode was this column
+    let nextOutputMode = outputMode;
+    if (outputMode === colName) {
+      nextOutputMode = 'row_count';
+    }
+
+    // Re-evaluate output value
+    let nextValue = 0;
+    if (nextOutputMode === 'row_count') {
+      nextValue = updatedRows.length;
+    } else {
+      const lastRow = updatedRows[updatedRows.length - 1];
+      nextValue = lastRow ? lastRow[nextOutputMode] : 0;
+    }
+
+    setRuntimeState(prev => ({
+      ...prev,
+      columns: newCols,
+      rows: updatedRows,
+      outputMode: nextOutputMode,
+      value: nextValue
+    }));
+    triggerSave(prev => prev + 1);
+    recalculateAllFormulas(null);
+  };
+
+  const handleSelectOutputMode = (mode: string) => {
+    // Re-evaluate output value
+    let nextValue = 0;
+    if (mode === 'row_count') {
+      nextValue = rows.length;
+    } else {
+      const lastRow = rows[rows.length - 1];
+      nextValue = lastRow ? lastRow[mode] : 0;
+    }
+
+    setRuntimeState(prev => ({
+      ...prev,
+      outputMode: mode,
+      value: nextValue
+    }));
+    triggerSave(prev => prev + 1);
+    recalculateAllFormulas(null);
+  };
+
+  const controlLabelStyle = { display: 'block', marginBottom: '8px', fontSize: '13px', fontWeight: 500, color: '#475569' };
+  const inputStyle = { display: 'block', marginTop: '4px', width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #ccc', boxSizing: 'border-box' as const, background: '#f8fafc', color: '#0f172a', outline: 'none', fontSize: '13px' };
+
+  return (
+    <div>
+      {/* Block Name */}
+      <label style={controlLabelStyle}>
+        Block Name
+        <input
+          type="text"
+          value={runtimeState?.blockName || ''}
+          onChange={(e) => {
+            setRuntimeState(prev => ({ ...prev, blockName: e.target.value }));
+            triggerSave(prev => prev + 1);
+          }}
+          placeholder={getBlockTypeDisplayName('databaseBlock')}
+          style={inputStyle}
+        />
+      </label>
+
+      {/* Column Definitions */}
+      <div style={{ marginTop: '16px', borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>
+        <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: '8px' }}>
+          Define Columns
+        </span>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
+          {columns.map((col, idx) => (
+            <div key={col.name} style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+              <input
+                type="text"
+                value={col.name}
+                onChange={(e) => handleRenameColumn(idx, e.target.value)}
+                style={{ flex: 2, padding: '4px 6px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none' }}
+              />
+              <select
+                value={col.type}
+                onChange={(e) => handleChangeColumnType(idx, e.target.value as any)}
+                style={{ flex: 1.5, padding: '4px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none' }}
+              >
+                <option value="text">Text</option>
+                <option value="number">Number</option>
+                <option value="boolean">Boolean</option>
+              </select>
+              <button
+                onClick={() => handleDeleteColumn(idx)}
+                style={{
+                  background: '#fee2e2',
+                  color: '#ef4444',
+                  border: 'none',
+                  borderRadius: '4px',
+                  width: '24px',
+                  height: '24px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold',
+                  fontSize: '14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+                title="Delete Column"
+              >
+                -
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <button
+          onClick={handleAddColumn}
+          style={{
+            width: '100%',
+            padding: '6px',
+            borderRadius: '6px',
+            border: '1px solid #cbd5e1',
+            background: '#ffffff',
+            color: '#475569',
+            fontSize: '12px',
+            fontWeight: 500,
+            cursor: 'pointer',
+            textAlign: 'center',
+            outline: 'none'
+          }}
+        >
+          + Add Column
+        </button>
+      </div>
+
+      {/* Output Mode Selector */}
+      <div style={{ marginTop: '16px', borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>
+        <label style={controlLabelStyle}>
+          Port Output Type / Value
+          <select
+            value={outputMode}
+            onChange={(e) => handleSelectOutputMode(e.target.value)}
+            style={{ ...inputStyle, cursor: 'pointer' }}
+          >
+            <option value="row_count">Row Count (#)</option>
+            {columns.map(col => (
+              <option key={col.name} value={col.name}>
+                {col.name} ({col.type === 'number' ? '#' : col.type === 'boolean' ? '?' : 'T'}) (last row)
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {/* Visual Styles */}
+      <div style={{ marginTop: '16px', borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>
+        <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: '8px' }}>
+          Visual Styling
+        </span>
+
+        <label style={controlLabelStyle}>
+          Background Color
+          <input
+            type="color"
+            value={runtimeState?.backgroundColor || '#ffffff'}
+            onChange={(e) => {
+              setRuntimeState(prev => ({ ...prev, backgroundColor: e.target.value }));
+              triggerSave(prev => prev + 1);
+            }}
+            style={{ display: 'block', marginTop: '4px', width: '100%' }}
+          />
+        </label>
+
+        <label style={controlLabelStyle}>
+          Border Radius: {runtimeState?.borderRadius ?? 8}px
+          <input
+            type="range"
+            min="0"
+            max="24"
+            value={runtimeState?.borderRadius ?? 8}
+            onInput={(e) => {
+              setRuntimeState(prev => ({
+                ...prev,
+                borderRadius: Number((e.target as HTMLInputElement).value),
+              }));
+              triggerSave(prev => prev + 1);
+            }}
+            style={{ display: 'block', marginTop: '4px', width: '100%' }}
+          />
+        </label>
+
+        <label style={controlLabelStyle}>
+          Opacity: {runtimeState?.opacity ?? 100}%
+          <input
+            type="range"
+            min="0"
+            max="100"
+            value={runtimeState?.opacity ?? 100}
+            onInput={(e) => {
+              setRuntimeState(prev => ({
+                ...prev,
+                opacity: Number((e.target as HTMLInputElement).value),
+              }));
+              triggerSave(prev => prev + 1);
+            }}
+            style={{ display: 'block', marginTop: '4px', width: '100%' }}
+          />
+        </label>
+
+        <label style={controlLabelStyle}>
+          Width (px)
+          <input
+            type="number"
+            placeholder="400"
+            value={runtimeState?.width !== undefined ? runtimeState.width : ''}
+            onChange={(e) => {
+              const val = e.target.value === '' ? undefined : Number(e.target.value);
+              setRuntimeState(prev => ({ ...prev, width: val }));
+              triggerSave(prev => prev + 1);
+            }}
+            style={inputStyle}
+          />
+        </label>
+
+        <label style={controlLabelStyle}>
+          Font Size (px)
+          <input
+            type="number"
+            placeholder="13"
+            value={runtimeState?.fontSize !== undefined ? runtimeState.fontSize : ''}
+            onChange={(e) => {
+              const val = e.target.value === '' ? undefined : Number(e.target.value);
+              setRuntimeState(prev => ({ ...prev, fontSize: val }));
+              triggerSave(prev => prev + 1);
+            }}
+            style={inputStyle}
+          />
+        </label>
+
+        <label style={controlLabelStyle}>
+          Text Color
+          <input
+            type="color"
+            value={runtimeState?.textColor || '#0f172a'}
+            onChange={(e) => {
+              setRuntimeState(prev => ({ ...prev, textColor: e.target.value }));
+              triggerSave(prev => prev + 1);
+            }}
+            style={{ display: 'block', marginTop: '4px', width: '100%' }}
+          />
+        </label>
+      </div>
+    </div>
+  );
+}

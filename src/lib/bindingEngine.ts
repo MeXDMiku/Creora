@@ -213,45 +213,50 @@ export function recalculateAllFormulas(store: any) {
   const allBlockIds = store.get(allBlockIdsAtom);
   const formulas = store.get(formulasAtom);
 
-  // 1. Build variables scope
-  const scope: Record<string, number> = {};
-  for (const blockId of allBlockIds) {
-    const runtimeState = store.get(blockRuntimeAtom(blockId));
-    let val = runtimeState?.value;
-    if (typeof val === 'boolean') {
-      val = val ? 1 : 0;
-    } else if (typeof val === 'string') {
-      const num = Number(val);
-      val = isNaN(num) ? 0 : num;
+  let scope: Record<string, number> = {};
+
+  // Execute formula evaluation in 2 successive passes to resolve chained formula dependencies
+  for (let pass = 1; pass <= 2; pass++) {
+    // 1. Build variables scope
+    scope = {};
+    for (const blockId of allBlockIds) {
+      const runtimeState = store.get(blockRuntimeAtom(blockId));
+      let val = runtimeState?.value;
+      if (typeof val === 'boolean') {
+        val = val ? 1 : 0;
+      } else if (typeof val === 'string') {
+        const num = Number(val);
+        val = isNaN(num) ? 0 : num;
+      }
+      scope[blockId] = val ?? 0;
     }
-    scope[blockId] = val ?? 0;
-  }
 
-  // 2. Evaluate all formula bindings
-  for (const binding of formulas) {
-    // Only calculate if the target block exists
-    if (allBlockIds.includes(binding.targetBlockId)) {
-      const targetAtom = blockRuntimeAtom(binding.targetBlockId);
-      const currentTargetState = store.get(targetAtom);
+    // 2. Evaluate all formula bindings
+    for (const binding of formulas) {
+      // Only calculate if the target block exists
+      if (allBlockIds.includes(binding.targetBlockId)) {
+        const targetAtom = blockRuntimeAtom(binding.targetBlockId);
+        const currentTargetState = store.get(targetAtom);
 
-      try {
-        const calculatedValue = evaluateFormula(binding.formula, scope);
-        if (currentTargetState.value !== calculatedValue || currentTargetState.error !== null) {
-          store.set(targetAtom, {
-            ...currentTargetState,
-            value: calculatedValue,
-            error: null,
-          });
-        }
-      } catch (err: any) {
-        console.error('Error evaluating formula for block:', binding.targetBlockId, err);
-        const errMsg = err?.message || 'Error';
-        if (currentTargetState.value !== 'Error' || currentTargetState.error !== errMsg) {
-          store.set(targetAtom, {
-            ...currentTargetState,
-            value: 'Error',
-            error: errMsg,
-          });
+        try {
+          const calculatedValue = evaluateFormula(binding.formula, scope);
+          if (currentTargetState.value !== calculatedValue || currentTargetState.error !== null) {
+            store.set(targetAtom, {
+              ...currentTargetState,
+              value: calculatedValue,
+              error: null,
+            });
+          }
+        } catch (err: any) {
+          console.error('Error evaluating formula for block:', binding.targetBlockId, err);
+          const errMsg = err?.message || 'Error';
+          if (currentTargetState.value !== 'Error' || currentTargetState.error !== errMsg) {
+            store.set(targetAtom, {
+              ...currentTargetState,
+              value: 'Error',
+              error: errMsg,
+            });
+          }
         }
       }
     }

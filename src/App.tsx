@@ -11,6 +11,7 @@ import { InputBlock } from './blocks/InputBlock'
 import { FormulaDisplayBlock } from './blocks/FormulaDisplayBlock'
 import { TimerBlock } from './blocks/TimerBlock'
 import { HistoryChartBlock } from './blocks/HistoryChartBlock'
+import { DatabaseBlock } from './blocks/DatabaseBlock'
 import { WireOverlay } from './components/WireOverlay'
 import { supabase } from './lib/supabase'
 import { recalculateAllFormulas } from './lib/bindingEngine'
@@ -541,6 +542,9 @@ function ContextMenu({ editor, deleteBlock }: { editor: any; deleteBlock: (block
       max: origRuntime?.max,
       trackedBlockId: origRuntime?.trackedBlockId,
       history: origRuntime?.history ? [] : undefined,
+      columns: origRuntime?.columns,
+      rows: origRuntime?.rows ? [] : undefined,
+      outputMode: origRuntime?.outputMode,
     }
 
     store.set(blockRuntimeAtom(newBlockId), newRuntime)
@@ -797,6 +801,7 @@ function App() {
       FormulaDisplayBlock,
       TimerBlock,
       HistoryChartBlock,
+      DatabaseBlock,
     ],
     content: '',
     onUpdate: ({ editor }) => {
@@ -814,7 +819,8 @@ function App() {
           typeName === 'inputBlock' || 
           typeName === 'textLabelBlock' ||
           typeName === 'timerBlock' ||
-          typeName === 'historyChartBlock'
+          typeName === 'historyChartBlock' ||
+          typeName === 'databaseBlock'
         ) {
           if (node.attrs?.blockId) {
             blockIds.push(node.attrs.blockId)
@@ -1173,6 +1179,8 @@ function App() {
               typeName = 'textLabelBlock'
             } else if (b.type === 'chart') {
               typeName = 'historyChartBlock'
+            } else if (b.type === 'database') {
+              typeName = 'databaseBlock'
             } else if (b.type === 'number') {
               const hasFormula = (importedPage.formulas || []).some((f: any) => f.targetBlockId === b.id)
               typeName = hasFormula ? 'formulaDisplayBlock' : 'numberDisplayBlock'
@@ -1195,7 +1203,10 @@ function App() {
                 opacity: b.styles?.opacity,
                 width: typeof b.styles?.width === 'number' ? b.styles.width : undefined,
                 trackedBlockId: b.props?.trackedBlockId,
-                history: b.props?.history || []
+                history: b.props?.history || [],
+                columns: b.props?.columns,
+                rows: b.props?.rows,
+                outputMode: b.props?.outputMode
               }
             }
           })
@@ -1253,7 +1264,8 @@ function App() {
               node.type.name === 'toggleBlock' || 
               node.type.name === 'inputBlock' || 
               node.type.name === 'textLabelBlock' ||
-              node.type.name === 'historyChartBlock'
+              node.type.name === 'historyChartBlock' ||
+              node.type.name === 'databaseBlock'
             ) && node.attrs.blockId === blockId
           ) {
             foundPos = pos
@@ -1478,6 +1490,27 @@ function App() {
           insertHistoryChart2()
         }
       }
+    },
+    {
+      id: 'databaseBlock',
+      title: 'Database Table',
+      description: 'Insert an editable database block backed by Supabase',
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          <line x1="3" y1="9" x2="21" y2="9" />
+          <line x1="3" y1="15" x2="21" y2="15" />
+          <line x1="9" y1="9" x2="9" y2="21" />
+          <line x1="15" y1="9" x2="15" y2="21" />
+        </svg>
+      ),
+      action: () => {
+        if (!blockExists('test_db_1')) {
+          insertDatabaseBlock()
+        } else {
+          insertDatabaseBlock2()
+        }
+      }
     }
   ], [editor])
 
@@ -1535,7 +1568,17 @@ function App() {
         // Extract all block IDs from editor content
         const blockIds: string[] = []
         const traverse = (node: any) => {
-          if (node.type === 'buttonBlock' || node.type === 'timerBlock' || node.type === 'numberDisplayBlock' || node.type === 'formulaDisplayBlock' || node.type === 'toggleBlock' || node.type === 'inputBlock' || node.type === 'textLabelBlock') {
+          if (
+            node.type === 'buttonBlock' || 
+            node.type === 'timerBlock' || 
+            node.type === 'numberDisplayBlock' || 
+            node.type === 'formulaDisplayBlock' || 
+            node.type === 'toggleBlock' || 
+            node.type === 'inputBlock' || 
+            node.type === 'textLabelBlock' ||
+            node.type === 'historyChartBlock' ||
+            node.type === 'databaseBlock'
+          ) {
             if (node.attrs?.blockId) {
               blockIds.push(node.attrs.blockId)
             }
@@ -1681,12 +1724,31 @@ function App() {
           editor.getJSON().content?.forEach(traverse)
         }
 
-        const sourceDataType = getBlockDataType(sourceNodeType || '')
+        let sourceDataType = getBlockDataType(sourceNodeType || '')
         const targetDataType = getBlockDataType(targetNodeType || '')
+
+        if (sourceNodeType === 'databaseBlock') {
+          const srcState = store.get(blockRuntimeAtom(activeWire.sourceBlockId))
+          const mode = srcState?.outputMode || 'row_count'
+          if (mode === 'row_count') {
+            sourceDataType = 'number'
+          } else {
+            const col = (srcState?.columns || []).find((c: any) => c.name === mode)
+            if (col) {
+              if (col.type === 'number') sourceDataType = 'number'
+              else if (col.type === 'boolean') sourceDataType = 'boolean'
+              else sourceDataType = 'string'
+            } else {
+              sourceDataType = 'number'
+            }
+          }
+        }
 
         // Check if types are compatible
         let isCompatible = false
         if (sourceDataType === 'string' && targetDataType === 'string') isCompatible = true
+        else if (sourceDataType === 'number' && targetDataType === 'number') isCompatible = true
+        else if (sourceDataType === 'boolean' && targetDataType === 'boolean') isCompatible = true
         else if (sourceDataType === 'trigger' && targetDataType === 'number') isCompatible = true
         else if (sourceDataType === 'trigger' && targetDataType === 'boolean') isCompatible = true
 
@@ -2230,6 +2292,58 @@ function App() {
       history: [],
       backgroundColor: '#1e293b',
       textColor: '#ffffff'
+    })
+  }
+
+  function insertDatabaseBlock() {
+    if (!editor || blockExists('test_db_1')) return
+    editor.chain().focus('end').insertContent({
+      type: 'databaseBlock',
+      attrs: {
+        blockId: 'test_db_1'
+      }
+    }).run()
+    store.set(blockPositionAtom('test_db_1'), { x: 80, y: 440 })
+    store.set(blockRuntimeAtom('test_db_1'), {
+      value: 0,
+      visible: true,
+      disabled: false,
+      loading: false,
+      error: null,
+      columns: [
+        { name: 'Name', type: 'text' },
+        { name: 'Age', type: 'number' }
+      ],
+      rows: [],
+      outputMode: 'row_count',
+      backgroundColor: '#ffffff',
+      borderRadius: 8
+    })
+  }
+
+  function insertDatabaseBlock2() {
+    if (!editor || blockExists('test_db_2')) return
+    editor.chain().focus('end').insertContent({
+      type: 'databaseBlock',
+      attrs: {
+        blockId: 'test_db_2'
+      }
+    }).run()
+    store.set(blockPositionAtom('test_db_2'), { x: 300, y: 440 })
+    store.set(blockRuntimeAtom('test_db_2'), {
+      value: 0,
+      visible: true,
+      disabled: false,
+      loading: false,
+      error: null,
+      columns: [
+        { name: 'Name', type: 'text' },
+        { name: 'Age', type: 'number' }
+      ],
+      rows: [],
+      outputMode: 'row_count',
+      backgroundColor: '#ffffff',
+      borderRadius: 8
     })
   }
 

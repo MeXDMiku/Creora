@@ -120,6 +120,7 @@ code {
 [class^="node-textLabelBlock"],
 [class^="node-timerBlock"],
 [class^="node-historyChartBlock"],
+[class^="node-databaseBlock"],
 div[data-node-view-wrapper][class*="button-block-wrapper"],
 div[data-node-view-wrapper][class*="number-display-block-wrapper"],
 div[data-node-view-wrapper][class*="formula-display-block-wrapper"],
@@ -127,7 +128,8 @@ div[data-node-view-wrapper][class*="toggle-block-wrapper"],
 div[data-node-view-wrapper][class*="input-block-wrapper"],
 div[data-node-view-wrapper][class*="text-label-block-wrapper"],
 div[data-node-view-wrapper][class*="timer-block-wrapper"],
-div[data-node-view-wrapper][class*="history-chart-block-wrapper"] {
+div[data-node-view-wrapper][class*="history-chart-block-wrapper"],
+div[data-node-view-wrapper][class*="database-block-wrapper"] {
   height: 0 !important;
   overflow: visible !important;
   margin: 0 !important;
