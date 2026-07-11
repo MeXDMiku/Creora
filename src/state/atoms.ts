@@ -10,6 +10,24 @@ export function getBlockDefaultValue(identifier: string): any {
   return 0;
 }
 
+export function getBlockTypeDisplayName(nodeType: string): string {
+  const type = nodeType.toLowerCase();
+  if (type.includes('button')) return 'Button';
+  if (type.includes('number')) return 'Number Display';
+  if (type.includes('toggle')) return 'Toggle';
+  if (type.includes('input')) return 'Input';
+  if (type.includes('text') || type.includes('label')) return 'Text Label';
+  if (type.includes('formula')) return 'Formula';
+  if (type.includes('timer')) return 'Timer';
+  return 'Block';
+}
+
+export function isGarbageName(name: string | undefined | null): boolean {
+  if (!name || name.trim() === '') return true;
+  if (name.includes('·')) return true;
+  return false;
+}
+
 export const blockRuntimeAtom = atomFamily((blockId: string) =>
   atom<BlockRuntimeState>({
     value: getBlockDefaultValue(blockId),

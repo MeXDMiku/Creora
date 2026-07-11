@@ -3,7 +3,7 @@ import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
 import type { NodeViewProps } from '@tiptap/react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { executeWorkflow } from '../lib/bindingEngine';
-import { blockRuntimeAtom, activeWireAtom, snapTargetAtom, triggerSaveAtom, contextMenuAtom, getPortBadge } from '../state/atoms';
+import { blockRuntimeAtom, activeWireAtom, snapTargetAtom, triggerSaveAtom, contextMenuAtom, getPortBadge, getBlockTypeDisplayName } from '../state/atoms';
 import { useMemo, useRef, useState, useEffect, useCallback } from 'react';
 import { useBlockDrag } from '../hooks/useBlockDrag';
 
@@ -161,6 +161,21 @@ const TimerBlockComponent = (props: NodeViewProps) => {
       onMouseLeave={() => setIsHovered(false)}
       onContextMenu={onContextMenu}
     >
+      <div 
+        style={{ 
+          position: 'absolute',
+          top: '-16px',
+          left: '0',
+          fontSize: '10px', 
+          opacity: 0.6, 
+          color: '#cbd5e1', 
+          userSelect: 'none', 
+          fontWeight: 500,
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {runtimeState?.blockName || getBlockTypeDisplayName('timerBlock')}
+      </div>
       <div
         contentEditable={false}
         style={{

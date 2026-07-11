@@ -2,7 +2,7 @@ import { Node } from '@tiptap/core';
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
 import type { NodeViewProps } from '@tiptap/react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
-import { blockRuntimeAtom, activeWireAtom, snapTargetAtom, contextMenuAtom, getPortBadge } from '../state/atoms';
+import { blockRuntimeAtom, activeWireAtom, snapTargetAtom, contextMenuAtom, getPortBadge, getBlockTypeDisplayName } from '../state/atoms';
 import { useMemo, useRef, useState } from 'react';
 import { useBlockDrag } from '../hooks/useBlockDrag';
 
@@ -85,6 +85,21 @@ const NumberDisplayBlockComponent = (props: NodeViewProps) => {
       onMouseLeave={() => setIsHovered(false)}
       onContextMenu={onContextMenu}
     >
+      <div 
+        style={{ 
+          position: 'absolute',
+          top: '-16px',
+          left: '0',
+          fontSize: '10px', 
+          opacity: 0.6, 
+          color: '#cbd5e1', 
+          userSelect: 'none', 
+          fontWeight: 500,
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {runtimeState?.blockName || getBlockTypeDisplayName('numberDisplayBlock')}
+      </div>
       <div
         contentEditable={false}
         style={{

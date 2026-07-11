@@ -1,5 +1,5 @@
 import { useAtom, useSetAtom, useStore } from 'jotai'
-import { blockRuntimeAtom, triggerSaveAtom, formulasAtom } from '../state/atoms'
+import { blockRuntimeAtom, triggerSaveAtom, formulasAtom, getBlockTypeDisplayName } from '../state/atoms'
 import { recalculateAllFormulas } from '../lib/bindingEngine'
 import { useMemo, useState, useEffect } from 'react'
 
@@ -23,22 +23,12 @@ export default function FormulaDisplayBlockInspector({ blockId, editor }: { bloc
         typeName === 'formulaDisplayBlock' ||
         typeName === 'toggleBlock' || 
         typeName === 'inputBlock' || 
-        typeName === 'textLabelBlock'
+        typeName === 'textLabelBlock' ||
+        typeName === 'timerBlock'
       )) {
-        let label = ''
-        if (typeName === 'buttonBlock') {
-          label = `Button (${node.attrs.label || bId})`
-        } else if (typeName === 'numberDisplayBlock') {
-          label = `Number Display (${bId})`
-        } else if (typeName === 'formulaDisplayBlock') {
-          label = `Formula Display (${bId})`
-        } else if (typeName === 'toggleBlock') {
-          label = `Toggle (${bId})`
-        } else if (typeName === 'inputBlock') {
-          label = `Input (${bId})`
-        } else if (typeName === 'textLabelBlock') {
-          label = `Text Label (${bId})`
-        }
+        const runtime = store.get(blockRuntimeAtom(bId))
+        const name = runtime?.blockName || getBlockTypeDisplayName(typeName)
+        const label = `${name} (${bId})`
         list.push({ id: bId, type: typeName, label })
       }
     })
@@ -57,6 +47,20 @@ export default function FormulaDisplayBlockInspector({ blockId, editor }: { bloc
 
   return (
     <div>
+      <label style={{ display: 'block', marginBottom: '12px' }}>
+        Block Name
+        <input
+          type="text"
+          value={runtimeState.blockName || ''}
+          onChange={(e) => {
+            setRuntimeState(prev => ({ ...prev, blockName: e.target.value }))
+            triggerSave(prev => prev + 1)
+          }}
+          placeholder={getBlockTypeDisplayName('formulaDisplayBlock')}
+          style={{ display: 'block', marginTop: '4px', width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #ccc', boxSizing: 'border-box', background: '#f8fafc', color: '#0f172a', outline: 'none', fontSize: '13px' }}
+        />
+      </label>
+
       <label style={{ display: 'block', marginBottom: '8px' }}>
         Background Color
         <input

@@ -2,7 +2,7 @@ import { Node } from '@tiptap/core';
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
 import type { NodeViewProps } from '@tiptap/react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
-import { blockRuntimeAtom, activeWireAtom, contextMenuAtom, getPortBadge } from '../state/atoms';
+import { blockRuntimeAtom, activeWireAtom, contextMenuAtom, getPortBadge, getBlockTypeDisplayName } from '../state/atoms';
 import { useMemo, useRef, useState, useEffect, useCallback } from 'react';
 import { useBlockDrag } from '../hooks/useBlockDrag';
 
@@ -92,6 +92,21 @@ const FormulaDisplayBlockComponent = (props: NodeViewProps) => {
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
+      <div 
+        style={{ 
+          position: 'absolute',
+          top: '-16px',
+          left: '0',
+          fontSize: '10px', 
+          opacity: 0.6, 
+          color: '#cbd5e1', 
+          userSelect: 'none', 
+          fontWeight: 500,
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {runtimeState?.blockName || getBlockTypeDisplayName('formulaDisplayBlock')}
+      </div>
       <div
         contentEditable={false}
         style={{

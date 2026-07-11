@@ -56,6 +56,7 @@ export interface AnimationConfig {
 }
 
 export interface BlockProps {
+  blockName?: string;
   label?: string;
   placeholder?: string;
   src?: string;
@@ -113,6 +114,7 @@ export interface FormulaBinding {
 }
 
 export interface BlockRuntimeState {
+  blockName?: string;
   value: any;
   visible: boolean;
   disabled: boolean;

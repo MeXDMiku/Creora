@@ -144,3 +144,7 @@ div[data-node-view-wrapper][class*="text-label-block-wrapper"] {
   }
 }
 
+.ProseMirror:focus {
+  outline: none;
+}
+

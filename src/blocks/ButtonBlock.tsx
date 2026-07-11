@@ -3,7 +3,7 @@ import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
 import type { NodeViewProps } from '@tiptap/react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { executeWorkflow } from '../lib/bindingEngine';
-import { blockRuntimeAtom, activeWireAtom, snapTargetAtom, triggerSaveAtom, contextMenuAtom, getPortBadge, workflowsAtom } from '../state/atoms';
+import { blockRuntimeAtom, activeWireAtom, snapTargetAtom, triggerSaveAtom, contextMenuAtom, getPortBadge, workflowsAtom, getBlockTypeDisplayName } from '../state/atoms';
 import { useMemo, useRef, useState } from 'react';
 import { useBlockDrag } from '../hooks/useBlockDrag';
 
@@ -101,6 +101,21 @@ const ButtonBlockComponent = (props: NodeViewProps) => {
       onMouseLeave={() => setIsHovered(false)}
       onContextMenu={onContextMenu}
     >
+      <div 
+        style={{ 
+          position: 'absolute',
+          top: '-16px',
+          left: '0',
+          fontSize: '10px', 
+          opacity: 0.6, 
+          color: '#cbd5e1', 
+          userSelect: 'none', 
+          fontWeight: 500,
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {runtimeState?.blockName || getBlockTypeDisplayName('buttonBlock')}
+      </div>
       <div
         contentEditable={false}
         style={{

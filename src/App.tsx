@@ -2,7 +2,7 @@ import { useEffect, useRef, useCallback, useState, useMemo } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { useSetAtom, useAtom, useAtomValue, useStore } from 'jotai'
-import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom } from './state/atoms'
+import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName } from './state/atoms'
 import { ButtonBlock } from './blocks/ButtonBlock'
 import { NumberDisplayBlock } from './blocks/NumberDisplayBlock'
 import { TextLabelBlock } from './blocks/TextLabelBlock'
@@ -60,6 +60,7 @@ function Inspector({ editor }: { editor: any }) {
 }
 
 function ConnectionPopup({ editor }: { editor: any }) {
+  const store = useStore()
   const [pending, setPending] = useAtom(pendingConnectionAtom)
   const setConnections = useSetAtom(connectionsAtom)
   const setWorkflows = useSetAtom(workflowsAtom)
@@ -124,20 +125,9 @@ function ConnectionPopup({ editor }: { editor: any }) {
         typeName === 'timerBlock'
       )) {
         const dataType = getBlockDataType(typeName)
-        let label = ''
-        if (typeName === 'buttonBlock') {
-          label = `Button (${node.attrs.label || bId})`
-        } else if (typeName === 'numberDisplayBlock') {
-          label = `Number Display (${bId})`
-        } else if (typeName === 'toggleBlock') {
-          label = `Toggle (${bId})`
-        } else if (typeName === 'inputBlock') {
-          label = `Input (${bId})`
-        } else if (typeName === 'textLabelBlock') {
-          label = `Text Label (${bId})`
-        } else if (typeName === 'timerBlock') {
-          label = `Timer (${bId})`
-        }
+        const runtime = store.get(blockRuntimeAtom(bId))
+        const name = runtime?.blockName || getBlockTypeDisplayName(typeName)
+        const label = `${name} (${bId})`
         list.push({ id: bId, type: typeName, label, dataType })
       }
       if (node.content) {
@@ -778,6 +768,7 @@ function App() {
   const [contextMenu, setContextMenu] = useAtom(contextMenuAtom)
   const [connectionContextMenu, setConnectionContextMenu] = useAtom(connectionContextMenuAtom)
   const setSelectedBlockId = useSetAtom(selectedBlockIdAtom)
+  const allBlockIds = useAtomValue(allBlockIdsAtom)
 
   // Type mismatch notification state
   const [typeMismatch, setTypeMismatch] = useState<{
@@ -1026,6 +1017,7 @@ function App() {
           else if (typeName === 'textLabelBlock') type = 'text'
 
           const blockProps: BlockProps = {
+            blockName: runtime.blockName,
             label: node.attrs?.label,
             defaultValue: runtime.value
           }
@@ -1208,6 +1200,7 @@ function App() {
               contentList.push({ type: typeName, attrs })
               positions[b.id] = { x: b.x || 100, y: b.y || 100 }
               runtimeStates[b.id] = {
+                blockName: b.props?.blockName,
                 value: b.props?.defaultValue ?? '',
                 visible: b.styles?.opacity !== 0,
                 disabled: false,
@@ -1776,6 +1769,71 @@ function App() {
       saveToSupabase()
     }
   }, [triggerSaveValue, saveToSupabase])
+
+  // Automatically validate, correct garbage names, and assign clean auto-increment display names to blocks
+  useEffect(() => {
+    if (isLoading || !editor) return
+
+    const currentBlocks: { id: string; type: string }[] = []
+    editor.state.doc.descendants((node: any) => {
+      const bId = node.attrs?.blockId
+      const typeName = node.type.name
+      if (bId && (
+        typeName === 'buttonBlock' ||
+        typeName === 'numberDisplayBlock' ||
+        typeName === 'formulaDisplayBlock' ||
+        typeName === 'toggleBlock' ||
+        typeName === 'inputBlock' ||
+        typeName === 'textLabelBlock' ||
+        typeName === 'timerBlock'
+      )) {
+        currentBlocks.push({ id: bId, type: typeName })
+      }
+    })
+
+    let changed = false
+
+    currentBlocks.forEach((block) => {
+      const runtime = store.get(blockRuntimeAtom(block.id))
+      const currentName = runtime?.blockName
+
+      if (isGarbageName(currentName)) {
+        const baseDisplayName = getBlockTypeDisplayName(block.type)
+        
+        // Collect all numeric suffix indices taken by other blocks of this type
+        const takenNumbers = new Set<number>()
+        currentBlocks.forEach((b) => {
+          if (b.id === block.id) return
+          const r = store.get(blockRuntimeAtom(b.id))
+          const name = r?.blockName
+          if (name && !isGarbageName(name) && name.startsWith(baseDisplayName + ' ')) {
+            const numPart = name.slice(baseDisplayName.length + 1)
+            const num = parseInt(numPart, 10)
+            if (!isNaN(num)) {
+              takenNumbers.add(num)
+            }
+          }
+        })
+
+        // Find the lowest positive integer starting at 1
+        let candidate = 1
+        while (takenNumbers.has(candidate)) {
+          candidate++
+        }
+
+        const newName = `${baseDisplayName} ${candidate}`
+        store.set(blockRuntimeAtom(block.id), (prev) => ({
+          ...prev,
+          blockName: newName
+        }))
+        changed = true
+      }
+    })
+
+    if (changed) {
+      setTriggerSave(prev => prev + 1)
+    }
+  }, [allBlockIds, editor, isLoading, store, setTriggerSave])
 
   // Save when workflows, connections, or formulas change
   useEffect(() => {

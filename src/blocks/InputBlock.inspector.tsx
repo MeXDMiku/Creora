@@ -1,5 +1,5 @@
 import { useAtom, useSetAtom } from 'jotai'
-import { blockRuntimeAtom, triggerSaveAtom } from '../state/atoms'
+import { blockRuntimeAtom, triggerSaveAtom, getBlockTypeDisplayName } from '../state/atoms'
 
 export default function InputBlockInspector({ blockId }: { blockId: string; editor: any }) {
   const [runtimeState, setRuntimeState] = useAtom(blockRuntimeAtom(blockId))
@@ -7,6 +7,20 @@ export default function InputBlockInspector({ blockId }: { blockId: string; edit
 
   return (
     <div>
+      <label style={{ display: 'block', marginBottom: '12px' }}>
+        Block Name
+        <input
+          type="text"
+          value={runtimeState.blockName || ''}
+          onChange={(e) => {
+            setRuntimeState(prev => ({ ...prev, blockName: e.target.value }))
+            triggerSave(prev => prev + 1)
+          }}
+          placeholder={getBlockTypeDisplayName('inputBlock')}
+          style={{ display: 'block', marginTop: '4px', width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #ccc', boxSizing: 'border-box', background: '#f8fafc', color: '#0f172a', outline: 'none', fontSize: '13px' }}
+        />
+      </label>
+
       <label style={{ display: 'block', marginBottom: '8px' }}>
         Background Color
         <input

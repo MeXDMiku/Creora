@@ -171,43 +171,42 @@ export function executeWorkflow(
 
 export function evaluateFormula(formula: string, scope: Record<string, any>): number {
   if (!formula || formula.trim() === '') return 0;
-  try {
-    const ast = jsep(formula);
-    const evalNode = (node: any): any => {
-      switch (node.type) {
-        case 'Literal':
-          return Number(node.value);
-        case 'Identifier':
-          const val = scope[node.name];
-          return val !== undefined ? Number(val) : 0;
-        case 'UnaryExpression': {
-          const arg = evalNode(node.argument);
-          if (node.operator === '-') return -arg;
-          if (node.operator === '+') return +arg;
-          return arg;
+  
+  const ast = jsep(formula);
+  const evalNode = (node: any): any => {
+    switch (node.type) {
+      case 'Literal':
+        return Number(node.value);
+      case 'Identifier':
+        if (!(node.name in scope)) {
+          throw new Error(`Referenced block "${node.name}" does not exist`);
         }
-        case 'BinaryExpression': {
-          const left = evalNode(node.left);
-          const right = evalNode(node.right);
-          switch (node.operator) {
-            case '+': return left + right;
-            case '-': return left - right;
-            case '*': return left * right;
-            case '/': return right !== 0 ? left / right : 0;
-            case '%': return right !== 0 ? left % right : 0;
-            default: return 0;
-          }
-        }
-        default:
-          return 0;
+        const val = scope[node.name];
+        return val !== undefined ? Number(val) : 0;
+      case 'UnaryExpression': {
+        const arg = evalNode(node.argument);
+        if (node.operator === '-') return -arg;
+        if (node.operator === '+') return +arg;
+        return arg;
       }
-    };
-    const result = evalNode(ast);
-    return isNaN(result) ? 0 : result;
-  } catch (e) {
-    console.error('Error evaluating formula:', formula, e);
-    return 0;
-  }
+      case 'BinaryExpression': {
+        const left = evalNode(node.left);
+        const right = evalNode(node.right);
+        switch (node.operator) {
+          case '+': return left + right;
+          case '-': return left - right;
+          case '*': return left * right;
+          case '/': return right !== 0 ? left / right : 0;
+          case '%': return right !== 0 ? left % right : 0;
+          default: return 0;
+        }
+      }
+      default:
+        return 0;
+    }
+  };
+  const result = evalNode(ast);
+  return isNaN(result) ? 0 : result;
 }
 
 export function recalculateAllFormulas(store: any) {
@@ -232,15 +231,28 @@ export function recalculateAllFormulas(store: any) {
   for (const binding of formulas) {
     // Only calculate if the target block exists
     if (allBlockIds.includes(binding.targetBlockId)) {
-      const calculatedValue = evaluateFormula(binding.formula, scope);
       const targetAtom = blockRuntimeAtom(binding.targetBlockId);
       const currentTargetState = store.get(targetAtom);
 
-      if (currentTargetState.value !== calculatedValue) {
-        store.set(targetAtom, {
-          ...currentTargetState,
-          value: calculatedValue,
-        });
+      try {
+        const calculatedValue = evaluateFormula(binding.formula, scope);
+        if (currentTargetState.value !== calculatedValue || currentTargetState.error !== null) {
+          store.set(targetAtom, {
+            ...currentTargetState,
+            value: calculatedValue,
+            error: null,
+          });
+        }
+      } catch (err: any) {
+        console.error('Error evaluating formula for block:', binding.targetBlockId, err);
+        const errMsg = err?.message || 'Error';
+        if (currentTargetState.value !== 'Error' || currentTargetState.error !== errMsg) {
+          store.set(targetAtom, {
+            ...currentTargetState,
+            value: 'Error',
+            error: errMsg,
+          });
+        }
       }
     }
   }
