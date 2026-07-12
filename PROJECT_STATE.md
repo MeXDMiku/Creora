@@ -16,6 +16,8 @@ All blocks are implemented as custom TipTap nodes in `src/blocks/` and render th
 | [`TextLabelBlock.tsx`](file:///d:/A/src/blocks/TextLabelBlock.tsx) | `textLabelBlock` | `string` | **Both** (Left input: string/text, Right output: string/text) | Background Color, Border Radius (0-24px slider), Opacity (0-100% slider), Width (px), Text Color, Font Size (px) |
 | [`ToggleBlock.tsx`](file:///d:/A/src/blocks/ToggleBlock.tsx) | `toggleBlock` | `boolean` | **Both** (Left input: boolean, Right output: boolean) | Background Color, Border Radius (0-24px slider), Opacity (0-100% slider), Width (px) |
 | [`TimerBlock.tsx`](file:///d:/A/src/blocks/TimerBlock.tsx) | `timerBlock` | `trigger` | **Both** (Left input: trigger, Right output: trigger) | Mode (Dropdown), Duration (Number), AutoStart (Checkbox), Background Color, Border Radius, Opacity, Width, Font Size, Text Color |
+| [`HistoryChartBlock.tsx`](file:///d:/A/src/blocks/HistoryChartBlock.tsx) | `historyChartBlock` | `unknown` | **Left Port Only** (Left input: watch block) | Track this block (Dropdown list of blocks), Background Color, Text Color |
+| [`DatabaseBlock.tsx`](file:///d:/A/src/blocks/DatabaseBlock.tsx) | `databaseBlock` | `database` | **Both** (Left input: trigger, Right output: dynamic mode value) | Columns Definition (Name + Type dropdown), Output Mode picker, standard background/border/opacity styling controls |
 
 ---
 
@@ -29,10 +31,10 @@ All blocks are implemented as custom TipTap nodes in `src/blocks/` and render th
   * **Mechanism:** Clicking an output port sets the `activeWireAtom`. Snaps to input ports within a 20px radius. Snapped target is held in `snapTargetAtom`. Drawing a valid wire opens the `ConnectionPopup` at target coordinates.
 * **Wire Type-checking**
   * **Implementation:** `src/App.tsx` (`onPointerUp` snap target resolution) and `src/state/atoms.ts` (`getBlockDataType` and `getPortBadge`).
-  * **Mechanism:** On connection, checks if types are compatible. `string -> string` (compatible), `trigger -> number` (compatible), and `trigger -> boolean` (compatible) are allowed. Mismatches display a tooltip overlay notifying the user and auto-dismiss after 2 seconds.
+  * **Mechanism:** On connection, checks if types are compatible. `string -> string` (compatible), `trigger -> number` (compatible), `trigger -> boolean` (compatible), and `trigger -> database` (compatible) are allowed. Mismatches display a tooltip overlay notifying the user and auto-dismiss after 2 seconds.
 * **Conditional Workflows**
   * **Implementation:** `src/lib/bindingEngine.ts` (execution flow) and `src/App.tsx` (configuration creation in `ConnectionPopup`).
-  * **Mechanism:** Evaluates matched triggers. Conditions can check another block's value with operators: `is ON`, `is OFF`, `equals`, `notEquals`, `greaterThan`, `lessThan`, `contains`, `isEmpty`. If checks pass, executes steps like `increment`/`decrement` (obeying min/max values), `set` (with `__sourceValue__` support for mirror connections), `toggle`, `setVisible`, and `setHidden`.
+  * **Mechanism:** Evaluates matched triggers. Conditions can check another block's value with operators. If checks pass, executes steps like `increment`/`decrement`, `set` (with `__sourceValue__` support), `toggle`, `setVisible`, `setHidden`, `addRow`, `updateRow`, and `deleteRow`.
 * **Supabase Persistence**
   * **Implementation:** `src/lib/supabase.ts` (Supabase client instance) and `src/App.tsx` (`loadPage` & `saveToSupabase` functions).
   * **Mechanism:** Pages are saved under a hardcoded `PAGE_ID` (`00000000-0000-0000-0000-000000000001`). Documents are saved inside a `blocks` payload holding TipTap `documentContent` JSON, block `positions`, Jotai `runtimeStates`, and canvas `connections`. Updates are debounced by 500ms.
@@ -41,7 +43,16 @@ All blocks are implemented as custom TipTap nodes in `src/blocks/` and render th
   * **Mechanism:** Triggers on `contextmenu` events. Allows users to "Delete Block" (removing the node, removing Jotai state instances, cleaning up connections/workflows) or "Disconnect all wires".
 * **Slash Menu Insertion**
   * **Implementation:** `src/App.tsx` (`commands` list, `filteredCommands` list, `handleSelectCommand`, and the keydown listener in `editorProps`).
-  * **Mechanism:** Pressing `/` opens a drop-down select menu with options to insert Button, Number Display, Toggle, Input, or Text Label blocks. Uses standard navigation (ArrowUp/ArrowDown to select, Enter to confirm, Escape to cancel).
+  * **Mechanism:** Pressing `/` opens a drop-down select menu with options to insert Button, Number Display, Toggle, Input, Text Label, History Chart, or Database Table blocks. Uses standard navigation.
+* **Chained Formula Recalculation Loop**
+  * **Implementation:** `src/lib/bindingEngine.ts` (`recalculateAllFormulas`).
+  * **Mechanism:** Performs a double-pass variable scope evaluation to resolve one-level deep formula chaining within the same execution frame.
+* **History Chart Sliding Window**
+  * **Implementation:** `src/lib/bindingEngine.ts` (`recalculateAllFormulas`).
+  * **Mechanism:** Watches a target block's value changes, appends them to a sliding array, and caps the history at 20 entries maximum.
+* **Database Block Persistence**
+  * **Implementation:** `src/blocks/DatabaseBlock.tsx` & `src/lib/bindingEngine.ts`.
+  * **Mechanism:** Cell updates are debounced by 500ms and synced to a dedicated Supabase table `database_rows`. Row additions/deletions update local state and Supabase immediately.
 
 ---
 
@@ -59,13 +70,14 @@ All blocks are implemented as custom TipTap nodes in `src/blocks/` and render th
    * When connecting an `InputBlock` to a `TextLabelBlock` (string-to-string), the connection popup is bypassed. A workflow step is immediately created with a target action of `set` and a payload value of `'__sourceValue__'`.
 5. **No SQL/Direct Expression Evaluation**
    * In compliance with architecture rule 7/13, no direct SQL query or JavaScript `eval` is used. Conditional checks use hardcoded operator cases, and direct values use the binding engine parser.
+6. **Update Row Verification Status**
+   * Update Row is implemented but NOT fully verified — testing suggested a possible coupling between which column is used as the match matcher and which column's new value actually gets applied, not yet confirmed or resolved. Treat as unverified until revisited.
 
 ---
 
 ## What Does NOT Exist Yet
 
 The following concepts have been discussed but are **NOT** implemented in the codebase yet:
-* **Database Blocks:** No block is capable of editing rows or listing databases; schemas defined in the types exist conceptually but have no renderer components.
 * **Publishing:** The published site renderer (`Rule 8`) does not exist yet. Only the `EDITOR` (the interactive canvas) is implemented.
 * **Desktop App:** The codebase is purely a web application and lacks desktop environment wrappers.
 * **AI Integration:** No AI tools or prompt widgets are implemented in the UI.
@@ -88,7 +100,11 @@ d:/A/src/
 │   ├── TextLabelBlock.tsx  # String label block displaying value text.
 │   ├── ToggleBlock.tsx     # Boolean switch block.
 │   ├── TimerBlock.tsx      # Trigger block representing a ticking timer.
-│   └── TimerBlock.inspector.tsx # Inspector configurations for TimerBlock.
+│   ├── TimerBlock.inspector.tsx # Inspector configurations for TimerBlock.
+│   ├── HistoryChartBlock.tsx # Chart block graphing tracked block history.
+│   ├── HistoryChartBlock.inspector.tsx # Inspector configurations for HistoryChartBlock.
+│   ├── DatabaseBlock.tsx   # Supabase-backed datastore table block.
+│   └── DatabaseBlock.inspector.tsx # Inspector configurations for DatabaseBlock.
 ├── components/
 │   └── WireOverlay.tsx     # Renders the SVG paths for connections between active block ports.
 ├── hooks/
