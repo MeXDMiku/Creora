@@ -138,14 +138,14 @@ div[data-node-view-wrapper][class*="database-block-wrapper"] {
 
 /* Decorative Canvas Background Dot Grid Pattern */
 #editor-container {
-  background-color: #f9fafb;
+  background-color: var(--bg);
   background-image: radial-gradient(#e5e7eb 1.2px, transparent 1.2px);
   background-size: 20px 20px;
 }
 
 @media (prefers-color-scheme: dark) {
   #editor-container {
-    background-color: #111216;
+    background-color: var(--bg);
     background-image: radial-gradient(#2e303a 1.2px, transparent 1.2px);
   }
 }

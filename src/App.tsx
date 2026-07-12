@@ -12,6 +12,7 @@ import { FormulaDisplayBlock } from './blocks/FormulaDisplayBlock'
 import { TimerBlock } from './blocks/TimerBlock'
 import { HistoryChartBlock } from './blocks/HistoryChartBlock'
 import { DatabaseBlock } from './blocks/DatabaseBlock'
+import { ListBlock } from './blocks/ListBlock'
 import { WireOverlay } from './components/WireOverlay'
 import { supabase } from './lib/supabase'
 import { recalculateAllFormulas } from './lib/bindingEngine'
@@ -965,6 +966,7 @@ function App() {
       TimerBlock,
       HistoryChartBlock,
       DatabaseBlock,
+      ListBlock,
     ],
     content: '',
     onUpdate: ({ editor }) => {
@@ -983,7 +985,8 @@ function App() {
           typeName === 'textLabelBlock' ||
           typeName === 'timerBlock' ||
           typeName === 'historyChartBlock' ||
-          typeName === 'databaseBlock'
+          typeName === 'databaseBlock' ||
+          typeName === 'listBlock'
         ) {
           if (node.attrs?.blockId) {
             blockIds.push(node.attrs.blockId)
@@ -1137,7 +1140,9 @@ function App() {
         typeName === 'inputBlock' || 
         typeName === 'textLabelBlock' ||
         typeName === 'timerBlock' ||
-        typeName === 'historyChartBlock'
+        typeName === 'historyChartBlock' ||
+        typeName === 'databaseBlock' ||
+        typeName === 'listBlock'
       ) {
         const blockId = node.attrs?.blockId
         if (blockId) {
@@ -1162,6 +1167,8 @@ function App() {
           else if (typeName === 'inputBlock') type = 'input'
           else if (typeName === 'textLabelBlock') type = 'text'
           else if (typeName === 'historyChartBlock') type = 'chart'
+          else if (typeName === 'databaseBlock') type = 'database'
+          else if (typeName === 'listBlock') type = 'list'
 
           const blockProps: BlockProps = {
             blockName: runtime.blockName,
@@ -1344,6 +1351,8 @@ function App() {
               typeName = 'historyChartBlock'
             } else if (b.type === 'database') {
               typeName = 'databaseBlock'
+            } else if (b.type === 'list') {
+              typeName = 'listBlock'
             } else if (b.type === 'number') {
               const hasFormula = (importedPage.formulas || []).some((f: any) => f.targetBlockId === b.id)
               typeName = hasFormula ? 'formulaDisplayBlock' : 'numberDisplayBlock'
@@ -1428,7 +1437,8 @@ function App() {
               node.type.name === 'inputBlock' || 
               node.type.name === 'textLabelBlock' ||
               node.type.name === 'historyChartBlock' ||
-              node.type.name === 'databaseBlock'
+              node.type.name === 'databaseBlock' ||
+              node.type.name === 'listBlock'
             ) && node.attrs.blockId === blockId
           ) {
             foundPos = pos
@@ -1674,6 +1684,28 @@ function App() {
           insertDatabaseBlock2()
         }
       }
+    },
+    {
+      id: 'list',
+      title: 'List',
+      description: 'Insert a list block that displays cards for database rows',
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="8" y1="6" x2="21" y2="6" />
+          <line x1="8" y1="12" x2="21" y2="12" />
+          <line x1="8" y1="18" x2="21" y2="18" />
+          <line x1="3" y1="6" x2="3.01" y2="6" />
+          <line x1="3" y1="12" x2="3.01" y2="12" />
+          <line x1="3" y1="18" x2="3.01" y2="18" />
+        </svg>
+      ),
+      action: () => {
+        if (!blockExists('test_list_1')) {
+          insertListBlock()
+        } else {
+          insertListBlock2()
+        }
+      }
     }
   ], [editor])
 
@@ -1740,7 +1772,8 @@ function App() {
             node.type === 'inputBlock' || 
             node.type === 'textLabelBlock' ||
             node.type === 'historyChartBlock' ||
-            node.type === 'databaseBlock'
+            node.type === 'databaseBlock' ||
+            node.type === 'listBlock'
           ) {
             if (node.attrs?.blockId) {
               blockIds.push(node.attrs.blockId)
@@ -2016,7 +2049,9 @@ function App() {
         typeName === 'inputBlock' ||
         typeName === 'textLabelBlock' ||
         typeName === 'timerBlock' ||
-        typeName === 'historyChartBlock'
+        typeName === 'historyChartBlock' ||
+        typeName === 'databaseBlock' ||
+        typeName === 'listBlock'
       )) {
         currentBlocks.push({ id: bId, type: typeName })
       }
@@ -2366,7 +2401,7 @@ function App() {
         blockId: 'test_frm_2'
       }
     }).run()
-    store.set(blockPositionAtom('test_frm_2'), { x: 300, y: 440 })
+    store.set(blockPositionAtom('test_frm_2'), { x: 300, y: 280 })
   }
 
   function insertTimerBlock() {
@@ -2377,7 +2412,7 @@ function App() {
         blockId: 'test_tmr_1'
       }
     }).run()
-    store.set(blockPositionAtom('test_tmr_1'), { x: 80, y: 340 })
+    store.set(blockPositionAtom('test_tmr_1'), { x: 80, y: 280 })
     store.set(blockRuntimeAtom('test_tmr_1'), {
       value: false,
       visible: true,
@@ -2400,7 +2435,7 @@ function App() {
         blockId: 'test_tmr_2'
       }
     }).run()
-    store.set(blockPositionAtom('test_tmr_2'), { x: 300, y: 340 })
+    store.set(blockPositionAtom('test_tmr_2'), { x: 300, y: 280 })
     store.set(blockRuntimeAtom('test_tmr_2'), {
       value: false,
       visible: true,
@@ -2423,7 +2458,7 @@ function App() {
         blockId: 'test_chart_1'
       }
     }).run()
-    store.set(blockPositionAtom('test_chart_1'), { x: 300, y: 340 })
+    store.set(blockPositionAtom('test_chart_1'), { x: 300, y: 180 })
     store.set(blockRuntimeAtom('test_chart_1'), {
       value: 0,
       visible: true,
@@ -2445,7 +2480,7 @@ function App() {
         blockId: 'test_chart_2'
       }
     }).run()
-    store.set(blockPositionAtom('test_chart_2'), { x: 300, y: 440 })
+    store.set(blockPositionAtom('test_chart_2'), { x: 300, y: 280 })
     store.set(blockRuntimeAtom('test_chart_2'), {
       value: 0,
       visible: true,
@@ -2467,7 +2502,7 @@ function App() {
         blockId: 'test_db_1'
       }
     }).run()
-    store.set(blockPositionAtom('test_db_1'), { x: 80, y: 440 })
+    store.set(blockPositionAtom('test_db_1'), { x: 80, y: 180 })
     store.set(blockRuntimeAtom('test_db_1'), {
       value: 0,
       visible: true,
@@ -2493,7 +2528,7 @@ function App() {
         blockId: 'test_db_2'
       }
     }).run()
-    store.set(blockPositionAtom('test_db_2'), { x: 300, y: 440 })
+    store.set(blockPositionAtom('test_db_2'), { x: 300, y: 280 })
     store.set(blockRuntimeAtom('test_db_2'), {
       value: 0,
       visible: true,
@@ -2511,11 +2546,70 @@ function App() {
     })
   }
 
+  function insertListBlock() {
+    if (!editor || blockExists('test_list_1')) return
+    editor.chain().focus('end').insertContent({
+      type: 'listBlock',
+      attrs: {
+        blockId: 'test_list_1'
+      }
+    }).run()
+    store.set(blockPositionAtom('test_list_1'), { x: 80, y: 180 })
+    store.set(blockRuntimeAtom('test_list_1'), {
+      value: '',
+      visible: true,
+      disabled: false,
+      loading: false,
+      error: null,
+      trackedBlockId: '',
+      backgroundColor: '#ffffff',
+      textColor: '#0f172a',
+      borderRadius: 8
+    })
+  }
+
+  function insertListBlock2() {
+    if (!editor || blockExists('test_list_2')) return
+    editor.chain().focus('end').insertContent({
+      type: 'listBlock',
+      attrs: {
+        blockId: 'test_list_2'
+      }
+    }).run()
+    store.set(blockPositionAtom('test_list_2'), { x: 300, y: 280 })
+    store.set(blockRuntimeAtom('test_list_2'), {
+      value: '',
+      visible: true,
+      disabled: false,
+      loading: false,
+      error: null,
+      trackedBlockId: '',
+      backgroundColor: '#ffffff',
+      textColor: '#0f172a',
+      borderRadius: 8
+    })
+  }
+
 
 
   return (
-    <div className="app-container" style={{ display: 'flex', fontFamily: 'sans-serif', minHeight: '100vh' }}>
-      <div style={{ flex: 1, padding: '24px' }}>
+    <div className="app-container" style={{ display: 'flex', fontFamily: 'sans-serif', minHeight: '100vh', background: 'var(--bg)' }}>
+      <div
+        id="editor-container"
+        ref={canvasRef}
+        style={{
+          flex: 1,
+          padding: '24px',
+          position: 'relative',
+          minHeight: 'calc(100vh - 48px)',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'visible',
+        }}
+        onPointerMove={onCanvasPointerMove}
+        onPointerUp={onCanvasPointerUp}
+        onPointerDown={onCanvasPointerDown}
+      >
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '16px' }}>
           <h1 style={{ margin: 0 }}>Creora Playground</h1>
           {isLoading ? (
@@ -2617,15 +2711,7 @@ function App() {
         )}
 
 
-        <div
-          id="editor-container"
-          ref={canvasRef}
-          style={{ position: 'relative', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '16px', height: '500px', overflow: 'hidden' }}
-          onPointerMove={onCanvasPointerMove}
-          onPointerUp={onCanvasPointerUp}
-          onPointerDown={onCanvasPointerDown}
-        >
-          <EditorContent editor={editor} />
+          <EditorContent editor={editor} style={{ flex: 1, position: 'relative', pointerEvents: activeWire ? 'none' : 'auto' }} />
           <WireOverlay />
           <ConnectionPopup editor={editor} />
           <ContextMenu editor={editor} deleteBlock={deleteBlock} />
@@ -2708,7 +2794,6 @@ function App() {
               })}
             </div>
           )}
-        </div>
       </div>
       <Inspector editor={editor} />
     </div>

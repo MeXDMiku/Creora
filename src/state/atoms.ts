@@ -8,6 +8,7 @@ export function getBlockDefaultValue(identifier: string): any {
   if (id.includes('inp') || id.includes('input') || id.includes('lbl') || id.includes('label')) return '';
   if (id.includes('tmr') || id.includes('timer')) return false;
   if (id.includes('db') || id.includes('database')) return 0;
+  if (id.includes('list')) return '';
   return 0;
 }
 
@@ -22,6 +23,7 @@ export function getBlockTypeDisplayName(nodeType: string): string {
   if (type.includes('timer')) return 'Timer';
   if (type.includes('history') || type.includes('chart')) return 'History Chart';
   if (type.includes('database')) return 'Database';
+  if (type.includes('list')) return 'List';
   return 'Block';
 }
 
@@ -34,6 +36,7 @@ export function isGarbageName(name: string | undefined | null): boolean {
 export const blockRuntimeAtom = atomFamily((blockId: string) => {
   const isChart = blockId.toLowerCase().includes('chart') || blockId.toLowerCase().includes('history');
   const isDb = blockId.toLowerCase().includes('db') || blockId.toLowerCase().includes('database');
+  const isList = blockId.toLowerCase().includes('list');
   return atom<BlockRuntimeState>({
     value: getBlockDefaultValue(blockId),
     visible: true,
@@ -41,6 +44,7 @@ export const blockRuntimeAtom = atomFamily((blockId: string) => {
     loading: false,
     error: null,
     ...(isChart ? { history: [], trackedBlockId: '' } : {}),
+    ...(isList ? { trackedBlockId: '' } : {}),
     ...(isDb ? {
       columns: [
         { name: 'Name', type: 'text' },
@@ -126,6 +130,7 @@ export function getBlockDataType(nodeType: string): BlockDataType {
     case 'textLabelBlock': return 'string';
     case 'historyChartBlock': return 'unknown';
     case 'databaseBlock': return 'database';
+    case 'listBlock': return 'unknown';
     default: return 'unknown';
   }
 }
@@ -155,7 +160,8 @@ export function getCanvasBlocks(editor: any, store: any, excludeBlockId?: string
       typeName === 'textLabelBlock' ||
       typeName === 'timerBlock' ||
       typeName === 'historyChartBlock' ||
-      typeName === 'databaseBlock'
+      typeName === 'databaseBlock' ||
+      typeName === 'listBlock'
     )) {
       const dataType = getBlockDataType(typeName);
       const runtime = store.get(blockRuntimeAtom(bId));

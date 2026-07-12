@@ -612,5 +612,38 @@ export function recalculateAllFormulas(store: any) {
       }
     }
   }
+
+  // 4. Update all List blocks from Supabase
+  for (const blockId of allBlockIds) {
+    if (blockId.toLowerCase().includes('list')) {
+      const listAtom = blockRuntimeAtom(blockId);
+      const listState = store.get(listAtom);
+      const trackedId = listState?.trackedBlockId;
+      if (trackedId) {
+        supabase
+          .from('database_rows')
+          .select('*')
+          .eq('database_block_id', trackedId)
+          .order('created_at', { ascending: true })
+          .then(({ data, error }: any) => {
+            if (error) {
+              console.warn('[ListBlock recalculate] Supabase fetch error:', error.message);
+              return;
+            }
+            if (data) {
+              const parsedRows = data.map((item: any) => ({
+                id: item.id,
+                ...item.row_data
+              }));
+              const currentListState = store.get(listAtom);
+              store.set(listAtom, {
+                ...currentListState,
+                rows: parsedRows
+              });
+            }
+          });
+      }
+    }
+  }
 }
 
