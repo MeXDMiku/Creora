@@ -6,7 +6,7 @@ export type BlockType =
 export type ActionType =
   | 'increment' | 'decrement' | 'set' | 'toggle' | 'reset'
   | 'setVisible' | 'setHidden' | 'navigate'
-  | 'addRow' | 'deleteRow' | 'updateField'
+  | 'addRow' | 'updateRow' | 'deleteRow' | 'updateField'
   | 'callAPI' | 'playAnimation' | 'submitForm';
 
 export type TriggerEvent =
@@ -100,6 +100,8 @@ export interface WorkflowStep {
   fieldId?: string;
   condition: ConditionConfig | null;
   mappings?: Record<string, { source: 'fixed' | 'block'; value: string }>;
+  matchColumn?: string;
+  matchValue?: { source: 'fixed' | 'block'; value: string };
 }
 
 export interface Workflow {

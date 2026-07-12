@@ -112,6 +112,9 @@ function ConnectionPopup({ editor }: { editor: any }) {
   const databaseColumns = targetState?.columns || []
 
   const [mappings, setMappings] = useState<Record<string, { source: 'fixed' | 'block'; value: string }>>({})
+  const [matchColumn, setMatchColumn] = useState<string>('')
+  const [matchValueSource, setMatchValueSource] = useState<'fixed' | 'block'>('fixed')
+  const [matchValueVal, setMatchValueVal] = useState<string>('')
 
   useEffect(() => {
     if (isDatabaseBlock && databaseColumns.length > 0) {
@@ -120,6 +123,10 @@ function ConnectionPopup({ editor }: { editor: any }) {
         initialMappings[col.name] = { source: 'fixed', value: '' }
       })
       setMappings(initialMappings)
+
+      if (!matchColumn || !databaseColumns.some((c: any) => c.name === matchColumn)) {
+        setMatchColumn(databaseColumns[0].name)
+      }
     }
   }, [isDatabaseBlock, databaseColumns])
 
@@ -271,8 +278,17 @@ function ConnectionPopup({ editor }: { editor: any }) {
         stepStep.action = 'toggle'
       }
     } else if (isDatabaseBlock) {
-      stepStep.action = 'addRow'
-      stepStep.mappings = mappings
+      stepStep.action = action
+      if (action === 'addRow' || action === 'updateRow') {
+        stepStep.mappings = mappings
+      }
+      if (action === 'updateRow' || action === 'deleteRow') {
+        stepStep.matchColumn = matchColumn
+        stepStep.matchValue = {
+          source: matchValueSource,
+          value: matchValueVal || (canvasBlocks[0]?.id || '')
+        }
+      }
     } else {
       if (action === 'reset') {
         stepStep.action = 'reset'
@@ -356,6 +372,8 @@ function ConnectionPopup({ editor }: { editor: any }) {
           ) : isDatabaseBlock ? (
             <>
               <option value="addRow">Add Row</option>
+              <option value="updateRow">Update Row</option>
+              <option value="deleteRow">Delete Row</option>
             </>
           ) : (
             <>
@@ -394,7 +412,66 @@ function ConnectionPopup({ editor }: { editor: any }) {
         </label>
       )}
 
-      {isDatabaseBlock && action === 'addRow' && (
+      {isDatabaseBlock && (action === 'updateRow' || action === 'deleteRow') && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', border: '1px solid #94a3b8', padding: '8px', borderRadius: '6px', background: '#f1f5f9', marginBottom: '8px' }}>
+          <div style={{ fontWeight: 600, color: '#334155', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Find Matcher Row</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '11px', fontWeight: 500, color: '#475569' }}>
+              Where Column
+              <select
+                value={matchColumn}
+                onChange={(e) => setMatchColumn(e.target.value)}
+                style={{ ...selectStyle, padding: '2px 24px 2px 6px', fontSize: '11px', height: '24px' }}
+              >
+                {databaseColumns.map((col: any) => (
+                  <option key={col.name} value={col.name}>
+                    {col.name} ({col.type})
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '4px', marginTop: '2px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 500, color: '#475569' }}>Equals Value</span>
+              <select
+                value={matchValueSource}
+                onChange={(e) => {
+                  setMatchValueSource(e.target.value as any);
+                  setMatchValueVal(e.target.value === 'fixed' ? '' : (canvasBlocks[0]?.id || ''));
+                }}
+                style={{ ...selectStyle, width: '90px', padding: '2px 20px 2px 6px', fontSize: '10px', height: '22px' }}
+              >
+                <option value="fixed">Fixed value</option>
+                <option value="block">From block</option>
+              </select>
+            </div>
+
+            {matchValueSource === 'fixed' ? (
+              <input
+                type="text"
+                value={matchValueVal}
+                onChange={(e) => setMatchValueVal(e.target.value)}
+                placeholder="Enter value to match"
+                style={{ ...inputStyle, padding: '4px 6px', fontSize: '11px', height: '24px' }}
+              />
+            ) : (
+              <select
+                value={matchValueVal}
+                onChange={(e) => setMatchValueVal(e.target.value)}
+                style={{ ...selectStyle, padding: '2px 24px 2px 6px', fontSize: '11px', height: '24px' }}
+              >
+                {canvasBlocks.map(b => (
+                  <option key={b.id} value={b.id}>
+                    {b.label}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+        </div>
+      )}
+
+      {isDatabaseBlock && (action === 'addRow' || action === 'updateRow') && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '180px', overflowY: 'auto', paddingRight: '4px' }}>
           <div style={{ fontWeight: 600, color: '#475569', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Column Mappings</div>
           {databaseColumns.map((col: any) => {

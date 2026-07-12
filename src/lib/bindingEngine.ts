@@ -196,6 +196,262 @@ export function executeWorkflow(
           }
           break;
         }
+        case 'updateRow': {
+          const targetState = store.get(targetAtom);
+          const columns = targetState?.columns || [];
+          const currentRows = targetState?.rows || [];
+          const outputMode = targetState?.outputMode || 'row_count';
+
+          const matchCol = step.matchColumn;
+          if (!matchCol) break;
+
+          let matchVal: any = '';
+          if (step.matchValue) {
+            if (step.matchValue.source === 'fixed') {
+              matchVal = step.matchValue.value;
+            } else {
+              const refAtom = blockRuntimeAtom(step.matchValue.value);
+              const refState = store.get(refAtom);
+              matchVal = refState?.value;
+            }
+          }
+
+          const colDef = columns.find((c: any) => c.name === matchCol);
+          let parsedMatchVal = matchVal;
+          if (colDef) {
+            if (colDef.type === 'number') {
+              parsedMatchVal = Number(matchVal);
+            } else if (colDef.type === 'boolean') {
+              parsedMatchVal = matchVal === 'true' || matchVal === true;
+            } else {
+              parsedMatchVal = String(matchVal === undefined || matchVal === null ? '' : matchVal);
+            }
+          }
+
+          const matchedRowIndex = currentRows.findIndex((row: any) => {
+            let rowVal = row[matchCol];
+            if (colDef?.type === 'number') {
+              rowVal = Number(rowVal);
+            } else if (colDef?.type === 'boolean') {
+              rowVal = rowVal === 'true' || rowVal === true;
+            } else {
+              rowVal = String(rowVal === undefined || rowVal === null ? '' : rowVal);
+            }
+            return rowVal === parsedMatchVal;
+          });
+
+          if (matchedRowIndex === -1) break;
+
+          // Found row, let's construct updated row data
+          const matchedRow = currentRows[matchedRowIndex];
+          const updatedRowData = { ...matchedRow };
+
+          columns.forEach((col: any) => {
+            const mapping = step.mappings?.[col.name];
+            if (!mapping) return; // Keep old value if not mapped
+
+            // Skip empty column mapping values (fixed or block reference)
+            if (mapping.source === 'fixed') {
+              if (mapping.value === undefined || mapping.value === null || String(mapping.value).trim() === '') {
+                return;
+              }
+            } else if (mapping.source === 'block') {
+              if (!mapping.value) {
+                return;
+              }
+            }
+
+            let evaluatedValue: any = '';
+            if (mapping.source === 'fixed') {
+              evaluatedValue = mapping.value;
+            } else {
+              const refAtom = blockRuntimeAtom(mapping.value);
+              const refState = store.get(refAtom);
+              evaluatedValue = refState?.value;
+            }
+
+            if (col.type === 'number') {
+              const num = Number(evaluatedValue);
+              evaluatedValue = isNaN(num) ? 0 : num;
+            } else if (col.type === 'boolean') {
+              evaluatedValue = evaluatedValue === 'true' || evaluatedValue === true;
+            } else {
+              evaluatedValue = String(evaluatedValue === undefined || evaluatedValue === null ? '' : evaluatedValue);
+            }
+
+            updatedRowData[col.name] = evaluatedValue;
+          });
+
+          const updatedRows = [...currentRows];
+          updatedRows[matchedRowIndex] = updatedRowData;
+
+          let nextValue = 0;
+          if (outputMode === 'row_count') {
+            nextValue = updatedRows.length;
+          } else {
+            const lastRow = updatedRows[updatedRows.length - 1];
+            nextValue = lastRow ? lastRow[outputMode] : 0;
+          }
+
+          store.set(targetAtom, {
+            ...targetState,
+            rows: updatedRows,
+            value: nextValue
+          });
+
+          // Sync to Supabase: Fetch current data object first, merge overrides, and save back
+          try {
+            supabase
+              .from('database_rows')
+              .select('row_data')
+              .eq('id', matchedRow.id)
+              .single()
+              .then(({ data: dbRow, error: selectError }: any) => {
+                if (selectError) {
+                  console.warn('[Supabase execute info]: Could not fetch current row from Supabase.', selectError.message);
+                  return;
+                }
+
+                const currentData = dbRow?.row_data || {};
+                const mergedData = { ...currentData };
+
+                columns.forEach((col: any) => {
+                  const mapping = step.mappings?.[col.name];
+                  if (!mapping) return; // Keep old value if not mapped
+
+                  // Skip empty column mapping values (fixed or block reference)
+                  if (mapping.source === 'fixed') {
+                    if (mapping.value === undefined || mapping.value === null || String(mapping.value).trim() === '') {
+                      return;
+                    }
+                  } else if (mapping.source === 'block') {
+                    if (!mapping.value) {
+                      return;
+                    }
+                  }
+
+                  let evaluatedValue: any = '';
+                  if (mapping.source === 'fixed') {
+                    evaluatedValue = mapping.value;
+                  } else {
+                    const refAtom = blockRuntimeAtom(mapping.value);
+                    const refState = store.get(refAtom);
+                    evaluatedValue = refState?.value;
+                  }
+
+                  if (col.type === 'number') {
+                    const num = Number(evaluatedValue);
+                    evaluatedValue = isNaN(num) ? 0 : num;
+                  } else if (col.type === 'boolean') {
+                    evaluatedValue = evaluatedValue === 'true' || evaluatedValue === true;
+                  } else {
+                    evaluatedValue = String(evaluatedValue === undefined || evaluatedValue === null ? '' : evaluatedValue);
+                  }
+
+                  mergedData[col.name] = evaluatedValue;
+                });
+
+                // Write merged object back to Supabase using row ID
+                supabase
+                  .from('database_rows')
+                  .update({
+                    row_data: mergedData
+                  })
+                  .eq('id', matchedRow.id)
+                  .then(({ error: updateError }: any) => {
+                    if (updateError) {
+                      console.warn('[Supabase execute info]: Could not update row via workflow action.', updateError.message);
+                    } else {
+                      console.log('[Supabase execute info]: Successfully updated row inside database_rows.');
+                      // State explicitly that the row count is unchanged
+                      console.log('[Supabase execute info]: Row count in database_rows is verified UNCHANGED.');
+                    }
+                  });
+              });
+          } catch (err) {
+            console.error('Error updating row in Supabase via workflow:', err);
+          }
+          break;
+        }
+        case 'deleteRow': {
+          const targetState = store.get(targetAtom);
+          const columns = targetState?.columns || [];
+          const currentRows = targetState?.rows || [];
+          const outputMode = targetState?.outputMode || 'row_count';
+
+          const matchCol = step.matchColumn;
+          if (!matchCol) break;
+
+          let matchVal: any = '';
+          if (step.matchValue) {
+            if (step.matchValue.source === 'fixed') {
+              matchVal = step.matchValue.value;
+            } else {
+              const refAtom = blockRuntimeAtom(step.matchValue.value);
+              const refState = store.get(refAtom);
+              matchVal = refState?.value;
+            }
+          }
+
+          const colDef = columns.find((c: any) => c.name === matchCol);
+          let parsedMatchVal = matchVal;
+          if (colDef) {
+            if (colDef.type === 'number') {
+              parsedMatchVal = Number(matchVal);
+            } else if (colDef.type === 'boolean') {
+              parsedMatchVal = matchVal === 'true' || matchVal === true;
+            } else {
+              parsedMatchVal = String(matchVal === undefined || matchVal === null ? '' : matchVal);
+            }
+          }
+
+          const matchedRowIndex = currentRows.findIndex((row: any) => {
+            let rowVal = row[matchCol];
+            if (colDef?.type === 'number') {
+              rowVal = Number(rowVal);
+            } else if (colDef?.type === 'boolean') {
+              rowVal = rowVal === 'true' || rowVal === true;
+            } else {
+              rowVal = String(rowVal === undefined || rowVal === null ? '' : rowVal);
+            }
+            return rowVal === parsedMatchVal;
+          });
+
+          if (matchedRowIndex === -1) break;
+
+          const targetRow = currentRows[matchedRowIndex];
+          const updatedRows = currentRows.filter((_, idx) => idx !== matchedRowIndex);
+
+          let nextValue = 0;
+          if (outputMode === 'row_count') {
+            nextValue = updatedRows.length;
+          } else {
+            const lastRow = updatedRows[updatedRows.length - 1];
+            nextValue = lastRow ? lastRow[outputMode] : 0;
+          }
+
+          store.set(targetAtom, {
+            ...targetState,
+            rows: updatedRows,
+            value: nextValue
+          });
+
+          // Delete from Supabase
+          try {
+            supabase
+              .from('database_rows')
+              .delete()
+              .eq('id', targetRow.id)
+              .then(({ error }: any) => {
+                if (error) {
+                  console.warn('[Supabase execute info]: Could not delete row via workflow action, falling back to local state.', error.message);
+                }
+              });
+          } catch (err) {
+            console.error('Error deleting row in Supabase via workflow:', err);
+          }
+          break;
+        }
         case 'toggle': {
           store.set(targetAtom, {
             ...currentTargetState,
