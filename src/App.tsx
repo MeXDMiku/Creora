@@ -2,7 +2,7 @@ import { useEffect, useRef, useCallback, useState, useMemo } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { useSetAtom, useAtom, useAtomValue, useStore } from 'jotai'
-import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, getCanvasBlocks } from './state/atoms'
+import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, getCanvasBlocks, currentPageIdAtom } from './state/atoms'
 import { ButtonBlock } from './blocks/ButtonBlock'
 import { NumberDisplayBlock } from './blocks/NumberDisplayBlock'
 import { TextLabelBlock } from './blocks/TextLabelBlock'
@@ -951,6 +951,16 @@ function App() {
   const debouncedSaveRef = useRef<any | null>(null)
   const [triggerSaveValue, setTriggerSave] = useAtom(triggerSaveAtom)
 
+  // Pages state
+  const [activePageId, setActivePageId] = useAtom(currentPageIdAtom)
+  const [pagesList, setPagesList] = useState<{ id: string; name: string }[]>([])
+  const [isCrossfading, setIsCrossfading] = useState(false)
+
+  const activePageIdRef = useRef(PAGE_ID)
+  useEffect(() => {
+    activePageIdRef.current = activePageId || PAGE_ID
+  }, [activePageId])
+
   // Ref to hold saveToSupabase callback to break mutual dependency with editor hook
   const saveToSupabaseRef = useRef<(() => void) | null>(null)
 
@@ -1215,7 +1225,7 @@ function App() {
             animations: blockAnimations,
             parentId: null,
             children: [],
-            pageId: PAGE_ID
+            pageId: activePageIdRef.current
           })
         }
       }
@@ -1225,14 +1235,16 @@ function App() {
     const formulas = store.get(formulasAtom)
     const connections = store.get(connectionsAtom)
 
+    const activeName = pagesList.find(p => p.id === activePageIdRef.current)?.name || 'Page 1'
+
     const page: Page & { 
       documentContent: any;
       positions: Record<string, { x: number; y: number }>;
       runtimeStates: Record<string, any>;
       connections: any[];
     } = {
-      id: PAGE_ID,
-      name: 'Main Page',
+      id: activePageIdRef.current,
+      name: activeName,
       route: '/main',
       layoutTemplateId: null,
       blocks: blocksArray,
@@ -1812,7 +1824,7 @@ function App() {
             workflows,
             updated_at: new Date().toISOString()
           })
-          .eq('id', PAGE_ID)
+          .eq('id', activePageIdRef.current)
 
         if (error) throw error
         setSaveStatus('Saved')
@@ -2121,22 +2133,278 @@ function App() {
   }, [store, saveToSupabase, isLoading])
 
 
+  const fetchPagesList = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('pages')
+        .select('id, blocks')
+        .order('updated_at', { ascending: true })
+
+      if (error) throw error
+
+      if (data) {
+        const list = data.map((p, idx) => ({
+          id: p.id,
+          name: p.blocks?.pageName || (p.id === PAGE_ID ? 'Page 1' : `Page ${idx + 1}`)
+        }))
+        setPagesList(list)
+      }
+    } catch (err) {
+      console.error('Failed to fetch pages list:', err)
+    }
+  }, [])
+
+  const savePageData = async (pageId: string) => {
+    if (!editor) return
+    try {
+      const docJson = editor.getJSON()
+      const blockIds: string[] = []
+      const traverse = (node: any) => {
+        if (
+          node.type === 'buttonBlock' || 
+          node.type === 'timerBlock' || 
+          node.type === 'numberDisplayBlock' || 
+          node.type === 'formulaDisplayBlock' || 
+          node.type === 'toggleBlock' || 
+          node.type === 'inputBlock' || 
+          node.type === 'textLabelBlock' ||
+          node.type === 'historyChartBlock' ||
+          node.type === 'databaseBlock' ||
+          node.type === 'listBlock'
+        ) {
+          if (node.attrs?.blockId) {
+            blockIds.push(node.attrs.blockId)
+          }
+        }
+        if (node.content) {
+          node.content.forEach(traverse)
+        }
+      }
+      traverse(docJson)
+
+      const positions: Record<string, { x: number; y: number }> = {}
+      const runtimeStates: Record<string, any> = {}
+
+      blockIds.forEach(id => {
+        positions[id] = store.get(blockPositionAtom(id))
+        runtimeStates[id] = store.get(blockRuntimeAtom(id))
+      })
+
+      const workflows = store.get(workflowsAtom)
+      const connections = store.get(connectionsAtom)
+      const formulas = store.get(formulasAtom)
+
+      const pageName = pagesList.find(p => p.id === pageId)?.name || 'Page 1'
+
+      const blocksPayload = {
+        documentContent: docJson,
+        positions,
+        runtimeStates,
+        connections,
+        formulas,
+        pageName
+      }
+
+      await supabase
+        .from('pages')
+        .update({
+          blocks: blocksPayload,
+          workflows,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', pageId)
+    } catch (err) {
+      console.error('Failed to save page data:', pageId, err)
+    }
+  }
+
+  const switchPage = async (targetPageId: string) => {
+    if (targetPageId === activePageIdRef.current || !editor) return
+    setIsLoading(true)
+    setSaveStatus('Saving...')
+
+    // 1. Save current page first
+    await savePageData(activePageIdRef.current)
+
+    // 2. Start crossfade transition
+    setIsCrossfading(true)
+    await new Promise(resolve => setTimeout(resolve, 150)) // Wait for 150ms fadeout
+
+    // 3. Clear Jotai state of current blocks to avoid leaks
+    const currentDoc = editor.getJSON()
+    const currentIds: string[] = []
+    const traverse = (node: any) => {
+      if (node.attrs?.blockId) {
+        currentIds.push(node.attrs.blockId)
+      }
+      if (node.content) {
+        node.content.forEach(traverse)
+      }
+    }
+    traverse(currentDoc)
+
+    currentIds.forEach(id => {
+      blockPositionAtom.remove(id)
+      blockRuntimeAtom.remove(id)
+    })
+    store.set(connectionsAtom, [])
+    store.set(workflowsAtom, [])
+    store.set(formulasAtom, [])
+    setSelectedBlockId(null)
+
+    // 4. Update active page state and persist to localStorage
+    setActivePageId(targetPageId)
+    localStorage.setItem('creora_active_page_id', targetPageId)
+
+    // 5. Load target page from Supabase
+    try {
+      const { data, error } = await supabase
+        .from('pages')
+        .select('*')
+        .eq('id', targetPageId)
+        .maybeSingle()
+
+      if (error) throw error
+
+      if (data) {
+        const blocksData = data.blocks || {}
+        const workflowsData = data.workflows || []
+
+        // Set TipTap Content
+        editor.commands.setContent(blocksData.documentContent || '')
+
+        // Populate block positions
+        if (blocksData.positions) {
+          Object.entries(blocksData.positions).forEach(([id, pos]: [string, any]) => {
+            store.set(blockPositionAtom(id), pos)
+          })
+        }
+
+        // Populate block runtime states
+        if (blocksData.runtimeStates) {
+          Object.entries(blocksData.runtimeStates).forEach(([id, rState]: [string, any]) => {
+            store.set(blockRuntimeAtom(id), rState)
+          })
+        }
+
+        // Populate connections
+        store.set(connectionsAtom, blocksData.connections || [])
+
+        // Populate formulas
+        store.set(formulasAtom, blocksData.formulas || [])
+
+        // Populate workflows
+        store.set(workflowsAtom, workflowsData || [])
+
+        // Sync allBlockIdsAtom
+        const newBlockIds: string[] = []
+        const traverseNew = (node: any) => {
+          if (
+            node.type === 'buttonBlock' || 
+            node.type === 'timerBlock' ||
+            node.type === 'numberDisplayBlock' || 
+            node.type === 'formulaDisplayBlock' || 
+            node.type === 'toggleBlock' || 
+            node.type === 'inputBlock' || 
+            node.type === 'textLabelBlock' ||
+            node.type === 'historyChartBlock' ||
+            node.type === 'databaseBlock' ||
+            node.type === 'listBlock'
+          ) {
+            if (node.attrs?.blockId) {
+              newBlockIds.push(node.attrs.blockId)
+            }
+          }
+          if (node.content) {
+            node.content.forEach(traverseNew)
+          }
+        }
+        traverseNew(blocksData.documentContent)
+        store.set(allBlockIdsAtom, newBlockIds)
+
+        // Recalculate all formulas
+        recalculateAllFormulas(store)
+      }
+    } catch (err) {
+      console.error('Failed to load target page:', targetPageId, err)
+    } finally {
+      setIsLoading(false)
+      setSaveStatus('Ready')
+      // Fade back in
+      setIsCrossfading(false)
+    }
+  }
+
+  const createNewPage = async () => {
+    setIsLoading(true)
+    setSaveStatus('Saving...')
+    const newPageId = crypto.randomUUID()
+    const newPageName = `Page ${pagesList.length + 1}`
+    const defaultBlocks = {
+      documentContent: {
+        type: 'doc',
+        content: [
+          {
+            type: 'heading',
+            attrs: { level: 3 },
+            content: [{ type: 'text', text: newPageName }]
+          },
+          {
+            type: 'paragraph',
+            content: [{ type: 'text', text: 'This is a brand new empty page. Press / to insert blocks.' }]
+          }
+        ]
+      },
+      positions: {},
+      runtimeStates: {},
+      connections: [],
+      formulas: [],
+      pageName: newPageName
+    }
+
+    try {
+      const { error } = await supabase
+        .from('pages')
+        .insert({
+          id: newPageId,
+          blocks: defaultBlocks,
+          workflows: []
+        })
+
+      if (error) throw error
+
+      // Refresh local pages list
+      await fetchPagesList()
+
+      // Switch to the newly created page
+      await switchPage(newPageId)
+    } catch (err) {
+      console.error('Failed to create new page:', err)
+    } finally {
+      setIsLoading(false)
+      setSaveStatus('Ready')
+    }
+  }
+
   // Load from Supabase on init
   useEffect(() => {
-    async function loadPage() {
+    async function initApp() {
       try {
         setIsLoading(true)
         setSaveStatus('Ready')
-        let { data, error } = await supabase
+
+        // 1. Fetch all pages
+        const { data: allPages, error: fetchErr } = await supabase
           .from('pages')
-          .select('*')
-          .eq('id', PAGE_ID)
-          .maybeSingle()
+          .select('id, blocks, workflows')
+          .order('updated_at', { ascending: true })
 
-        if (error) throw error
+        if (fetchErr) throw fetchErr
 
-        if (!data) {
-          // If no row exists, insert one
+        let pages = allPages || []
+        const hasDefaultPage = pages.some(p => p.id === PAGE_ID)
+        
+        if (!hasDefaultPage) {
           const defaultBlocks = {
             documentContent: {
               type: 'doc',
@@ -2154,7 +2422,9 @@ function App() {
             },
             positions: {},
             runtimeStates: {},
-            connections: []
+            connections: [],
+            formulas: [],
+            pageName: 'Page 1'
           }
           
           const { data: newRow, error: insertError } = await supabase
@@ -2168,94 +2438,109 @@ function App() {
             .single()
 
           if (insertError) throw insertError
-          data = newRow
+          pages = [newRow, ...pages]
         }
 
-        if (data) {
-          const blocksData = data.blocks || {}
-          const workflowsData = data.workflows || []
+        let pagesListFetched: any[] = pages
+        const list = pagesListFetched.map((p, idx) => ({
+          id: p.id,
+          name: p.blocks?.pageName || (p.id === PAGE_ID ? 'Page 1' : `Page ${idx + 1}`)
+        }))
+        setPagesList(list)
 
-          // 1. Populate block positions
+        // 2. Resolve active page ID
+        let lastActiveId = localStorage.getItem('creora_active_page_id')
+        if (!lastActiveId || !pagesListFetched.some(p => p.id === lastActiveId)) {
+          lastActiveId = PAGE_ID
+        }
+        setActivePageId(lastActiveId)
+        localStorage.setItem('creora_active_page_id', lastActiveId)
+
+        // 3. Load active page data
+        const activePageData = pagesListFetched.find(p => p.id === lastActiveId)
+        if (activePageData && editor) {
+          const blocksData = activePageData.blocks || {}
+          const workflowsData = activePageData.workflows || []
+
+          // Migrate document content (textDisplayBlock -> numberDisplayBlock) if any
+          const migrateNodes = (node: any) => {
+            if (node.type === 'textDisplayBlock') {
+              node.type = 'numberDisplayBlock'
+            }
+            if (node.content) {
+              node.content.forEach(migrateNodes)
+            }
+          }
+          if (blocksData.documentContent) {
+            migrateNodes(blocksData.documentContent)
+            editor.commands.setContent(blocksData.documentContent)
+          }
+
+          // Populate block positions
           if (blocksData.positions) {
             Object.entries(blocksData.positions).forEach(([id, pos]: [string, any]) => {
               store.set(blockPositionAtom(id), pos)
             })
           }
 
-          // 2. Populate block runtime states
+          // Populate block runtime states
           if (blocksData.runtimeStates) {
             Object.entries(blocksData.runtimeStates).forEach(([id, rState]: [string, any]) => {
               store.set(blockRuntimeAtom(id), rState)
             })
           }
 
-          // 3. Populate connections
-          if (blocksData.connections) {
-            store.set(connectionsAtom, blocksData.connections)
-          }
+          // Populate connections
+          store.set(connectionsAtom, blocksData.connections || [])
 
-          // 3b. Populate formulas
-          if (blocksData.formulas) {
-            store.set(formulasAtom, blocksData.formulas)
-          } else {
-            store.set(formulasAtom, [])
-          }
+          // Populate formulas
+          store.set(formulasAtom, blocksData.formulas || [])
 
-          // 4. Populate workflows
-          store.set(workflowsAtom, workflowsData)
+          // Populate workflows
+          store.set(workflowsAtom, workflowsData || [])
 
-          // 5. Populate TipTap editor content
-          if (editor && blocksData.documentContent) {
-            // Migrate document content (textDisplayBlock -> numberDisplayBlock)
-            const migrateNodes = (node: any) => {
-              if (node.type === 'textDisplayBlock') {
-                node.type = 'numberDisplayBlock'
-              }
-              if (node.content) {
-                node.content.forEach(migrateNodes)
-              }
-            }
-            migrateNodes(blocksData.documentContent)
-            editor.commands.setContent(blocksData.documentContent)
-
-            // Extract all block IDs to populate allBlockIdsAtom
-            const blockIds: string[] = []
-            const traverse = (node: any) => {
-              if (
-                node.type === 'buttonBlock' || 
-                node.type === 'timerBlock' ||
-                node.type === 'numberDisplayBlock' || 
-                node.type === 'formulaDisplayBlock' || 
-                node.type === 'toggleBlock' || 
-                node.type === 'inputBlock' || 
-                node.type === 'textLabelBlock'
-              ) {
-                if (node.attrs?.blockId) {
-                  blockIds.push(node.attrs.blockId)
-                }
-              }
-              if (node.content) {
-                node.content.forEach(traverse)
+          // Extract all block IDs to populate allBlockIdsAtom
+          const blockIds: string[] = []
+          const traverse = (node: any) => {
+            if (
+              node.type === 'buttonBlock' || 
+              node.type === 'timerBlock' ||
+              node.type === 'numberDisplayBlock' || 
+              node.type === 'formulaDisplayBlock' || 
+              node.type === 'toggleBlock' || 
+              node.type === 'inputBlock' || 
+              node.type === 'textLabelBlock' ||
+              node.type === 'historyChartBlock' ||
+              node.type === 'databaseBlock' ||
+              node.type === 'listBlock'
+            ) {
+              if (node.attrs?.blockId) {
+                blockIds.push(node.attrs.blockId)
               }
             }
+            if (node.content) {
+              node.content.forEach(traverse)
+            }
+          }
+          if (blocksData.documentContent) {
             traverse(blocksData.documentContent)
-            store.set(allBlockIdsAtom, blockIds)
-
-            // Recalculate all formulas with loaded states
-            recalculateAllFormulas(store)
           }
+          store.set(allBlockIdsAtom, blockIds)
+
+          // Recalculate all formulas
+          recalculateAllFormulas(store)
         }
       } catch (err) {
-        console.error('Error loading page from Supabase:', err)
+        console.error('Error loading page from Supabase on init:', err)
       } finally {
         setIsLoading(false)
       }
     }
 
     if (editor) {
-      loadPage()
+      initApp()
     }
-  }, [editor, store])
+  }, [editor, fetchPagesList])
 
   // Helper: check if a block with this ID already exists in the editor
   function blockExists(blockId: string): boolean {
@@ -2595,20 +2880,13 @@ function App() {
   return (
     <div className="app-container" style={{ display: 'flex', fontFamily: 'sans-serif', minHeight: '100vh', background: 'var(--bg)' }}>
       <div
-        id="editor-container"
-        ref={canvasRef}
         style={{
           flex: 1,
           padding: '24px',
-          position: 'relative',
-          minHeight: 'calc(100vh - 48px)',
           display: 'flex',
           flexDirection: 'column',
-          overflow: 'visible',
+          position: 'relative',
         }}
-        onPointerMove={onCanvasPointerMove}
-        onPointerUp={onCanvasPointerUp}
-        onPointerDown={onCanvasPointerDown}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '16px' }}>
           <h1 style={{ margin: 0 }}>Creora Playground</h1>
@@ -2629,6 +2907,56 @@ function App() {
               {saveStatus}
             </span>
           )}
+
+          {/* Page Switcher Tabs */}
+          <div style={{ display: 'flex', gap: '4px', alignItems: 'center', background: '#f1f5f9', padding: '3px', borderRadius: '6px', marginLeft: '16px' }}>
+            {pagesList.map((page) => {
+              const isActive = page.id === (activePageId || PAGE_ID);
+              return (
+                <button
+                  key={page.id}
+                  onClick={() => switchPage(page.id)}
+                  style={{
+                    padding: '4px 10px',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                    fontWeight: 500,
+                    background: isActive ? '#4f46e5' : 'transparent',
+                    color: isActive ? 'white' : '#475569',
+                    transition: 'all 0.15s ease',
+                  }}
+                  onMouseOver={(e) => {
+                    if (!isActive) e.currentTarget.style.background = '#e2e8f0';
+                  }}
+                  onMouseOut={(e) => {
+                    if (!isActive) e.currentTarget.style.background = 'transparent';
+                  }}
+                >
+                  {page.name}
+                </button>
+              );
+            })}
+            <button
+              onClick={createNewPage}
+              style={{
+                padding: '4px 8px',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '13px',
+                fontWeight: 600,
+                background: 'transparent',
+                color: '#4f46e5',
+                transition: 'all 0.15s ease',
+              }}
+              onMouseOver={(e) => (e.currentTarget.style.background = '#fee2e2')}
+              onMouseOut={(e) => (e.currentTarget.style.background = 'transparent')}
+            >
+              + New Page
+            </button>
+          </div>
 
           <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px' }}>
             <button
@@ -2711,6 +3039,24 @@ function App() {
         )}
 
 
+        <div
+          id="editor-container"
+          ref={canvasRef}
+          onPointerMove={onCanvasPointerMove}
+          onPointerUp={onCanvasPointerUp}
+          onPointerDown={onCanvasPointerDown}
+          style={{
+            flex: 1,
+            position: 'relative',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'visible',
+            minHeight: 'calc(100vh - 120px)',
+            opacity: isCrossfading ? 0 : 1,
+            transition: 'opacity 150ms ease-in-out',
+            pointerEvents: isCrossfading ? 'none' : 'auto',
+          }}
+        >
           <EditorContent editor={editor} style={{ flex: 1, position: 'relative', pointerEvents: activeWire ? 'none' : 'auto' }} />
           <WireOverlay />
           <ConnectionPopup editor={editor} />
@@ -2794,6 +3140,7 @@ function App() {
               })}
             </div>
           )}
+        </div>
       </div>
       <Inspector editor={editor} />
     </div>

@@ -35,9 +35,9 @@ All blocks are implemented as custom TipTap nodes in `src/blocks/` and render th
 * **Conditional Workflows**
   * **Implementation:** `src/lib/bindingEngine.ts` (execution flow) and `src/App.tsx` (configuration creation in `ConnectionPopup`).
   * **Mechanism:** Evaluates matched triggers. Conditions can check another block's value with operators. If checks pass, executes steps like `increment`/`decrement`, `set` (with `__sourceValue__` support), `toggle`, `setVisible`, `setHidden`, `addRow`, `updateRow`, and `deleteRow`.
-* **Supabase Persistence**
-  * **Implementation:** `src/lib/supabase.ts` (Supabase client instance) and `src/App.tsx` (`loadPage` & `saveToSupabase` functions).
-  * **Mechanism:** Pages are saved under a hardcoded `PAGE_ID` (`00000000-0000-0000-0000-000000000001`). Documents are saved inside a `blocks` payload holding TipTap `documentContent` JSON, block `positions`, Jotai `runtimeStates`, and canvas `connections`. Updates are debounced by 500ms.
+* **Supabase Persistence & Multi-Page Support**
+  * **Implementation:** `src/lib/supabase.ts` (Supabase client instance) and `src/App.tsx` (`initApp`, `savePageData`, `switchPage`, and `createNewPage` functions).
+  * **Mechanism:** Pages are saved and loaded independently. The list of pages is queried on mount. A switcher in the header lets users tab between pages or click "+ New Page" to create a new row in Supabase. Switching uses `editor.commands.setContent()` with a 150ms crossfade (fading the canvas elements to `opacity: 0` before switching content and fading back in) without unmounting the TipTap editor. The active page ID is persisted in `localStorage` so refreshing the browser restores the last active page.
 * **Right-Click Context Menu**
   * **Implementation:** `src/App.tsx` (`ContextMenu` component) and capturing-phase click listeners inside blocks.
   * **Mechanism:** Triggers on `contextmenu` events. Allows users to "Delete Block" (removing the node, removing Jotai state instances, cleaning up connections/workflows) or "Disconnect all wires".
