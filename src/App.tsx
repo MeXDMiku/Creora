@@ -2,7 +2,7 @@ import { useEffect, useRef, useCallback, useState, useMemo } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { useSetAtom, useAtom, useAtomValue, useStore } from 'jotai'
-import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, getCanvasBlocks, currentPageIdAtom } from './state/atoms'
+import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, getCanvasBlocks, currentPageIdAtom, pagesListAtom, switchPageFnAtom } from './state/atoms'
 import { ButtonBlock } from './blocks/ButtonBlock'
 import { NumberDisplayBlock } from './blocks/NumberDisplayBlock'
 import { TextLabelBlock } from './blocks/TextLabelBlock'
@@ -953,8 +953,9 @@ function App() {
 
   // Pages state
   const [activePageId, setActivePageId] = useAtom(currentPageIdAtom)
-  const [pagesList, setPagesList] = useState<{ id: string; name: string }[]>([])
+  const [pagesList, setPagesList] = useAtom(pagesListAtom)
   const [isCrossfading, setIsCrossfading] = useState(false)
+  const setSwitchPageFn = useSetAtom(switchPageFnAtom)
 
   const activePageIdRef = useRef(PAGE_ID)
   useEffect(() => {
@@ -2334,6 +2335,10 @@ function App() {
       setIsCrossfading(false)
     }
   }
+
+  useEffect(() => {
+    setSwitchPageFn(() => switchPage)
+  }, [switchPage, setSwitchPageFn])
 
   const createNewPage = async () => {
     setIsLoading(true)

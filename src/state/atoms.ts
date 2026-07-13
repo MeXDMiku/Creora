@@ -173,3 +173,6 @@ export function getCanvasBlocks(editor: any, store: any, excludeBlockId?: string
   return list;
 }
 
+export const pagesListAtom = atom<{ id: string; name: string }[]>([]);
+export const switchPageFnAtom = atom<((pageId: string) => Promise<void>) | null>(null);
+

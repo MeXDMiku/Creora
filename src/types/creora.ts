@@ -144,6 +144,7 @@ export interface BlockRuntimeState {
   columns?: { name: string; type: 'text' | 'number' | 'boolean' }[];
   rows?: { id: string; [key: string]: any }[];
   outputMode?: string;
+  targetPageId?: string;
 }
 
 export interface DatabaseField {

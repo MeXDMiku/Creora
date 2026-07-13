@@ -1,9 +1,11 @@
-import { useAtom, useSetAtom } from 'jotai'
-import { blockRuntimeAtom, triggerSaveAtom, getBlockTypeDisplayName } from '../state/atoms'
+import { useAtom, useSetAtom, useAtomValue } from 'jotai'
+import { blockRuntimeAtom, triggerSaveAtom, getBlockTypeDisplayName, pagesListAtom, switchPageFnAtom } from '../state/atoms'
 
 export default function ButtonBlockInspector({ blockId }: { blockId: string; editor: any }) {
   const [runtimeState, setRuntimeState] = useAtom(blockRuntimeAtom(blockId))
   const triggerSave = useSetAtom(triggerSaveAtom)
+  const pagesList = useAtomValue(pagesListAtom)
+  const switchPageFn = useAtomValue(switchPageFnAtom)
 
   return (
     <div>
@@ -112,6 +114,53 @@ export default function ButtonBlockInspector({ blockId }: { blockId: string; edi
           style={{ display: 'block', marginTop: '4px', width: '100%', padding: '4px', borderRadius: '4px', border: '1px solid #ccc', boxSizing: 'border-box' }}
         />
       </label>
+
+      <div style={{ borderTop: '1px solid #e5e7eb', marginTop: '16px', paddingTop: '16px' }}>
+        <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 600, color: '#334155' }}>Navigation</h4>
+        <label style={{ display: 'block', marginBottom: '8px', fontSize: '13px' }}>
+          On click, go to page
+          <select
+            value={runtimeState.targetPageId || ''}
+            onChange={(e) => {
+              const val = e.target.value === '' ? undefined : e.target.value
+              setRuntimeState(prev => ({ ...prev, targetPageId: val }))
+              triggerSave(prev => prev + 1)
+            }}
+            style={{ display: 'block', marginTop: '4px', width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #ccc', background: '#fff', color: '#0f172a', fontSize: '13px', outline: 'none' }}
+          >
+            <option value="">None</option>
+            {pagesList.map(page => (
+              <option key={page.id} value={page.id}>{page.name}</option>
+            ))}
+          </select>
+        </label>
+        {runtimeState.targetPageId && (
+          <button
+            onClick={() => {
+              if (switchPageFn && runtimeState.targetPageId) {
+                switchPageFn(runtimeState.targetPageId);
+              }
+            }}
+            style={{
+              marginTop: '8px',
+              width: '100%',
+              padding: '6px 12px',
+              background: '#4f46e5',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '12px',
+              fontWeight: 600,
+              transition: 'background 0.2s',
+            }}
+            onMouseOver={(e) => (e.currentTarget.style.background = '#4338ca')}
+            onMouseOut={(e) => (e.currentTarget.style.background = '#4f46e5')}
+          >
+            Test navigation →
+          </button>
+        )}
+      </div>
     </div>
   )
 }
