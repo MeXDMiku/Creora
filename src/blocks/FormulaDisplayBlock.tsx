@@ -5,6 +5,7 @@ import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { blockRuntimeAtom, activeWireAtom, contextMenuAtom, getPortBadge, getBlockTypeDisplayName } from '../state/atoms';
 import { useMemo, useRef, useState, useEffect, useCallback } from 'react';
 import { useBlockDrag } from '../hooks/useBlockDrag';
+import { blockToCSS } from '../lib/renderBlockStyles';
 
 const FormulaDisplayBlockComponent = (props: NodeViewProps) => {
   const store = useStore();
@@ -73,19 +74,14 @@ const FormulaDisplayBlockComponent = (props: NodeViewProps) => {
 
   const showRightPort = isHovered;
 
+  const { outer: outerStyle, inner: innerStyle } = blockToCSS('formulaDisplayBlock', position, runtimeState);
+
   return (
     <NodeViewWrapper 
       ref={wrapperRef}
       as="div" 
       className="formula-display-block-wrapper" 
-      style={{ 
-        display: 'block', 
-        position: 'absolute', 
-        left: `${position.x}px`, 
-        top: `${position.y}px`, 
-        width: runtimeState?.width !== undefined ? `${runtimeState.width}px` : 'max-content',
-        opacity: runtimeState?.opacity !== undefined ? runtimeState.opacity / 100 : 1
-      }}
+      style={outerStyle}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
@@ -110,23 +106,8 @@ const FormulaDisplayBlockComponent = (props: NodeViewProps) => {
       <div
         contentEditable={false}
         style={{
-          fontSize: runtimeState?.fontSize !== undefined ? `${runtimeState.fontSize}px` : '1.8rem',
-          fontWeight: 700,
-          color: runtimeState?.textColor || '#ffffff',
-          background: runtimeState?.backgroundColor || '#7c3aed', // Beautiful deep violet for formula blocks
-          borderRadius: runtimeState?.borderRadius !== undefined ? `${runtimeState.borderRadius}px` : '8px',
-          padding: '10px 20px',
-          minWidth: '90px',
-          minHeight: '44px',
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: runtimeState?.width !== undefined ? '100%' : 'auto',
-          boxSizing: 'border-box',
-          userSelect: 'none',
+          ...innerStyle,
           cursor: 'move',
-          gap: '8px',
-          boxShadow: '0 4px 6px -1px rgba(124, 58, 237, 0.2), 0 2px 4px -1px rgba(124, 58, 237, 0.1)',
         }}
       >
         <span style={{ 

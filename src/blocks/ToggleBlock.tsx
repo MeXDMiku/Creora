@@ -6,6 +6,7 @@ import { executeWorkflow, recalculateAllFormulas } from '../lib/bindingEngine';
 import { blockRuntimeAtom, activeWireAtom, snapTargetAtom, triggerSaveAtom, contextMenuAtom, getPortBadge, getBlockTypeDisplayName } from '../state/atoms';
 import { useMemo, useRef, useState, useEffect, useCallback } from 'react';
 import { useBlockDrag } from '../hooks/useBlockDrag';
+import { blockToCSS } from '../lib/renderBlockStyles';
 
 const ToggleBlockComponent = (props: NodeViewProps) => {
   const { node } = props;
@@ -102,19 +103,14 @@ const ToggleBlockComponent = (props: NodeViewProps) => {
   // Right port is visible on hover only
   const showRightPort = isHovered;
 
+  const { outer: outerStyle, inner: innerStyle } = blockToCSS('toggleBlock', position, runtimeState);
+
   return (
     <NodeViewWrapper 
       ref={wrapperRef}
       as="div" 
       className="toggle-block-wrapper" 
-      style={{ 
-        display: 'block', 
-        position: 'absolute', 
-        left: `${position.x}px`, 
-        top: `${position.y}px`, 
-        width: runtimeState?.width !== undefined ? `${runtimeState.width}px` : 'max-content',
-        opacity: runtimeState?.opacity !== undefined ? runtimeState.opacity / 100 : 1
-      }}
+      style={outerStyle}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={onPointerUp}
@@ -138,16 +134,7 @@ const ToggleBlockComponent = (props: NodeViewProps) => {
       </div>
       <div
         contentEditable={false}
-        style={{
-          width: '44px',
-          height: '24px',
-          borderRadius: '12px',
-          backgroundColor: runtimeValue ? '#22c55e' : '#d1d5db',
-          position: 'relative',
-          cursor: 'pointer',
-          transition: 'background-color 0.2s',
-          userSelect: 'none',
-        }}
+        style={innerStyle}
       >
         <div
           style={{

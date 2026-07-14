@@ -23,7 +23,8 @@ interface ExtractedBlock {
 const extractBlocks = (node: any): ExtractedBlock[] => {
   if (!node) return [];
   const list: ExtractedBlock[] = [];
-  if (node.attrs?.blockId && (node.type === 'buttonBlock' || node.type === 'numberDisplayBlock')) {
+  const supportedTypes = ['buttonBlock', 'numberDisplayBlock', 'toggleBlock', 'inputBlock', 'textLabelBlock', 'formulaDisplayBlock'];
+  if (node.attrs?.blockId && supportedTypes.includes(node.type)) {
     list.push({
       id: node.attrs.blockId,
       type: node.type,
@@ -67,6 +68,92 @@ function RenderedBlock({ block }: { block: ExtractedBlock }) {
       <div style={outerStyle}>
         <div style={innerStyle}>
           {String(runtimeState?.value ?? 0)}
+        </div>
+      </div>
+    );
+  }
+
+  if (block.type === 'toggleBlock') {
+    const runtimeValue = typeof runtimeState?.value === 'boolean' ? runtimeState.value : false;
+    return (
+      <div style={outerStyle}>
+        <div
+          style={innerStyle}
+          onClick={() => {
+            const nextVal = !runtimeValue;
+            store.set(blockRuntimeAtom(block.id), {
+              ...runtimeState,
+              value: nextVal,
+            });
+            executeWorkflow(block.id, 'onClick', store);
+            recalculateAllFormulas(store);
+          }}
+        >
+          <div
+            style={{
+              width: '20px',
+              height: '20px',
+              borderRadius: '50%',
+              backgroundColor: 'white',
+              position: 'absolute',
+              top: '2px',
+              left: runtimeValue ? '22px' : '2px',
+              transition: 'left 0.2s',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (block.type === 'inputBlock') {
+    return (
+      <div style={outerStyle}>
+        <input
+          type="text"
+          style={innerStyle}
+          value={String(runtimeState?.value ?? '')}
+          onChange={(e) => {
+            store.set(blockRuntimeAtom(block.id), {
+              ...runtimeState,
+              value: e.target.value,
+            });
+            executeWorkflow(block.id, 'onChange', store);
+            recalculateAllFormulas(store);
+          }}
+          placeholder="Type something..."
+        />
+      </div>
+    );
+  }
+
+  if (block.type === 'textLabelBlock') {
+    return (
+      <div style={outerStyle}>
+        <div style={innerStyle}>
+          {String(runtimeState?.value ?? '')}
+        </div>
+      </div>
+    );
+  }
+
+  if (block.type === 'formulaDisplayBlock') {
+    return (
+      <div style={outerStyle}>
+        <div style={innerStyle}>
+          <span style={{ 
+            fontSize: '11px', 
+            background: 'rgba(255, 255, 255, 0.2)', 
+            padding: '2px 6px', 
+            borderRadius: '4px',
+            textTransform: 'uppercase',
+            fontWeight: 'bold',
+            letterSpacing: '0.5px'
+          }}>
+            fx
+          </span>
+          {String(runtimeState?.value ?? '0')}
         </div>
       </div>
     );

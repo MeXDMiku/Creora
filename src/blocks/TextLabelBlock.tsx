@@ -5,6 +5,7 @@ import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { blockRuntimeAtom, activeWireAtom, snapTargetAtom, contextMenuAtom, getPortBadge, getBlockTypeDisplayName } from '../state/atoms';
 import { useMemo, useRef, useState } from 'react';
 import { useBlockDrag } from '../hooks/useBlockDrag';
+import { blockToCSS } from '../lib/renderBlockStyles';
 
 const TextLabelBlockComponent = (props: NodeViewProps) => {
   const store = useStore();
@@ -66,18 +67,13 @@ const TextLabelBlockComponent = (props: NodeViewProps) => {
   const isSnapTarget = snapTarget === blockId;
   const showRightPort = isHovered;
 
+  const { outer: outerStyle, inner: innerStyle } = blockToCSS('textLabelBlock', position, runtimeState);
+
   return (
     <NodeViewWrapper 
       as="div" 
       className="text-label-block-wrapper" 
-      style={{ 
-        display: 'block', 
-        position: 'absolute', 
-        left: `${position.x}px`, 
-        top: `${position.y}px`, 
-        width: runtimeState?.width !== undefined ? `${runtimeState.width}px` : 'max-content',
-        opacity: runtimeState?.opacity !== undefined ? runtimeState.opacity / 100 : 1
-      }}
+      style={outerStyle}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
@@ -103,20 +99,7 @@ const TextLabelBlockComponent = (props: NodeViewProps) => {
       <div
         contentEditable={false}
         style={{
-          fontSize: runtimeState?.fontSize !== undefined ? `${runtimeState.fontSize}px` : '1.2rem',
-          fontWeight: 500,
-          color: runtimeState?.textColor || '#ffffff',
-          background: runtimeState?.backgroundColor || '#0f172a', // beautiful deep slate background by default
-          borderRadius: runtimeState?.borderRadius !== undefined ? `${runtimeState.borderRadius}px` : '6px',
-          padding: '10px 20px',
-          minWidth: '100px',
-          minHeight: '38px',
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: runtimeState?.width !== undefined ? '100%' : 'auto',
-          boxSizing: 'border-box',
-          userSelect: 'none',
+          ...innerStyle,
           cursor: 'move',
         }}
       >

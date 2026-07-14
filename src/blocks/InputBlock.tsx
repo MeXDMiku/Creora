@@ -6,6 +6,7 @@ import { executeWorkflow, recalculateAllFormulas } from '../lib/bindingEngine';
 import { blockRuntimeAtom, activeWireAtom, triggerSaveAtom, contextMenuAtom, getPortBadge, getBlockTypeDisplayName } from '../state/atoms';
 import { useMemo, useRef, useState, useEffect, useCallback } from 'react';
 import { useBlockDrag } from '../hooks/useBlockDrag';
+import { blockToCSS } from '../lib/renderBlockStyles';
 
 const InputBlockComponent = (props: NodeViewProps) => {
   const { node } = props;
@@ -77,25 +78,16 @@ const InputBlockComponent = (props: NodeViewProps) => {
 
   const showRightPort = isHovered;
 
+  const { outer: outerStyle, inner: innerStyle } = blockToCSS('inputBlock', position, runtimeState);
+
   return (
     <NodeViewWrapper 
       ref={wrapperRef}
       as="div" 
       className="input-block-wrapper" 
-      style={{ 
-        display: 'flex',
-        alignItems: 'center',
-        position: 'absolute', 
-        left: `${position.x}px`, 
-        top: `${position.y}px`, 
-        width: runtimeState?.width !== undefined ? `${runtimeState.width}px` : '240px',
-        opacity: runtimeState?.opacity !== undefined ? runtimeState.opacity / 100 : 1,
-        background: runtimeState?.backgroundColor || '#1e293b',
-        borderRadius: runtimeState?.borderRadius !== undefined ? `${runtimeState.borderRadius}px` : '8px',
-        padding: '6px 10px',
-        boxSizing: 'border-box',
+      style={{
+        ...outerStyle,
         cursor: 'move',
-        gap: '8px',
       }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
@@ -157,17 +149,7 @@ const InputBlockComponent = (props: NodeViewProps) => {
           recalculateAllFormulas(store);
           triggerSave(prev => prev + 1);
         }}
-        style={{
-          flex: 1,
-          boxSizing: 'border-box',
-          padding: '6px 12px',
-          background: '#ffffff',
-          color: '#1e293b',
-          border: '1px solid #cbd5e1',
-          borderRadius: '4px',
-          outline: 'none',
-          fontSize: '14px',
-        }}
+        style={innerStyle}
         placeholder="Type something..."
       />
       {/* Right (output) port */}
