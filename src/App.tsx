@@ -2,7 +2,7 @@ import { useEffect, useRef, useCallback, useState, useMemo } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { useSetAtom, useAtom, useAtomValue, useStore } from 'jotai'
-import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, getCanvasBlocks, currentPageIdAtom, pagesListAtom, switchPageFnAtom } from './state/atoms'
+import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, getCanvasBlocks, currentPageIdAtom, pagesListAtom, switchPageFnAtom, isPreviewModeAtom } from './state/atoms'
 import { ButtonBlock } from './blocks/ButtonBlock'
 import { NumberDisplayBlock } from './blocks/NumberDisplayBlock'
 import { TextLabelBlock } from './blocks/TextLabelBlock'
@@ -956,6 +956,7 @@ function App() {
   const [pagesList, setPagesList] = useAtom(pagesListAtom)
   const [isCrossfading, setIsCrossfading] = useState(false)
   const setSwitchPageFn = useSetAtom(switchPageFnAtom)
+  const [isPreviewMode, setIsPreviewMode] = useAtom(isPreviewModeAtom)
 
   const activePageIdRef = useRef(PAGE_ID)
   useEffect(() => {
@@ -2963,6 +2964,27 @@ function App() {
             </button>
           </div>
 
+          <button
+            onClick={() => setIsPreviewMode(!isPreviewMode)}
+            style={{
+              padding: '6px 12px',
+              marginLeft: '8px',
+              border: '1px solid #cbd5e1',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '13px',
+              fontWeight: 600,
+              background: isPreviewMode ? '#475569' : '#ffffff',
+              color: isPreviewMode ? '#ffffff' : '#475569',
+              transition: 'all 0.15s ease',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            {isPreviewMode ? '👁 Edit Mode' : '👁 Preview'}
+          </button>
+
           <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px' }}>
             <button
               onClick={handleExport}
@@ -3046,6 +3068,7 @@ function App() {
 
         <div
           id="editor-container"
+          className={isPreviewMode ? 'preview-mode' : ''}
           ref={canvasRef}
           onPointerMove={onCanvasPointerMove}
           onPointerUp={onCanvasPointerUp}
@@ -3063,10 +3086,10 @@ function App() {
           }}
         >
           <EditorContent editor={editor} style={{ flex: 1, position: 'relative', pointerEvents: activeWire ? 'none' : 'auto' }} />
-          <WireOverlay />
-          <ConnectionPopup editor={editor} />
-          <ContextMenu editor={editor} deleteBlock={deleteBlock} />
-          <ConnectionContextMenu />
+          {!isPreviewMode && <WireOverlay />}
+          {!isPreviewMode && <ConnectionPopup editor={editor} />}
+          {!isPreviewMode && <ContextMenu editor={editor} deleteBlock={deleteBlock} />}
+          {!isPreviewMode && <ConnectionContextMenu />}
           {typeMismatch && (
             <div
               style={{
@@ -3147,7 +3170,7 @@ function App() {
           )}
         </div>
       </div>
-      <Inspector editor={editor} />
+      {!isPreviewMode && <Inspector editor={editor} />}
     </div>
   )
 }

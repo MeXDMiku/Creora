@@ -101,19 +101,43 @@ export const pendingConnectionAtom = atom<{
 
 export const triggerSaveAtom = atom<number>(0);
 
-export const contextMenuAtom = atom<{
+export const isPreviewModeAtom = atom<boolean>(false);
+
+const baseContextMenuAtom = atom<{
   blockId: string;
   x: number;
   y: number;
   visible: boolean;
 } | null>(null);
 
-export const connectionContextMenuAtom = atom<{
+export const contextMenuAtom = atom(
+  (get) => get(baseContextMenuAtom),
+  (get, set, update) => {
+    if (get(isPreviewModeAtom)) {
+      set(baseContextMenuAtom, null);
+      return;
+    }
+    set(baseContextMenuAtom, update);
+  }
+);
+
+const baseConnectionContextMenuAtom = atom<{
   connectionId: string;
   x: number;
   y: number;
   visible: boolean;
 } | null>(null);
+
+export const connectionContextMenuAtom = atom(
+  (get) => get(baseConnectionContextMenuAtom),
+  (get, set, update) => {
+    if (get(isPreviewModeAtom)) {
+      set(baseConnectionContextMenuAtom, null);
+      return;
+    }
+    set(baseConnectionContextMenuAtom, update);
+  }
+);
 
 export const allBlockIdsAtom = atom<string[]>([]);
 

@@ -1,12 +1,13 @@
 import { useRef, useCallback } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
-import { blockPositionAtom, selectedBlockIdAtom, triggerSaveAtom } from '../state/atoms';
+import { blockPositionAtom, selectedBlockIdAtom, triggerSaveAtom, isPreviewModeAtom } from '../state/atoms';
 
 export function useBlockDrag(blockId: string, containerRef: React.RefObject<HTMLElement>) {
   const position = useAtomValue(blockPositionAtom(blockId));
   const setPosition = useSetAtom(blockPositionAtom(blockId));
   const setSelected = useSetAtom(selectedBlockIdAtom);
   const triggerSave = useSetAtom(triggerSaveAtom);
+  const isPreviewMode = useAtomValue(isPreviewModeAtom);
 
   const dragState = useRef<{
     grabOffsetX: number;
@@ -19,6 +20,16 @@ export function useBlockDrag(blockId: string, containerRef: React.RefObject<HTML
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     e.stopPropagation();
     if (e.button !== 0) return; // Only drag on left click
+    if (isPreviewMode) {
+      dragState.current = {
+        grabOffsetX: 0,
+        grabOffsetY: 0,
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+        hasMoved: false,
+      };
+      return;
+    }
     const container = containerRef.current;
     if (!container) return;
 
@@ -35,9 +46,10 @@ export function useBlockDrag(blockId: string, containerRef: React.RefObject<HTML
     };
 
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
-  }, [position.x, position.y, containerRef]);
+  }, [position.x, position.y, containerRef, isPreviewMode]);
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
+    if (isPreviewMode) return;
     if (!dragState.current) return;
     const container = containerRef.current;
     if (!container) return;
@@ -65,15 +77,17 @@ export function useBlockDrag(blockId: string, containerRef: React.RefObject<HTML
     const wasClick = !dragState.current.hasMoved;
     const didMove = dragState.current.hasMoved;
     dragState.current = null;
-    (e.target as HTMLElement).releasePointerCapture(e.pointerId);
-    if (wasClick) {
-      setSelected(blockId);
-    }
-    if (didMove) {
-      triggerSave(prev => prev + 1);
+    if (!isPreviewMode) {
+      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+      if (wasClick) {
+        setSelected(blockId);
+      }
+      if (didMove) {
+        triggerSave(prev => prev + 1);
+      }
     }
     return wasClick;
-  }, [blockId, setSelected, triggerSave]);
+  }, [blockId, setSelected, triggerSave, isPreviewMode]);
 
   return {
     position,

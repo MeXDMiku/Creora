@@ -3,7 +3,7 @@ import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
 import type { NodeViewProps } from '@tiptap/react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { executeWorkflow } from '../lib/bindingEngine';
-import { blockRuntimeAtom, activeWireAtom, snapTargetAtom, triggerSaveAtom, contextMenuAtom, getPortBadge, workflowsAtom, getBlockTypeDisplayName, switchPageFnAtom } from '../state/atoms';
+import { blockRuntimeAtom, activeWireAtom, snapTargetAtom, triggerSaveAtom, contextMenuAtom, getPortBadge, workflowsAtom, getBlockTypeDisplayName, switchPageFnAtom, isPreviewModeAtom } from '../state/atoms';
 import { useMemo, useRef, useState } from 'react';
 import { useBlockDrag } from '../hooks/useBlockDrag';
 
@@ -28,6 +28,8 @@ const ButtonBlockComponent = (props: NodeViewProps) => {
 
   const { position, handlePointerDown, handlePointerMove, handlePointerUp } = useBlockDrag(blockId, containerRef as React.RefObject<HTMLElement>);
 
+  const isPreviewMode = useAtomValue(isPreviewModeAtom);
+
   const onPointerUp = (e: React.PointerEvent) => {
     const wasClick = handlePointerUp(e);
     if (wasClick) {
@@ -35,6 +37,18 @@ const ButtonBlockComponent = (props: NodeViewProps) => {
       console.log('[DIAG] ButtonBlock clicked! blockId =', blockId);
       console.log('[DIAG] FULL current contents of workflowsAtom in store:', JSON.stringify(currentWorkflows, null, 2));
       executeWorkflow(blockId, 'onClick', store);
+
+      // In Preview Mode, direct click-to-navigate is active if targetPageId is configured
+      if (isPreviewMode) {
+        const targetPageId = runtimeState?.targetPageId;
+        if (targetPageId) {
+          const switchPageFn = store.get(switchPageFnAtom);
+          if (switchPageFn) {
+            switchPageFn(targetPageId);
+          }
+        }
+      }
+
       triggerSave(prev => prev + 1);
     }
   };
@@ -42,6 +56,7 @@ const ButtonBlockComponent = (props: NodeViewProps) => {
   const onContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    if (isPreviewMode) return;
     const container = containerRef.current;
     if (!container) return;
     const containerRect = container.getBoundingClientRect();

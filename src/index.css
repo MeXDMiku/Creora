@@ -121,6 +121,7 @@ code {
 [class^="node-timerBlock"],
 [class^="node-historyChartBlock"],
 [class^="node-databaseBlock"],
+[class^="node-listBlock"],
 div[data-node-view-wrapper][class*="button-block-wrapper"],
 div[data-node-view-wrapper][class*="number-display-block-wrapper"],
 div[data-node-view-wrapper][class*="formula-display-block-wrapper"],
@@ -129,7 +130,8 @@ div[data-node-view-wrapper][class*="input-block-wrapper"],
 div[data-node-view-wrapper][class*="text-label-block-wrapper"],
 div[data-node-view-wrapper][class*="timer-block-wrapper"],
 div[data-node-view-wrapper][class*="history-chart-block-wrapper"],
-div[data-node-view-wrapper][class*="database-block-wrapper"] {
+div[data-node-view-wrapper][class*="database-block-wrapper"],
+div[data-node-view-wrapper][class*="list-block-wrapper"] {
   height: 0 !important;
   overflow: visible !important;
   margin: 0 !important;
@@ -152,5 +154,18 @@ div[data-node-view-wrapper][class*="database-block-wrapper"] {
 
 .ProseMirror:focus {
   outline: none;
+}
+
+/* Hide port dots completely on every block when editor-container is in preview-mode */
+#editor-container.preview-mode [data-port-output],
+#editor-container.preview-mode [data-port-input] {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* Hide floating metadata labels above blocks when editor-container is in preview-mode */
+#editor-container.preview-mode [class*="-block-wrapper"] > div:first-child {
+  opacity: 0 !important;
+  pointer-events: none !important;
 }
 
