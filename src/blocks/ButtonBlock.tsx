@@ -6,6 +6,7 @@ import { executeWorkflow } from '../lib/bindingEngine';
 import { blockRuntimeAtom, activeWireAtom, snapTargetAtom, triggerSaveAtom, contextMenuAtom, getPortBadge, workflowsAtom, getBlockTypeDisplayName, switchPageFnAtom, isPreviewModeAtom } from '../state/atoms';
 import { useMemo, useRef, useState } from 'react';
 import { useBlockDrag } from '../hooks/useBlockDrag';
+import { blockToCSS } from '../lib/renderBlockStyles';
 
 const ButtonBlockComponent = (props: NodeViewProps) => {
   const { node } = props;
@@ -97,18 +98,13 @@ const ButtonBlockComponent = (props: NodeViewProps) => {
   // Right port is visible on hover only
   const showRightPort = isHovered;
 
+  const { outer: outerStyle, inner: innerStyle } = blockToCSS('buttonBlock', position, runtimeState);
+
   return (
     <NodeViewWrapper 
       as="div" 
       className="button-block-wrapper" 
-      style={{ 
-        display: 'block', 
-        position: 'absolute', 
-        left: `${position.x}px`, 
-        top: `${position.y}px`, 
-        width: runtimeState?.width !== undefined ? `${runtimeState.width}px` : 'max-content',
-        opacity: runtimeState?.opacity !== undefined ? runtimeState.opacity / 100 : 1
-      }}
+      style={outerStyle}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={onPointerUp}
@@ -133,20 +129,7 @@ const ButtonBlockComponent = (props: NodeViewProps) => {
       </div>
       <div
         contentEditable={false}
-        style={{
-          padding: '8px 16px',
-          background: runtimeState?.backgroundColor || '#6366f1',
-          color: runtimeState?.textColor || 'white',
-          borderRadius: runtimeState?.borderRadius !== undefined ? `${runtimeState.borderRadius}px` : '8px',
-          cursor: 'pointer',
-          border: 'none',
-          fontSize: runtimeState?.fontSize !== undefined ? `${runtimeState.fontSize}px` : '14px',
-          userSelect: 'none',
-          display: 'inline-block',
-          textAlign: 'center',
-          width: runtimeState?.width !== undefined ? '100%' : 'auto',
-          boxSizing: 'border-box'
-        }}
+        style={innerStyle}
       >
         {label}
       </div>

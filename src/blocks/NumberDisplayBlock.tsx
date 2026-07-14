@@ -5,6 +5,7 @@ import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { blockRuntimeAtom, activeWireAtom, snapTargetAtom, contextMenuAtom, getPortBadge, getBlockTypeDisplayName } from '../state/atoms';
 import { useMemo, useRef, useState } from 'react';
 import { useBlockDrag } from '../hooks/useBlockDrag';
+import { blockToCSS } from '../lib/renderBlockStyles';
 
 const NumberDisplayBlockComponent = (props: NodeViewProps) => {
   const store = useStore();
@@ -66,18 +67,13 @@ const NumberDisplayBlockComponent = (props: NodeViewProps) => {
   const isSnapTarget = snapTarget === blockId;
   const showRightPort = isHovered;
 
+  const { outer: outerStyle, inner: innerStyle } = blockToCSS('numberDisplayBlock', position, runtimeState);
+
   return (
     <NodeViewWrapper 
       as="div" 
       className="number-display-block-wrapper" 
-      style={{ 
-        display: 'block', 
-        position: 'absolute', 
-        left: `${position.x}px`, 
-        top: `${position.y}px`, 
-        width: runtimeState?.width !== undefined ? `${runtimeState.width}px` : 'max-content',
-        opacity: runtimeState?.opacity !== undefined ? runtimeState.opacity / 100 : 1
-      }}
+      style={outerStyle}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
@@ -103,20 +99,7 @@ const NumberDisplayBlockComponent = (props: NodeViewProps) => {
       <div
         contentEditable={false}
         style={{
-          fontSize: runtimeState?.fontSize !== undefined ? `${runtimeState.fontSize}px` : '2rem',
-          fontWeight: 700,
-          color: runtimeState?.textColor || '#ffffff',
-          background: runtimeState?.backgroundColor || '#1e293b',
-          borderRadius: runtimeState?.borderRadius !== undefined ? `${runtimeState.borderRadius}px` : '8px',
-          padding: '12px 24px',
-          minWidth: '80px',
-          minHeight: '48px',
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: runtimeState?.width !== undefined ? '100%' : 'auto',
-          boxSizing: 'border-box',
-          userSelect: 'none',
+          ...innerStyle,
           cursor: 'move',
         }}
       >
