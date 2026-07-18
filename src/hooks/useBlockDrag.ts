@@ -70,7 +70,7 @@ export function useBlockDrag(blockId: string, containerRef: React.RefObject<HTML
       });
       triggerSave(prev => prev + 1);
     }
-  }, [setPosition, containerRef, triggerSave]);
+  }, [setPosition, containerRef, triggerSave, isPreviewMode]);
 
   const handlePointerUp = useCallback((e: React.PointerEvent) => {
     if (!dragState.current) return;

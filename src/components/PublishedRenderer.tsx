@@ -177,9 +177,7 @@ export default function PublishedRenderer() {
       try {
         setLoading(true);
         const { data, error } = await supabase
-          .from('pages')
-          .select('*')
-          .eq('id', pageId)
+          .rpc('get_page', { p_id: pageId })
           .maybeSingle();
 
         if (error) throw error;

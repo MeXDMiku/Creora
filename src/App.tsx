@@ -1820,13 +1820,11 @@ function App() {
         }
 
         const { error } = await supabase
-          .from('pages')
-          .update({
-            blocks: blocksPayload,
-            workflows,
-            updated_at: new Date().toISOString()
+          .rpc('save_page', {
+            p_id: activePageIdRef.current,
+            p_blocks: blocksPayload,
+            p_workflows: workflows
           })
-          .eq('id', activePageIdRef.current)
 
         if (error) throw error
         setSaveStatus('Saved')
@@ -2138,16 +2136,14 @@ function App() {
   const fetchPagesList = useCallback(async () => {
     try {
       const { data, error } = await supabase
-        .from('pages')
-        .select('id, blocks')
-        .order('updated_at', { ascending: true })
+        .rpc('list_pages')
 
       if (error) throw error
 
       if (data) {
-        const list = data.map((p, idx) => ({
+        const list = data.map((p: any) => ({
           id: p.id,
-          name: p.blocks?.pageName || (p.id === PAGE_ID ? 'Page 1' : `Page ${idx + 1}`)
+          name: p.page_name || 'Untitled'
         }))
         setPagesList(list)
       }
@@ -2207,14 +2203,13 @@ function App() {
         pageName
       }
 
-      await supabase
-        .from('pages')
-        .update({
-          blocks: blocksPayload,
-          workflows,
-          updated_at: new Date().toISOString()
+      const { error } = await supabase
+        .rpc('save_page', {
+          p_id: pageId,
+          p_blocks: blocksPayload,
+          p_workflows: workflows
         })
-        .eq('id', pageId)
+      if (error) throw error
     } catch (err) {
       console.error('Failed to save page data:', pageId, err)
     }
@@ -2261,9 +2256,7 @@ function App() {
     // 5. Load target page from Supabase
     try {
       const { data, error } = await supabase
-        .from('pages')
-        .select('*')
-        .eq('id', targetPageId)
+        .rpc('get_page', { p_id: targetPageId })
         .maybeSingle()
 
       if (error) throw error
@@ -2370,11 +2363,9 @@ function App() {
 
     try {
       const { error } = await supabase
-        .from('pages')
-        .insert({
-          id: newPageId,
-          blocks: defaultBlocks,
-          workflows: []
+        .rpc('create_page', {
+          p_id: newPageId,
+          p_blocks: defaultBlocks
         })
 
       if (error) throw error
@@ -2400,14 +2391,12 @@ function App() {
         setSaveStatus('Ready')
 
         // 1. Fetch all pages
-        const { data: allPages, error: fetchErr } = await supabase
-          .from('pages')
-          .select('id, blocks, workflows')
-          .order('updated_at', { ascending: true })
+        const { data: allPagesList, error: fetchErr } = await supabase
+          .rpc('list_pages')
 
         if (fetchErr) throw fetchErr
 
-        let pages = allPages || []
+        let pages = allPagesList || []
         const hasDefaultPage = pages.some(p => p.id === PAGE_ID)
         
         if (!hasDefaultPage) {
@@ -2433,37 +2422,42 @@ function App() {
             pageName: 'Page 1'
           }
           
-          const { data: newRow, error: insertError } = await supabase
-            .from('pages')
-            .insert({
-              id: PAGE_ID,
-              blocks: defaultBlocks,
-              workflows: []
+          const { error: insertError } = await supabase
+            .rpc('create_page', {
+              p_id: PAGE_ID,
+              p_blocks: defaultBlocks
             })
-            .select()
-            .single()
 
           if (insertError) throw insertError
-          pages = [newRow, ...pages]
+          
+          // Re-fetch list
+          const { data: refreshedList, error: refreshErr } = await supabase
+            .rpc('list_pages')
+          if (refreshErr) throw refreshErr
+          pages = refreshedList || []
         }
 
-        let pagesListFetched: any[] = pages
-        const list = pagesListFetched.map((p, idx) => ({
+        const list = pages.map((p: any) => ({
           id: p.id,
-          name: p.blocks?.pageName || (p.id === PAGE_ID ? 'Page 1' : `Page ${idx + 1}`)
+          name: p.page_name || 'Untitled'
         }))
         setPagesList(list)
 
         // 2. Resolve active page ID
         let lastActiveId = localStorage.getItem('creora_active_page_id')
-        if (!lastActiveId || !pagesListFetched.some(p => p.id === lastActiveId)) {
+        if (!lastActiveId || !pages.some(p => p.id === lastActiveId)) {
           lastActiveId = PAGE_ID
         }
         setActivePageId(lastActiveId)
         localStorage.setItem('creora_active_page_id', lastActiveId)
 
         // 3. Load active page data
-        const activePageData = pagesListFetched.find(p => p.id === lastActiveId)
+        const { data: activePageData, error: activePageErr } = await supabase
+          .rpc('get_page', { p_id: lastActiveId })
+          .maybeSingle()
+
+        if (activePageErr) throw activePageErr
+
         if (activePageData && editor) {
           const blocksData = activePageData.blocks || {}
           const workflowsData = activePageData.workflows || []

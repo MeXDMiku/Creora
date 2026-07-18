@@ -65,10 +65,7 @@ const ListBlockComponent = (props: NodeViewProps) => {
     }
 
     supabase
-      .from('database_rows')
-      .select('*')
-      .eq('database_block_id', trackedBlockId)
-      .order('created_at', { ascending: true })
+      .rpc('list_database_rows', { p_block_id: trackedBlockId })
       .then(({ data, error }: any) => {
         if (error) {
           console.warn('[ListBlock] Supabase fetch warning:', error.message);

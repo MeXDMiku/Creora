@@ -179,12 +179,10 @@ export function executeWorkflow(
           // Insert into Supabase
           try {
             supabase
-              .from('database_rows')
-              .insert({
-                id: rowId,
-                database_block_id: step.targetId,
-                row_data: defaultData,
-                created_at: new Date().toISOString()
+              .rpc('add_database_row', {
+                p_id: rowId,
+                p_block_id: step.targetId,
+                p_row_data: defaultData
               })
               .then(({ error }: any) => {
                 if (error) {
@@ -302,17 +300,15 @@ export function executeWorkflow(
           // Sync to Supabase: Fetch current data object first, merge overrides, and save back
           try {
             supabase
-              .from('database_rows')
-              .select('row_data')
-              .eq('id', matchedRow.id)
-              .single()
-              .then(({ data: dbRow, error: selectError }: any) => {
+              .rpc('list_database_rows', { p_block_id: step.targetId })
+              .then(({ data: dbRows, error: selectError }: any) => {
                 if (selectError) {
                   console.warn('[Supabase execute info]: Could not fetch current row from Supabase.', selectError.message);
                   return;
                 }
 
-                const currentData = dbRow?.row_data || {};
+                const matchedDbRow = dbRows?.find((r: any) => r.id === matchedRow.id);
+                const currentData = matchedDbRow?.row_data || {};
                 const mergedData = { ...currentData };
 
                 columns.forEach((col: any) => {
@@ -353,11 +349,10 @@ export function executeWorkflow(
 
                 // Write merged object back to Supabase using row ID
                 supabase
-                  .from('database_rows')
-                  .update({
-                    row_data: mergedData
+                  .rpc('update_database_row', {
+                    p_id: matchedRow.id,
+                    p_row_data: mergedData
                   })
-                  .eq('id', matchedRow.id)
                   .then(({ error: updateError }: any) => {
                     if (updateError) {
                       console.warn('[Supabase execute info]: Could not update row via workflow action.', updateError.message);
@@ -439,9 +434,7 @@ export function executeWorkflow(
           // Delete from Supabase
           try {
             supabase
-              .from('database_rows')
-              .delete()
-              .eq('id', targetRow.id)
+              .rpc('delete_database_row', { p_id: targetRow.id })
               .then(({ error }: any) => {
                 if (error) {
                   console.warn('[Supabase execute info]: Could not delete row via workflow action, falling back to local state.', error.message);
@@ -621,10 +614,7 @@ export function recalculateAllFormulas(store: any) {
       const trackedId = listState?.trackedBlockId;
       if (trackedId) {
         supabase
-          .from('database_rows')
-          .select('*')
-          .eq('database_block_id', trackedId)
-          .order('created_at', { ascending: true })
+          .rpc('list_database_rows', { p_block_id: trackedId })
           .then(({ data, error }: any) => {
             if (error) {
               console.warn('[ListBlock recalculate] Supabase fetch error:', error.message);
@@ -636,10 +626,13 @@ export function recalculateAllFormulas(store: any) {
                 ...item.row_data
               }));
               const currentListState = store.get(listAtom);
-              store.set(listAtom, {
-                ...currentListState,
-                rows: parsedRows
-              });
+              const currentListRows = currentListState?.rows || [];
+              if (parsedRows.length > 0 || currentListRows.length === 0) {
+                store.set(listAtom, {
+                  ...currentListState,
+                  rows: parsedRows
+                });
+              }
             }
           });
       }

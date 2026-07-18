@@ -25,7 +25,7 @@ All blocks are implemented as custom TipTap nodes in `src/blocks/` and render th
 
 * **Block Dragging**
   * **Implementation:** `src/hooks/useBlockDrag.ts` and the `onPointerDown`/`onPointerMove`/`onPointerUp` wrappers in each individual block component.
-  * **Mechanism:** Utilizes pointer capture via `setPointerCapture` and `releasePointerCapture` on drag start. Tracks changes relative to `#editor-container` and updates `blockPositionAtom` via Jotai, triggering saves.
+  * **Mechanism:** Utilizes pointer capture via `setPointerCapture` and `releasePointerCapture` on drag start. Tracks changes relative to `#editor-container` and updates `blockPositionAtom` via Jotai, triggering saves. *Note: Fixed a bug where Preview Mode changes were not registered due to a missing dependency in the drag hook array.*
 * **Wire Drawing**
   * **Implementation:** `src/components/WireOverlay.tsx` (for SVG overlay rendering) and `src/App.tsx` (for canvas drag-end snapping & logic initialization).
   * **Mechanism:** Clicking an output port sets the `activeWireAtom`. Snaps to input ports within a 20px radius. Snapped target is held in `snapTargetAtom`. Drawing a valid wire opens the `ConnectionPopup` at target coordinates.
@@ -37,7 +37,7 @@ All blocks are implemented as custom TipTap nodes in `src/blocks/` and render th
   * **Mechanism:** Evaluates matched triggers. Conditions can check another block's value with operators. If checks pass, executes steps like `increment`/`decrement`, `set` (with `__sourceValue__` support), `toggle`, `setVisible`, `setHidden`, `addRow`, `updateRow`, and `deleteRow`.
 * **Supabase Persistence & Multi-Page Support**
   * **Implementation:** `src/lib/supabase.ts` (Supabase client instance) and `src/App.tsx` (`initApp`, `savePageData`, `switchPage`, and `createNewPage` functions).
-  * **Mechanism:** Pages are saved and loaded independently. The list of pages is queried on mount. A switcher in the header lets users tab between pages or click "+ New Page" to create a new row in Supabase. Switching uses `editor.commands.setContent()` with a 150ms crossfade (fading the canvas elements to `opacity: 0` before switching content and fading back in) without unmounting the TipTap editor. The active page ID is persisted in `localStorage` so refreshing the browser restores the last active page.
+  * **Mechanism:** Pages are saved and loaded independently using secure RPC calls. RLS on the `pages` and `database_rows` tables is fully locked down (direct access via the anon key returns nothing). All reads and writes are routed through eight security definer RPC functions: `get_page`, `list_pages`, `save_page`, `create_page`, `list_database_rows`, `add_database_row`, `update_database_row`, and `delete_database_row`. Switching pages uses `editor.commands.setContent()` with a 150ms crossfade without unmounting the TipTap editor. The active page ID is persisted in `localStorage` so refreshing the browser restores the last active page.
 * **Right-Click Context Menu**
   * **Implementation:** `src/App.tsx` (`ContextMenu` component) and capturing-phase click listeners inside blocks.
   * **Mechanism:** Triggers on `contextmenu` events. Allows users to "Delete Block" (removing the node, removing Jotai state instances, cleaning up connections/workflows) or "Disconnect all wires".
@@ -52,7 +52,7 @@ All blocks are implemented as custom TipTap nodes in `src/blocks/` and render th
   * **Mechanism:** Watches a target block's value changes, appends them to a sliding array, and caps the history at 20 entries maximum.
 * **Database Block Persistence**
   * **Implementation:** `src/blocks/DatabaseBlock.tsx` & `src/lib/bindingEngine.ts`.
-  * **Mechanism:** Cell updates are debounced by 500ms and synced to a dedicated Supabase table `database_rows`. Row additions/deletions update local state and Supabase immediately.
+  * **Mechanism:** Cell updates are debounced by 500ms and synced to the `database_rows` Supabase table. *Note: The `database_rows` table has been created and verified. Prior to this fix, the table did not actually exist in the database (all row data was nested inside the page's saved JSON payload and survived intact during the migration).*
 
 ---
 
@@ -71,14 +71,15 @@ All blocks are implemented as custom TipTap nodes in `src/blocks/` and render th
 5. **No SQL/Direct Expression Evaluation**
    * In compliance with architecture rule 7/13, no direct SQL query or JavaScript `eval` is used. Conditional checks use hardcoded operator cases, and direct values use the binding engine parser.
 6. **Update Row Verification Status**
-   * Update Row is implemented but NOT fully verified — testing suggested a possible coupling between which column is used as the match matcher and which column's new value actually gets applied, not yet confirmed or resolved. Treat as unverified until revisited.
+   * Update Row is implemented but NOT fully verified — testing suggested a possible coupling between which column is used as the match matcher and which column's new value actually gets applied. This matcher bug remains unverified and unresolved.
+7. **No Local Supabase DB Credentials**
+   * There are no stored database passwords or credentials locally in the workspace. Any SQL/DDL operations must be executed manually in the Supabase Dashboard SQL Editor. After any DDL schema change, an explicit `NOTIFY pgrst, 'reload schema';` command must be run to refresh PostgREST's stale schema cache.
 
 ---
 
 ## What Does NOT Exist Yet
 
 The following concepts have been discussed but are **NOT** implemented in the codebase yet:
-* **Publishing:** The published site renderer (`Rule 8`) does not exist yet. Only the `EDITOR` (the interactive canvas) is implemented.
 * **Desktop App:** The codebase is purely a web application and lacks desktop environment wrappers.
 * **AI Integration:** No AI tools or prompt widgets are implemented in the UI.
 

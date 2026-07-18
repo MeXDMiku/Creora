@@ -38,10 +38,7 @@ const DatabaseBlockComponent = (props: NodeViewProps) => {
     async function loadRows() {
       try {
         const { data, error } = await supabase
-          .from('database_rows')
-          .select('*')
-          .eq('database_block_id', blockId)
-          .order('created_at', { ascending: true });
+          .rpc('list_database_rows', { p_block_id: blockId });
 
         if (error) {
           console.warn('[Supabase load info]: Table public.database_rows not initialized or missing, using local state.', error.message);
@@ -54,21 +51,26 @@ const DatabaseBlockComponent = (props: NodeViewProps) => {
             ...item.row_data
           }));
 
-          // Sync value based on outputMode
-          let nextValue = 0;
-          if (outputMode === 'row_count') {
-            nextValue = parsedRows.length;
-          } else {
-            const lastRow = parsedRows[parsedRows.length - 1];
-            nextValue = lastRow ? lastRow[outputMode] : 0;
-          }
+          const currentLocalState = store.get(atomInstance);
+          const currentLocalRows = currentLocalState?.rows || [];
 
-          store.set(atomInstance, {
-            ...runtimeState,
-            rows: parsedRows,
-            value: nextValue
-          });
-          recalculateAllFormulas(store);
+          if (parsedRows.length > 0 || currentLocalRows.length === 0) {
+            // Sync value based on outputMode
+            let nextValue = 0;
+            if (outputMode === 'row_count') {
+              nextValue = parsedRows.length;
+            } else {
+              const lastRow = parsedRows[parsedRows.length - 1];
+              nextValue = lastRow ? lastRow[outputMode] : 0;
+            }
+
+            store.set(atomInstance, {
+              ...runtimeState,
+              rows: parsedRows,
+              value: nextValue
+            });
+            recalculateAllFormulas(store);
+          }
         }
       } catch (err) {
         console.error('Error fetching database rows from Supabase:', err);
@@ -86,9 +88,7 @@ const DatabaseBlockComponent = (props: NodeViewProps) => {
     debouncedSaveRef.current[rowId] = setTimeout(async () => {
       try {
         const { error } = await supabase
-          .from('database_rows')
-          .update({ row_data: rowData })
-          .eq('id', rowId);
+          .rpc('update_database_row', { p_id: rowId, p_row_data: rowData });
         if (error) {
           console.warn('[Supabase save info]: Could not update row, falling back to local state.', error.message);
         }
@@ -165,12 +165,10 @@ const DatabaseBlockComponent = (props: NodeViewProps) => {
     // Insert row to Supabase
     try {
       const { error } = await supabase
-        .from('database_rows')
-        .insert({
-          id: rowId,
-          database_block_id: blockId,
-          row_data: defaultData,
-          created_at: new Date().toISOString()
+        .rpc('add_database_row', {
+          p_id: rowId,
+          p_block_id: blockId,
+          p_row_data: defaultData
         });
       if (error) {
         console.warn('[Supabase save info]: Could not insert row, falling back to local state.', error.message);
@@ -204,9 +202,7 @@ const DatabaseBlockComponent = (props: NodeViewProps) => {
     // Delete row from Supabase
     try {
       const { error } = await supabase
-        .from('database_rows')
-        .delete()
-        .eq('id', rowId);
+        .rpc('delete_database_row', { p_id: rowId });
       if (error) {
         console.warn('[Supabase save info]: Could not delete row, falling back to local state.', error.message);
       }
