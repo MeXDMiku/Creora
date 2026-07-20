@@ -71,7 +71,7 @@ All blocks are implemented as custom TipTap nodes in `src/blocks/` and render th
 5. **No SQL/Direct Expression Evaluation**
    * In compliance with architecture rule 7/13, no direct SQL query or JavaScript `eval` is used. Conditional checks use hardcoded operator cases, and direct values use the binding engine parser.
 6. **Update Row Verification Status**
-   * Update Row is implemented but NOT fully verified — testing suggested a possible coupling between which column is used as the match matcher and which column's new value actually gets applied. This matcher bug remains unverified and unresolved.
+   * Update Row is implemented and fully verified — the matcher correctly uses the specified column for matching, and updates the mapped columns independently without cross-coupling.
 7. **No Local Supabase DB Credentials**
    * There are no stored database passwords or credentials locally in the workspace. Any SQL/DDL operations must be executed manually in the Supabase Dashboard SQL Editor. After any DDL schema change, an explicit `NOTIFY pgrst, 'reload schema';` command must be run to refresh PostgREST's stale schema cache.
 
