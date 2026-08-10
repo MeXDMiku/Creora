@@ -1,0 +1,49 @@
+# Keeps the Supabase project from being paused for inactivity.
+#
+# Supabase pauses a Free-plan project after roughly a week without enough
+# database activity. A paused project's hostname stops resolving entirely, so
+# the app cannot load or save, and any published /view/ page is offline. This
+# happened on 10 Aug 2026: the project had been idle since 20 Jul.
+#
+# This calls one read-only RPC every day, which counts as activity.
+#
+# SETUP (once):
+#   GitHub repo -> Settings -> Secrets and variables -> Actions -> New repository secret
+#     SUPABASE_URL       https://<project-ref>.supabase.co
+#     SUPABASE_ANON_KEY  the anon/public key from .env.local
+#   (The anon key already ships in the browser bundle and is guarded by RLS,
+#   but keeping it in secrets avoids pasting keys into the repo.)
+#
+# This is a workaround for a Free-plan constraint, not a fix. Anything with
+# real visitors generates its own activity; a paid project never pauses.
+
+name: Keep Supabase awake
+
+on:
+  schedule:
+    - cron: '17 6 * * *' # daily, 06:17 UTC
+  workflow_dispatch: # also runnable by hand from the Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call list_pages RPC
+        run: |
+          if [ -z "${{ secrets.SUPABASE_URL }}" ] || [ -z "${{ secrets.SUPABASE_ANON_KEY }}" ]; then
+            echo "::error::SUPABASE_URL or SUPABASE_ANON_KEY secret is not set. See the setup notes in this file."
+            exit 1
+          fi
+          code=$(curl -s -o /tmp/body.txt -w '%{http_code}' --max-time 30 \
+            -X POST "${{ secrets.SUPABASE_URL }}/rest/v1/rpc/list_pages" \
+            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{}')
+          echo "HTTP $code"
+          if [ "$code" != "200" ]; then
+            echo "::error::Supabase did not answer with 200. It may be paused again, or list_pages may have changed."
+            head -c 500 /tmp/body.txt
+            exit 1
+          fi
+          echo "Project is awake."
