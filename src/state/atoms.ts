@@ -1,15 +1,16 @@
 import { atom } from 'jotai';
 import { atomFamily } from 'jotai/utils';
 import type { Workflow, FormulaBinding, Page, BlockRuntimeState } from '../types/creora';
+import { nodeTypeFromBlockId, defaultValueForNodeType, defaultRuntimeForNodeType, shortBlockId } from '../lib/blockRegistry';
 
+/**
+ * Block type is resolved from the ID via the registry, which is exact for
+ * `<nodeType>__<random>` IDs and falls back to the legacy heuristic for the
+ * old `test_*` fixture IDs. Do not substring-match block IDs here — a random
+ * suffix can contain any letters, so `id.includes('db')` matched by accident.
+ */
 export function getBlockDefaultValue(identifier: string): any {
-  const id = identifier.toLowerCase();
-  if (id.includes('tgl') || id.includes('toggle')) return false;
-  if (id.includes('inp') || id.includes('input') || id.includes('lbl') || id.includes('label') || id.includes('shp') || id.includes('shape')) return '';
-  if (id.includes('tmr') || id.includes('timer')) return false;
-  if (id.includes('db') || id.includes('database')) return 0;
-  if (id.includes('list')) return '';
-  return 0;
+  return defaultValueForNodeType(nodeTypeFromBlockId(identifier));
 }
 
 export function getBlockTypeDisplayName(nodeType: string): string {
@@ -34,28 +35,9 @@ export function isGarbageName(name: string | undefined | null): boolean {
   return false;
 }
 
+
 export const blockRuntimeAtom = atomFamily((blockId: string) => {
-  const isChart = blockId.toLowerCase().includes('chart') || blockId.toLowerCase().includes('history');
-  const isDb = blockId.toLowerCase().includes('db') || blockId.toLowerCase().includes('database');
-  const isList = blockId.toLowerCase().includes('list');
-  const isShape = blockId.toLowerCase().includes('shp') || blockId.toLowerCase().includes('shape');
-  return atom<BlockRuntimeState>({
-    value: getBlockDefaultValue(blockId),
-    visible: true,
-    disabled: false,
-    loading: false,
-    error: null,
-    columns: isDb ? [
-      { name: 'Name', type: 'text' },
-      { name: 'Age', type: 'number' }
-    ] : undefined,
-    rows: isDb ? [] : undefined,
-    outputMode: isDb ? 'row_count' : undefined,
-    trackedBlockId: (isChart || isList) ? '' : undefined,
-    history: isChart ? [] : undefined,
-    text: isShape ? '' : undefined,
-    role: isShape ? null : undefined,
-  });
+  return atom<BlockRuntimeState>(defaultRuntimeForNodeType(nodeTypeFromBlockId(blockId)));
 });
 
 export const blockPositionAtom = atomFamily((blockId: string) => {
@@ -178,7 +160,7 @@ export function getCanvasBlocks(editor: any, store: any, excludeBlockId?: string
       const dataType = getBlockDataType(typeName);
       const runtime = store.get(blockRuntimeAtom(bId));
       const name = runtime?.blockName || getBlockTypeDisplayName(typeName);
-      const label = `${name} (${bId})`;
+      const label = `${name} (${shortBlockId(bId)})`;
       list.push({ id: bId, type: typeName, label, dataType });
     }
   });

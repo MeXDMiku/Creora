@@ -3,6 +3,7 @@ import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { useSetAtom, useAtom, useAtomValue, useStore } from 'jotai'
 import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, getCanvasBlocks, currentPageIdAtom, pagesListAtom, switchPageFnAtom, isPreviewModeAtom, canvasModeAtom } from './state/atoms'
+import { newBlockId, defaultRuntimeForNodeType, defaultAttrsForNodeType, BLOCK_FOOTPRINT, type BlockNodeType } from './lib/blockRegistry'
 import { ButtonBlock } from './blocks/ButtonBlock'
 import { NumberDisplayBlock } from './blocks/NumberDisplayBlock'
 import { TextLabelBlock } from './blocks/TextLabelBlock'
@@ -1557,13 +1558,7 @@ function App() {
           <path d="M6 12h12" />
         </svg>
       ),
-      action: () => {
-        if (!blockExists('test_btn_1')) {
-          insertButtonBlock()
-        } else {
-          insertButtonBlock2()
-        }
-      }
+      action: () => insertBlock('buttonBlock')
     },
     {
       id: 'numberDisplay',
@@ -1576,13 +1571,7 @@ function App() {
           <line x1="15" y1="9" x2="9" y2="15" />
         </svg>
       ),
-      action: () => {
-        if (!blockExists('test_num_1')) {
-          insertNumberDisplay()
-        } else {
-          insertNumberDisplay2()
-        }
-      }
+      action: () => insertBlock('numberDisplayBlock')
     },
     {
       id: 'toggle',
@@ -1594,13 +1583,7 @@ function App() {
           <circle cx="8" cy="12" r="3" fill="currentColor" />
         </svg>
       ),
-      action: () => {
-        if (!blockExists('test_tgl_1')) {
-          insertToggleBlock()
-        } else {
-          insertToggleBlock2()
-        }
-      }
+      action: () => insertBlock('toggleBlock')
     },
     {
       id: 'input',
@@ -1614,13 +1597,7 @@ function App() {
           <line x1="16" y1="3" x2="14" y2="21" />
         </svg>
       ),
-      action: () => {
-        if (!blockExists('test_inp_1')) {
-          insertInputBlock()
-        } else {
-          insertInputBlock2()
-        }
-      }
+      action: () => insertBlock('inputBlock')
     },
     {
       id: 'textLabel',
@@ -1632,13 +1609,7 @@ function App() {
           <line x1="7" y1="7" x2="7.01" y2="7" />
         </svg>
       ),
-      action: () => {
-        if (!blockExists('test_lbl_1')) {
-          insertTextLabel()
-        } else {
-          insertTextLabel2()
-        }
-      }
+      action: () => insertBlock('textLabelBlock')
     },
     {
       id: 'formula',
@@ -1650,13 +1621,7 @@ function App() {
           <line x1="12" y1="12" x2="20" y2="12" />
         </svg>
       ),
-      action: () => {
-        if (!blockExists('test_frm_1')) {
-          insertFormulaDisplay()
-        } else {
-          insertFormulaDisplay2()
-        }
-      }
+      action: () => insertBlock('formulaDisplayBlock')
     },
     {
       id: 'timer',
@@ -1668,13 +1633,7 @@ function App() {
           <polyline points="12 6 12 12 16 14" />
         </svg>
       ),
-      action: () => {
-        if (!blockExists('test_tmr_1')) {
-          insertTimerBlock()
-        } else {
-          insertTimerBlock2()
-        }
-      }
+      action: () => insertBlock('timerBlock')
     },
     {
       id: 'historyChart',
@@ -1687,13 +1646,7 @@ function App() {
           <line x1="6" y1="20" x2="6" y2="14" />
         </svg>
       ),
-      action: () => {
-        if (!blockExists('test_chart_1')) {
-          insertHistoryChart()
-        } else {
-          insertHistoryChart2()
-        }
-      }
+      action: () => insertBlock('historyChartBlock')
     },
     {
       id: 'databaseBlock',
@@ -1708,13 +1661,7 @@ function App() {
           <line x1="15" y1="9" x2="15" y2="21" />
         </svg>
       ),
-      action: () => {
-        if (!blockExists('test_db_1')) {
-          insertDatabaseBlock()
-        } else {
-          insertDatabaseBlock2()
-        }
-      }
+      action: () => insertBlock('databaseBlock')
     },
     {
       id: 'list',
@@ -1730,13 +1677,7 @@ function App() {
           <line x1="3" y1="18" x2="3.01" y2="18" />
         </svg>
       ),
-      action: () => {
-        if (!blockExists('test_list_1')) {
-          insertListBlock()
-        } else {
-          insertListBlock2()
-        }
-      }
+      action: () => insertBlock('listBlock')
     },
     {
       id: 'shape',
@@ -1747,13 +1688,7 @@ function App() {
           <rect x="3" y="3" width="18" height="18" rx="4" />
         </svg>
       ),
-      action: () => {
-        if (!blockExists('test_shp_1')) {
-          insertShapeBlock()
-        } else {
-          insertShapeBlock2()
-        }
-      }
+      action: () => insertBlock('shapeBlock')
     }
   ], [editor])
 
@@ -2582,386 +2517,53 @@ function App() {
   }, [editor, fetchPagesList])
 
   // Helper: check if a block with this ID already exists in the editor
-  function blockExists(blockId: string): boolean {
-    if (!editor) return false
-    let found = false
-    editor.state.doc.descendants((node: any) => {
-      if (node.attrs?.blockId === blockId) {
-        found = true
-        return false
-      }
-    })
-    return found
+  /** First free slot on a coarse grid, so new blocks never land on top of each other. */
+  function findFreePosition(): { x: number; y: number } {
+    const taken: { x: number; y: number }[] = []
+    if (editor) {
+      editor.state.doc.descendants((node: any) => {
+        const id = node.attrs?.blockId
+        if (id) taken.push(store.get(blockPositionAtom(id)))
+      })
+    }
+    const COLS = 4
+    const startX = 80
+    const startY = 60
+    const stepX = BLOCK_FOOTPRINT.width + 20
+    const stepY = BLOCK_FOOTPRINT.height + 20
+    for (let i = 0; i < 400; i++) {
+      const x = startX + (i % COLS) * stepX
+      const y = startY + Math.floor(i / COLS) * stepY
+      const clash = taken.some(
+        (p) => p && Math.abs(p.x - x) < stepX * 0.75 && Math.abs(p.y - y) < stepY * 0.75
+      )
+      if (!clash) return { x, y }
+    }
+    return { x: startX, y: startY }
   }
 
-  function insertButtonBlock() {
-    if (!editor || blockExists('test_btn_1')) return
-    editor.chain().focus('end').insertContent({
-      type: 'buttonBlock',
-      attrs: {
-        blockId: 'test_btn_1',
-        label: 'Increment Counter'
-      }
-    }).run()
-    store.set(blockPositionAtom('test_btn_1'), { x: 80, y: 60 })
-  }
-
-  function insertNumberDisplay() {
-    if (!editor || blockExists('test_num_1')) return
-    editor.chain().focus('end').insertContent({
-      type: 'numberDisplayBlock',
-      attrs: {
-        blockId: 'test_num_1'
-      }
-    }).run()
-    store.set(blockPositionAtom('test_num_1'), { x: 300, y: 60 })
-  }
-
-  function insertButtonBlock2() {
-    if (!editor || blockExists('test_btn_2')) return
-    editor.chain().focus('end').insertContent({
-      type: 'buttonBlock',
-      attrs: {
-        blockId: 'test_btn_2',
-        label: 'Counter B'
-      }
-    }).run()
-    store.set(blockPositionAtom('test_btn_2'), { x: 80, y: 200 })
-  }
-
-  function insertNumberDisplay2() {
-    if (!editor || blockExists('test_num_2')) return
-    editor.chain().focus('end').insertContent({
-      type: 'numberDisplayBlock',
-      attrs: {
-        blockId: 'test_num_2'
-      }
-    }).run()
-    store.set(blockPositionAtom('test_num_2'), { x: 300, y: 200 })
-  }
-
-  function insertTextLabel() {
-    if (!editor || blockExists('test_lbl_1')) return
-    editor.chain().focus('end').insertContent({
-      type: 'textLabelBlock',
-      attrs: {
-        blockId: 'test_lbl_1'
-      }
-    }).run()
-    store.set(blockPositionAtom('test_lbl_1'), { x: 520, y: 340 })
-  }
-
-  function insertTextLabel2() {
-    if (!editor || blockExists('test_lbl_2')) return
-    editor.chain().focus('end').insertContent({
-      type: 'textLabelBlock',
-      attrs: {
-        blockId: 'test_lbl_2'
-      }
-    }).run()
-    store.set(blockPositionAtom('test_lbl_2'), { x: 520, y: 440 })
-  }
-
-  function insertToggleBlock() {
-    if (!editor || blockExists('test_tgl_1')) return
-    editor.chain().focus('end').insertContent({
-      type: 'toggleBlock',
-      attrs: {
-        blockId: 'test_tgl_1'
-      }
-    }).run()
-    store.set(blockPositionAtom('test_tgl_1'), { x: 80, y: 340 })
-  }
-
-  function insertToggleBlock2() {
-    if (!editor || blockExists('test_tgl_2')) return
-    editor.chain().focus('end').insertContent({
-      type: 'toggleBlock',
-      attrs: {
-        blockId: 'test_tgl_2'
-      }
-    }).run()
-    store.set(blockPositionAtom('test_tgl_2'), { x: 300, y: 340 })
-  }
-
-  function insertInputBlock() {
-    if (!editor || blockExists('test_inp_1')) return
-    editor.chain().focus('end').insertContent({
-      type: 'inputBlock',
-      attrs: {
-        blockId: 'test_inp_1'
-      }
-    }).run()
-    store.set(blockPositionAtom('test_inp_1'), { x: 520, y: 60 })
-  }
-
-  function insertInputBlock2() {
-    if (!editor || blockExists('test_inp_2')) return
-    editor.chain().focus('end').insertContent({
-      type: 'inputBlock',
-      attrs: {
-        blockId: 'test_inp_2'
-      }
-    }).run()
-    store.set(blockPositionAtom('test_inp_2'), { x: 520, y: 200 })
-  }
-
-  function insertFormulaDisplay() {
-    if (!editor || blockExists('test_frm_1')) return
-    editor.chain().focus('end').insertContent({
-      type: 'formulaDisplayBlock',
-      attrs: {
-        blockId: 'test_frm_1'
-      }
-    }).run()
-    store.set(blockPositionAtom('test_frm_1'), { x: 300, y: 340 })
-  }
-
-  function insertFormulaDisplay2() {
-    if (!editor || blockExists('test_frm_2')) return
-    editor.chain().focus('end').insertContent({
-      type: 'formulaDisplayBlock',
-      attrs: {
-        blockId: 'test_frm_2'
-      }
-    }).run()
-    store.set(blockPositionAtom('test_frm_2'), { x: 300, y: 280 })
-  }
-
-  function insertTimerBlock() {
-    if (!editor || blockExists('test_tmr_1')) return
-    editor.chain().focus('end').insertContent({
-      type: 'timerBlock',
-      attrs: {
-        blockId: 'test_tmr_1'
-      }
-    }).run()
-    store.set(blockPositionAtom('test_tmr_1'), { x: 80, y: 280 })
-    store.set(blockRuntimeAtom('test_tmr_1'), {
-      value: false,
-      visible: true,
-      disabled: false,
-      loading: false,
-      error: null,
-      mode: 'countdown',
-      duration: 10,
-      autoStart: false,
-      backgroundColor: '#10b981',
-      textColor: '#ffffff'
-    })
-  }
-
-  function insertTimerBlock2() {
-    if (!editor || blockExists('test_tmr_2')) return
-    editor.chain().focus('end').insertContent({
-      type: 'timerBlock',
-      attrs: {
-        blockId: 'test_tmr_2'
-      }
-    }).run()
-    store.set(blockPositionAtom('test_tmr_2'), { x: 300, y: 280 })
-    store.set(blockRuntimeAtom('test_tmr_2'), {
-      value: false,
-      visible: true,
-      disabled: false,
-      loading: false,
-      error: null,
-      mode: 'countdown',
-      duration: 10,
-      autoStart: false,
-      backgroundColor: '#10b981',
-      textColor: '#ffffff'
-    })
-  }
-
-  function insertHistoryChart() {
-    if (!editor || blockExists('test_chart_1')) return
-    editor.chain().focus('end').insertContent({
-      type: 'historyChartBlock',
-      attrs: {
-        blockId: 'test_chart_1'
-      }
-    }).run()
-    store.set(blockPositionAtom('test_chart_1'), { x: 300, y: 180 })
-    store.set(blockRuntimeAtom('test_chart_1'), {
-      value: 0,
-      visible: true,
-      disabled: false,
-      loading: false,
-      error: null,
-      trackedBlockId: '',
-      history: [],
-      backgroundColor: '#1e293b',
-      textColor: '#ffffff'
-    })
-  }
-
-  function insertHistoryChart2() {
-    if (!editor || blockExists('test_chart_2')) return
-    editor.chain().focus('end').insertContent({
-      type: 'historyChartBlock',
-      attrs: {
-        blockId: 'test_chart_2'
-      }
-    }).run()
-    store.set(blockPositionAtom('test_chart_2'), { x: 300, y: 280 })
-    store.set(blockRuntimeAtom('test_chart_2'), {
-      value: 0,
-      visible: true,
-      disabled: false,
-      loading: false,
-      error: null,
-      trackedBlockId: '',
-      history: [],
-      backgroundColor: '#1e293b',
-      textColor: '#ffffff'
-    })
-  }
-
-  function insertDatabaseBlock() {
-    if (!editor || blockExists('test_db_1')) return
-    editor.chain().focus('end').insertContent({
-      type: 'databaseBlock',
-      attrs: {
-        blockId: 'test_db_1'
-      }
-    }).run()
-    store.set(blockPositionAtom('test_db_1'), { x: 80, y: 180 })
-    store.set(blockRuntimeAtom('test_db_1'), {
-      value: 0,
-      visible: true,
-      disabled: false,
-      loading: false,
-      error: null,
-      columns: [
-        { name: 'Name', type: 'text' },
-        { name: 'Age', type: 'number' }
-      ],
-      rows: [],
-      outputMode: 'row_count',
-      backgroundColor: '#ffffff',
-      borderRadius: 8
-    })
-  }
-
-  function insertDatabaseBlock2() {
-    if (!editor || blockExists('test_db_2')) return
-    editor.chain().focus('end').insertContent({
-      type: 'databaseBlock',
-      attrs: {
-        blockId: 'test_db_2'
-      }
-    }).run()
-    store.set(blockPositionAtom('test_db_2'), { x: 300, y: 280 })
-    store.set(blockRuntimeAtom('test_db_2'), {
-      value: 0,
-      visible: true,
-      disabled: false,
-      loading: false,
-      error: null,
-      columns: [
-        { name: 'Name', type: 'text' },
-        { name: 'Age', type: 'number' }
-      ],
-      rows: [],
-      outputMode: 'row_count',
-      backgroundColor: '#ffffff',
-      borderRadius: 8
-    })
-  }
-
-  function insertListBlock() {
-    if (!editor || blockExists('test_list_1')) return
-    editor.chain().focus('end').insertContent({
-      type: 'listBlock',
-      attrs: {
-        blockId: 'test_list_1'
-      }
-    }).run()
-    store.set(blockPositionAtom('test_list_1'), { x: 80, y: 180 })
-    store.set(blockRuntimeAtom('test_list_1'), {
-      value: '',
-      visible: true,
-      disabled: false,
-      loading: false,
-      error: null,
-      trackedBlockId: '',
-      backgroundColor: '#ffffff',
-      textColor: '#0f172a',
-      borderRadius: 8
-    })
-  }
-
-  function insertListBlock2() {
-    if (!editor || blockExists('test_list_2')) return
-    editor.chain().focus('end').insertContent({
-      type: 'listBlock',
-      attrs: {
-        blockId: 'test_list_2'
-      }
-    }).run()
-    store.set(blockPositionAtom('test_list_2'), { x: 300, y: 280 })
-    store.set(blockRuntimeAtom('test_list_2'), {
-      value: '',
-      visible: true,
-      disabled: false,
-      loading: false,
-      error: null,
-      trackedBlockId: '',
-      backgroundColor: '#ffffff',
-      textColor: '#0f172a',
-      borderRadius: 8
-    })
-  }
-
-  function insertShapeBlock() {
-    if (!editor || blockExists('test_shp_1')) return
-    editor.chain().focus('end').insertContent({
-      type: 'shapeBlock',
-      attrs: {
-        blockId: 'test_shp_1'
-      }
-    }).run()
-    store.set(blockPositionAtom('test_shp_1'), { x: 520, y: 340 })
-    store.set(blockRuntimeAtom('test_shp_1'), {
-      value: '',
-      text: '',
-      role: null,
-      visible: true,
-      disabled: false,
-      loading: false,
-      error: null,
-      backgroundColor: '#3b82f6',
-      textColor: '#ffffff',
-      borderRadius: 8,
-      width: 120,
-      height: 60,
-    })
-  }
-
-  function insertShapeBlock2() {
-    if (!editor || blockExists('test_shp_2')) return
-    editor.chain().focus('end').insertContent({
-      type: 'shapeBlock',
-      attrs: {
-        blockId: 'test_shp_2'
-      }
-    }).run()
-    store.set(blockPositionAtom('test_shp_2'), { x: 520, y: 440 })
-    store.set(blockRuntimeAtom('test_shp_2'), {
-      value: '',
-      text: '',
-      role: null,
-      visible: true,
-      disabled: false,
-      loading: false,
-      error: null,
-      backgroundColor: '#3b82f6',
-      textColor: '#ffffff',
-      borderRadius: 8,
-      width: 120,
-      height: 60,
-    })
+  /**
+   * Insert one block of the given type.
+   *
+   * Replaces the 22 hardcoded insertXBlock/insertXBlock2 functions, which
+   * capped every page at two blocks per type (the third insert was a silent
+   * no-op) and reused fixture IDs such as 'test_btn_1' across every page.
+   * Position and runtime state are set before insertContent so the block
+   * renders in place instead of flashing at the atom default.
+   */
+  function insertBlock(nodeType: BlockNodeType) {
+    if (!editor) return
+    const blockId = newBlockId(nodeType)
+    store.set(blockPositionAtom(blockId), findFreePosition())
+    store.set(blockRuntimeAtom(blockId), defaultRuntimeForNodeType(nodeType))
+    editor
+      .chain()
+      .focus('end')
+      .insertContent({
+        type: nodeType,
+        attrs: { blockId, ...defaultAttrsForNodeType(nodeType) },
+      })
+      .run()
   }
 
 
