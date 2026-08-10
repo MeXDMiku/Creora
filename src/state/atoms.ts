@@ -5,7 +5,7 @@ import type { Workflow, FormulaBinding, Page, BlockRuntimeState } from '../types
 export function getBlockDefaultValue(identifier: string): any {
   const id = identifier.toLowerCase();
   if (id.includes('tgl') || id.includes('toggle')) return false;
-  if (id.includes('inp') || id.includes('input') || id.includes('lbl') || id.includes('label')) return '';
+  if (id.includes('inp') || id.includes('input') || id.includes('lbl') || id.includes('label') || id.includes('shp') || id.includes('shape')) return '';
   if (id.includes('tmr') || id.includes('timer')) return false;
   if (id.includes('db') || id.includes('database')) return 0;
   if (id.includes('list')) return '';
@@ -24,6 +24,7 @@ export function getBlockTypeDisplayName(nodeType: string): string {
   if (type.includes('history') || type.includes('chart')) return 'History Chart';
   if (type.includes('database')) return 'Database';
   if (type.includes('list')) return 'List';
+  if (type.includes('shape')) return 'Shape';
   return 'Block';
 }
 
@@ -37,42 +38,33 @@ export const blockRuntimeAtom = atomFamily((blockId: string) => {
   const isChart = blockId.toLowerCase().includes('chart') || blockId.toLowerCase().includes('history');
   const isDb = blockId.toLowerCase().includes('db') || blockId.toLowerCase().includes('database');
   const isList = blockId.toLowerCase().includes('list');
+  const isShape = blockId.toLowerCase().includes('shp') || blockId.toLowerCase().includes('shape');
   return atom<BlockRuntimeState>({
     value: getBlockDefaultValue(blockId),
     visible: true,
     disabled: false,
     loading: false,
     error: null,
-    ...(isChart ? { history: [], trackedBlockId: '' } : {}),
-    ...(isList ? { trackedBlockId: '' } : {}),
-    ...(isDb ? {
-      columns: [
-        { name: 'Name', type: 'text' },
-        { name: 'Age', type: 'number' }
-      ],
-      rows: [],
-      outputMode: 'row_count',
-      backgroundColor: '#ffffff',
-      borderRadius: 8
-    } : {}),
+    columns: isDb ? [
+      { name: 'Name', type: 'text' },
+      { name: 'Age', type: 'number' }
+    ] : undefined,
+    rows: isDb ? [] : undefined,
+    outputMode: isDb ? 'row_count' : undefined,
+    trackedBlockId: (isChart || isList) ? '' : undefined,
+    history: isChart ? [] : undefined,
+    text: isShape ? '' : undefined,
+    role: isShape ? null : undefined,
   });
 });
 
-export const blockPositionAtom = atomFamily((_blockId: string) => {
-  return atom({ x: 100, y: 100 });
+export const blockPositionAtom = atomFamily((blockId: string) => {
+  return atom<{ x: number; y: number }>({ x: 100, y: 100 });
 });
-
-export const currentPageIdAtom = atom<string | null>(null);
-
-export const urlParamsAtom = atom<Record<string, string>>({});
-
-export const selectedBlockIdAtom = atom<string | null>(null);
 
 export const workflowsAtom = atom<Workflow[]>([]);
 
-export const formulasAtom = atom<FormulaBinding[]>([]);
-
-export const pagesAtom = atom<Page[]>([]);
+export const selectedBlockIdAtom = atom<string | null>(null);
 
 export const activeWireAtom = atom<{
   sourceBlockId: string;
@@ -82,26 +74,20 @@ export const activeWireAtom = atom<{
   currentY: number;
 } | null>(null);
 
-export const connectionsAtom = atom<{
-  id: string;
-  sourceBlockId: string;
-  targetBlockId: string;
-}[]>([]);
+export const connectionsAtom = atom<{ id: string; sourceBlockId: string; targetBlockId: string }[]>([]);
 
 export const snapTargetAtom = atom<string | null>(null);
 
 export const pendingConnectionAtom = atom<{
   sourceBlockId: string;
   targetBlockId: string;
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
+  sourceEvent: 'onClick' | 'onChange' | 'onTick' | 'onComplete';
 } | null>(null);
 
 export const triggerSaveAtom = atom<number>(0);
 
 export const isPreviewModeAtom = atom<boolean>(false);
+export const canvasModeAtom = atom<'design' | 'action'>('action');
 
 const baseContextMenuAtom = atom<{
   blockId: string;
@@ -112,7 +98,7 @@ const baseContextMenuAtom = atom<{
 
 export const contextMenuAtom = atom(
   (get) => get(baseContextMenuAtom),
-  (get, set, update) => {
+  (get, set, update: { blockId: string; x: number; y: number; visible: boolean } | null) => {
     if (get(isPreviewModeAtom)) {
       set(baseContextMenuAtom, null);
       return;
@@ -122,7 +108,7 @@ export const contextMenuAtom = atom(
 );
 
 const baseConnectionContextMenuAtom = atom<{
-  connectionId: string;
+  wireId: string;
   x: number;
   y: number;
   visible: boolean;
@@ -130,7 +116,7 @@ const baseConnectionContextMenuAtom = atom<{
 
 export const connectionContextMenuAtom = atom(
   (get) => get(baseConnectionContextMenuAtom),
-  (get, set, update) => {
+  (get, set, update: { wireId: string; x: number; y: number; visible: boolean } | null) => {
     if (get(isPreviewModeAtom)) {
       set(baseConnectionContextMenuAtom, null);
       return;
@@ -155,6 +141,7 @@ export function getBlockDataType(nodeType: string): BlockDataType {
     case 'historyChartBlock': return 'unknown';
     case 'databaseBlock': return 'database';
     case 'listBlock': return 'unknown';
+    case 'shapeBlock': return 'unknown';
     default: return 'unknown';
   }
 }
@@ -185,7 +172,8 @@ export function getCanvasBlocks(editor: any, store: any, excludeBlockId?: string
       typeName === 'timerBlock' ||
       typeName === 'historyChartBlock' ||
       typeName === 'databaseBlock' ||
-      typeName === 'listBlock'
+      typeName === 'listBlock' ||
+      typeName === 'shapeBlock'
     )) {
       const dataType = getBlockDataType(typeName);
       const runtime = store.get(blockRuntimeAtom(bId));
@@ -197,6 +185,7 @@ export function getCanvasBlocks(editor: any, store: any, excludeBlockId?: string
   return list;
 }
 
-export const pagesListAtom = atom<{ id: string; name: string }[]>([]);
-export const switchPageFnAtom = atom<((pageId: string) => Promise<void>) | null>(null);
-
+export const formulasAtom = atom<FormulaBinding[]>([]);
+export const currentPageIdAtom = atom<string>('00000000-0000-0000-0000-000000000001');
+export const pagesListAtom = atom<Page[]>([]);
+export const switchPageFnAtom = atom<((targetPageId: string) => Promise<void>) | null>(null);

@@ -163,6 +163,12 @@ div[data-node-view-wrapper][class*="list-block-wrapper"] {
   pointer-events: none !important;
 }
 
+#editor-container.design-mode [data-port-output],
+#editor-container.design-mode [data-port-input] {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
 /* Hide floating metadata labels above blocks when editor-container is in preview-mode */
 #editor-container.preview-mode [class*="-block-wrapper"] > div:first-child {
   opacity: 0 !important;

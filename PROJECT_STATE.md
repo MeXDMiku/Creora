@@ -18,11 +18,17 @@ All blocks are implemented as custom TipTap nodes in `src/blocks/` and render th
 | [`TimerBlock.tsx`](file:///d:/A/src/blocks/TimerBlock.tsx) | `timerBlock` | `trigger` | **Both** (Left input: trigger, Right output: trigger) | Mode (Dropdown), Duration (Number), AutoStart (Checkbox), Background Color, Border Radius, Opacity, Width, Font Size, Text Color |
 | [`HistoryChartBlock.tsx`](file:///d:/A/src/blocks/HistoryChartBlock.tsx) | `historyChartBlock` | `unknown` | **Left Port Only** (Left input: watch block) | Track this block (Dropdown list of blocks), Background Color, Text Color |
 | [`DatabaseBlock.tsx`](file:///d:/A/src/blocks/DatabaseBlock.tsx) | `databaseBlock` | `database` | **Both** (Left input: trigger, Right output: dynamic mode value) | Columns Definition (Name + Type dropdown), Output Mode picker, standard background/border/opacity styling controls |
+| [`FormulaDisplayBlock.tsx`](file:///d:/A/src/blocks/FormulaDisplayBlock.tsx) | `formulaDisplayBlock` | `number` | **Right Port Only** (Right output: computed number) | Formula Input, Background Color, Border Radius, Opacity, Width, Text Color, Font Size |
+| [`ListBlock.tsx`](file:///d:/A/src/blocks/ListBlock.tsx) | `listBlock` | `unknown` | **Left Port Only** (Left input: trigger/watch) | Tracked Block ID, Background Color, Border Radius, Opacity, Width, Text Color |
+| [`ShapeBlock.tsx`](file:///d:/A/src/blocks/ShapeBlock.tsx) | `shapeBlock` | `unknown` | **Dynamic** (Ports attach when Role = Trigger) | Role (Dropdown: None, Trigger), Label Content, Background Color, Border Radius, Opacity, Width, Height, Text Color, Font Size |
 
 ---
 
 ## Core Mechanisms Confirmed Working
 
+* **Dynamic Shape Role System (`ShapeBlock.tsx`)**
+  * **Implementation:** `src/blocks/ShapeBlock.tsx`, `src/blocks/ShapeBlock.inspector.tsx`, `src/lib/renderBlockStyles.ts`, `src/state/atoms.ts`, and `src/components/PublishedRenderer.tsx`.
+  * **Mechanism:** Decouples visual shape appearance from behavior. Shapes start roleless (`role === null`), rendering no ports. When assigned **Trigger**, ports attach and clicking fires `onClick` workflows. When role is None, no ports render and clicking only drags.
 * **Block Dragging**
   * **Implementation:** `src/hooks/useBlockDrag.ts` and the `onPointerDown`/`onPointerMove`/`onPointerUp` wrappers in each individual block component.
   * **Mechanism:** Utilizes pointer capture via `setPointerCapture` and `releasePointerCapture` on drag start. Tracks changes relative to `#editor-container` and updates `blockPositionAtom` via Jotai, triggering saves. *Note: Fixed a bug where Preview Mode changes were not registered due to a missing dependency in the drag hook array.*
@@ -105,7 +111,9 @@ d:/A/src/
 │   ├── HistoryChartBlock.tsx # Chart block graphing tracked block history.
 │   ├── HistoryChartBlock.inspector.tsx # Inspector configurations for HistoryChartBlock.
 │   ├── DatabaseBlock.tsx   # Supabase-backed datastore table block.
-│   └── DatabaseBlock.inspector.tsx # Inspector configurations for DatabaseBlock.
+│   ├── DatabaseBlock.inspector.tsx # Inspector configurations for DatabaseBlock.
+│   ├── ShapeBlock.tsx      # Multi-role dynamic shape block.
+│   └── ShapeBlock.inspector.tsx # Inspector configurations for ShapeBlock.
 ├── components/
 │   └── WireOverlay.tsx     # Renders the SVG paths for connections between active block ports.
 ├── hooks/

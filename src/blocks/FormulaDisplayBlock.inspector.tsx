@@ -203,7 +203,7 @@ export default function FormulaDisplayBlockInspector({ blockId, editor }: { bloc
                     }, 0)
                   }
                 }}
-                style={{ padding: '4px 8px', background: '#6366f1', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}
+                style={{ padding: '4px 8px', borderRadius: '4px', border: 'none', background: '#6366f1', color: 'white', fontSize: '12px', cursor: 'pointer' }}
               >
                 Insert
               </button>

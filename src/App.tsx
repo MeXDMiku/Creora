@@ -2,7 +2,7 @@ import { useEffect, useRef, useCallback, useState, useMemo } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { useSetAtom, useAtom, useAtomValue, useStore } from 'jotai'
-import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, getCanvasBlocks, currentPageIdAtom, pagesListAtom, switchPageFnAtom, isPreviewModeAtom } from './state/atoms'
+import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, getCanvasBlocks, currentPageIdAtom, pagesListAtom, switchPageFnAtom, isPreviewModeAtom, canvasModeAtom } from './state/atoms'
 import { ButtonBlock } from './blocks/ButtonBlock'
 import { NumberDisplayBlock } from './blocks/NumberDisplayBlock'
 import { TextLabelBlock } from './blocks/TextLabelBlock'
@@ -13,6 +13,7 @@ import { TimerBlock } from './blocks/TimerBlock'
 import { HistoryChartBlock } from './blocks/HistoryChartBlock'
 import { DatabaseBlock } from './blocks/DatabaseBlock'
 import { ListBlock } from './blocks/ListBlock'
+import { ShapeBlock } from './blocks/ShapeBlock'
 import { WireOverlay } from './components/WireOverlay'
 import { supabase } from './lib/supabase'
 import { recalculateAllFormulas } from './lib/bindingEngine'
@@ -702,6 +703,14 @@ function ContextMenu({ editor, deleteBlock }: { editor: any; deleteBlock: (block
       fontSize: origRuntime?.fontSize,
       opacity: origRuntime?.opacity,
       width: origRuntime?.width,
+      height: origRuntime?.height,
+      text: origRuntime?.text,
+      role: origRuntime?.role,
+      borderWidth: origRuntime?.borderWidth,
+      borderColor: origRuntime?.borderColor,
+      borderStyle: origRuntime?.borderStyle,
+      boxShadowPreset: origRuntime?.boxShadowPreset,
+      textAlign: origRuntime?.textAlign,
       min: origRuntime?.min,
       max: origRuntime?.max,
       trackedBlockId: origRuntime?.trackedBlockId,
@@ -957,6 +966,7 @@ function App() {
   const [isCrossfading, setIsCrossfading] = useState(false)
   const setSwitchPageFn = useSetAtom(switchPageFnAtom)
   const [isPreviewMode, setIsPreviewMode] = useAtom(isPreviewModeAtom)
+  const [canvasMode, setCanvasMode] = useAtom(canvasModeAtom)
 
   const activePageIdRef = useRef(PAGE_ID)
   useEffect(() => {
@@ -979,6 +989,7 @@ function App() {
       HistoryChartBlock,
       DatabaseBlock,
       ListBlock,
+      ShapeBlock,
     ],
     content: '',
     onUpdate: ({ editor }) => {
@@ -998,7 +1009,8 @@ function App() {
           typeName === 'timerBlock' ||
           typeName === 'historyChartBlock' ||
           typeName === 'databaseBlock' ||
-          typeName === 'listBlock'
+          typeName === 'listBlock' ||
+          typeName === 'shapeBlock'
         ) {
           if (node.attrs?.blockId) {
             blockIds.push(node.attrs.blockId)
@@ -1154,7 +1166,8 @@ function App() {
         typeName === 'timerBlock' ||
         typeName === 'historyChartBlock' ||
         typeName === 'databaseBlock' ||
-        typeName === 'listBlock'
+        typeName === 'listBlock' ||
+        typeName === 'shapeBlock'
       ) {
         const blockId = node.attrs?.blockId
         if (blockId) {
@@ -1181,6 +1194,7 @@ function App() {
           else if (typeName === 'historyChartBlock') type = 'chart'
           else if (typeName === 'databaseBlock') type = 'database'
           else if (typeName === 'listBlock') type = 'list'
+          else if (typeName === 'shapeBlock') type = 'shape'
 
           const blockProps: BlockProps = {
             blockName: runtime.blockName,
@@ -1367,6 +1381,8 @@ function App() {
               typeName = 'databaseBlock'
             } else if (b.type === 'list') {
               typeName = 'listBlock'
+            } else if (b.type === 'shape') {
+              typeName = 'shapeBlock'
             } else if (b.type === 'number') {
               const hasFormula = (importedPage.formulas || []).some((f: any) => f.targetBlockId === b.id)
               typeName = hasFormula ? 'formulaDisplayBlock' : 'numberDisplayBlock'
@@ -1452,7 +1468,8 @@ function App() {
               node.type.name === 'textLabelBlock' ||
               node.type.name === 'historyChartBlock' ||
               node.type.name === 'databaseBlock' ||
-              node.type.name === 'listBlock'
+              node.type.name === 'listBlock' ||
+              node.type.name === 'shapeBlock'
             ) && node.attrs.blockId === blockId
           ) {
             foundPos = pos
@@ -1720,6 +1737,23 @@ function App() {
           insertListBlock2()
         }
       }
+    },
+    {
+      id: 'shape',
+      title: 'Shape',
+      description: 'Insert a plain, roleless shape object',
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="4" />
+        </svg>
+      ),
+      action: () => {
+        if (!blockExists('test_shp_1')) {
+          insertShapeBlock()
+        } else {
+          insertShapeBlock2()
+        }
+      }
     }
   ], [editor])
 
@@ -1787,7 +1821,8 @@ function App() {
             node.type === 'textLabelBlock' ||
             node.type === 'historyChartBlock' ||
             node.type === 'databaseBlock' ||
-            node.type === 'listBlock'
+            node.type === 'listBlock' ||
+            node.type === 'shapeBlock'
           ) {
             if (node.attrs?.blockId) {
               blockIds.push(node.attrs.blockId)
@@ -2063,7 +2098,8 @@ function App() {
         typeName === 'timerBlock' ||
         typeName === 'historyChartBlock' ||
         typeName === 'databaseBlock' ||
-        typeName === 'listBlock'
+        typeName === 'listBlock' ||
+        typeName === 'shapeBlock'
       )) {
         currentBlocks.push({ id: bId, type: typeName })
       }
@@ -2168,7 +2204,8 @@ function App() {
           node.type === 'textLabelBlock' ||
           node.type === 'historyChartBlock' ||
           node.type === 'databaseBlock' ||
-          node.type === 'listBlock'
+          node.type === 'listBlock' ||
+          node.type === 'shapeBlock'
         ) {
           if (node.attrs?.blockId) {
             blockIds.push(node.attrs.blockId)
@@ -2304,7 +2341,8 @@ function App() {
             node.type === 'textLabelBlock' ||
             node.type === 'historyChartBlock' ||
             node.type === 'databaseBlock' ||
-            node.type === 'listBlock'
+            node.type === 'listBlock' ||
+            node.type === 'shapeBlock'
           ) {
             if (node.attrs?.blockId) {
               newBlockIds.push(node.attrs.blockId)
@@ -2512,7 +2550,8 @@ function App() {
               node.type === 'textLabelBlock' ||
               node.type === 'historyChartBlock' ||
               node.type === 'databaseBlock' ||
-              node.type === 'listBlock'
+              node.type === 'listBlock' ||
+              node.type === 'shapeBlock'
             ) {
               if (node.attrs?.blockId) {
                 blockIds.push(node.attrs.blockId)
@@ -2875,6 +2914,56 @@ function App() {
     })
   }
 
+  function insertShapeBlock() {
+    if (!editor || blockExists('test_shp_1')) return
+    editor.chain().focus('end').insertContent({
+      type: 'shapeBlock',
+      attrs: {
+        blockId: 'test_shp_1'
+      }
+    }).run()
+    store.set(blockPositionAtom('test_shp_1'), { x: 520, y: 340 })
+    store.set(blockRuntimeAtom('test_shp_1'), {
+      value: '',
+      text: '',
+      role: null,
+      visible: true,
+      disabled: false,
+      loading: false,
+      error: null,
+      backgroundColor: '#3b82f6',
+      textColor: '#ffffff',
+      borderRadius: 8,
+      width: 120,
+      height: 60,
+    })
+  }
+
+  function insertShapeBlock2() {
+    if (!editor || blockExists('test_shp_2')) return
+    editor.chain().focus('end').insertContent({
+      type: 'shapeBlock',
+      attrs: {
+        blockId: 'test_shp_2'
+      }
+    }).run()
+    store.set(blockPositionAtom('test_shp_2'), { x: 520, y: 440 })
+    store.set(blockRuntimeAtom('test_shp_2'), {
+      value: '',
+      text: '',
+      role: null,
+      visible: true,
+      disabled: false,
+      loading: false,
+      error: null,
+      backgroundColor: '#3b82f6',
+      textColor: '#ffffff',
+      borderRadius: 8,
+      width: 120,
+      height: 60,
+    })
+  }
+
 
 
   return (
@@ -2979,6 +3068,27 @@ function App() {
             {isPreviewMode ? '👁 Edit Mode' : '👁 Preview'}
           </button>
 
+          <button
+            onClick={() => setCanvasMode(canvasMode === 'action' ? 'design' : 'action')}
+            style={{
+              padding: '6px 12px',
+              marginLeft: '8px',
+              border: '1px solid #cbd5e1',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '13px',
+              fontWeight: 600,
+              background: canvasMode === 'design' ? '#475569' : '#ffffff',
+              color: canvasMode === 'design' ? '#ffffff' : '#475569',
+              transition: 'all 0.15s ease',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            {canvasMode === 'action' ? '🎨 Design View' : '⚡ Action View'}
+          </button>
+
           <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px' }}>
             <button
               onClick={handleExport}
@@ -3059,10 +3169,9 @@ function App() {
           </div>
         )}
 
-
         <div
           id="editor-container"
-          className={isPreviewMode ? 'preview-mode' : ''}
+          className={`${isPreviewMode ? 'preview-mode' : ''} ${canvasMode === 'design' ? 'design-mode' : ''}`.trim()}
           ref={canvasRef}
           onPointerMove={onCanvasPointerMove}
           onPointerUp={onCanvasPointerUp}
@@ -3080,7 +3189,7 @@ function App() {
           }}
         >
           <EditorContent editor={editor} style={{ flex: 1, position: 'relative', pointerEvents: activeWire ? 'none' : 'auto' }} />
-          {!isPreviewMode && <WireOverlay />}
+          {!isPreviewMode && canvasMode === 'action' && <WireOverlay />}
           {!isPreviewMode && <ConnectionPopup editor={editor} />}
           {!isPreviewMode && <ContextMenu editor={editor} deleteBlock={deleteBlock} />}
           {!isPreviewMode && <ConnectionContextMenu />}

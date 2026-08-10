@@ -1,122 +1,109 @@
-export type BlockType =
-  | 'button' | 'text' | 'input' | 'image' | 'container'
-  | 'toggle' | 'number' | 'timer' | 'database' | 'list'
-  | 'chart' | 'form' | 'video' | 'embed' | 'apiBlock';
-
-export type ActionType =
-  | 'increment' | 'decrement' | 'set' | 'toggle' | 'reset'
-  | 'setVisible' | 'setHidden' | 'navigate'
-  | 'addRow' | 'updateRow' | 'deleteRow' | 'updateField'
-  | 'callAPI' | 'playAnimation' | 'submitForm';
-
-export type TriggerEvent =
-  | 'onClick' | 'onChange' | 'onSubmit' | 'onHover'
-  | 'onTrue' | 'onFalse' | 'onTick' | 'onComplete'
-  | 'onLoad' | 'onRowAdded' | 'onFieldChanged';
-
-export type Permission = 'public' | 'authenticated' | 'author' | 'admin';
-
-export type ConditionOperator =
-  | 'equals' | 'notEquals' | 'greaterThan' | 'lessThan' | 'contains' | 'isEmpty'
-  | 'is ON' | 'is_ON' | 'is OFF' | 'is_OFF' | 'greater than' | 'less than';
-
-export interface ShadowConfig {
-  x: number; y: number; blur: number; spread: number; color: string;
-}
-
-export interface StyleConfig {
-  backgroundColor: string;
-  color: string;
-  borderRadius: number;
-  fontSize: number;
-  fontWeight: number;
-  paddingTop: number;
-  paddingRight: number;
-  paddingBottom: number;
-  paddingLeft: number;
-  opacity: number;
-  width: number | 'auto' | '100%';
-  height: number | 'auto';
-  borderWidth: number;
-  borderColor: string;
-  borderStyle: 'solid' | 'dashed' | 'dotted' | 'none';
-  shadow: ShadowConfig | null;
-}
-
-export interface HoverAnimation { scale: number; duration: number; }
-export interface ClickAnimation { scale: number; duration: number; }
-
-export interface AnimationConfig {
-  entrance: 'none' | 'fadeIn' | 'slideLeft' | 'slideRight' | 'slideUp' | 'scaleUp';
-  entranceDuration: number;
-  entranceDelay: number;
-  entranceTrigger: 'onLoad' | 'onVisible';
-  hover: HoverAnimation | null;
-  click: ClickAnimation | null;
-}
-
-export interface BlockProps {
-  blockName?: string;
-  label?: string;
-  placeholder?: string;
-  src?: string;
-  content?: string;
-  defaultValue?: any;
-  boundToFieldId?: string | null;
-  trackedBlockId?: string;
-  history?: number[];
-  columns?: { name: string; type: 'text' | 'number' | 'boolean' }[];
-  rows?: { id: string; [key: string]: any }[];
-  outputMode?: string;
-}
-
-export interface Block {
-  id: string;
-  type: BlockType;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  props: BlockProps;
-  styles: StyleConfig;
-  animations: AnimationConfig;
-  parentId: string | null;
-  children: string[];
-  pageId: string;
-}
-
-export interface ConditionConfig {
-  fieldId: string;
-  operator: ConditionOperator;
-  value: any;
-}
+export type BlockType = 
+  | 'button'
+  | 'number'
+  | 'toggle'
+  | 'input'
+  | 'text'
+  | 'timer'
+  | 'chart'
+  | 'database'
+  | 'list'
+  | 'shape';
 
 export interface WorkflowStep {
-  id: string;
-  action: ActionType;
   targetId: string;
-  value?: any;
+  action: 'increment' | 'decrement' | 'set' | 'toggle' | 'setVisible' | 'setHidden' | 'addRow' | 'updateRow' | 'deleteRow';
   amount?: number;
-  fieldId?: string;
-  condition: ConditionConfig | null;
+  value?: any;
+  condition?: {
+    fieldId: string;
+    operator: 'is ON' | 'is OFF' | 'equals' | 'notEquals' | 'greaterThan' | 'lessThan' | 'contains' | 'isEmpty' | 'is_ON' | 'is_OFF' | 'greater than' | 'less than';
+    value?: any;
+  };
   mappings?: Record<string, { source: 'fixed' | 'block'; value: string }>;
   matchColumn?: string;
-  matchValue?: { source: 'fixed' | 'block'; value: string };
+  matchSource?: 'fixed' | 'block';
+  matchValue?: string;
 }
+
+export type TriggerEvent = 'onClick' | 'onChange' | 'onTick' | 'onComplete';
 
 export interface Workflow {
   id: string;
   sourceId: string;
   sourceEvent: TriggerEvent;
   steps: WorkflowStep[];
-  permission: Permission;
-  pageId: string;
+  permission?: 'public' | 'authenticated' | 'author' | 'admin';
+}
+
+export interface Connection {
+  id: string;
+  sourceBlockId: string;
+  targetBlockId: string;
+}
+
+export interface StyleConfig {
+  backgroundColor?: string;
+  color?: string;
+  borderRadius?: number;
+  fontSize?: number;
+  fontWeight?: number;
+  paddingTop?: number;
+  paddingRight?: number;
+  paddingBottom?: number;
+  paddingLeft?: number;
+  opacity?: number;
+  width?: number | string;
+  height?: number | string;
+  borderWidth?: number;
+  borderColor?: string;
+  borderStyle?: string;
+  shadow?: string | null;
+}
+
+export interface AnimationConfig {
+  hoverScale?: number;
+  clickScale?: number;
+}
+
+export interface BlockProps {
+  blockName?: string;
+  label?: string;
+  defaultValue?: any;
+  trackedBlockId?: string;
+  history?: number[];
+  columns?: { name: string; type: 'text' | 'number' | 'boolean' }[];
+  rows?: { id: string; [key: string]: any }[];
+  outputMode?: string;
+  targetPageId?: string;
+}
+
+export interface Block {
+  id: string;
+  type: BlockType;
+  props: BlockProps;
+  styles: StyleConfig;
+  animations?: AnimationConfig;
+}
+
+export interface Page {
+  id: string;
+  title: string;
+  blocks: Block[];
+  workflows: Workflow[];
+  formulas?: FormulaBinding[];
+}
+
+export interface CreoraFile {
+  version: string;
+  activePageId: string;
+  pages: Page[];
 }
 
 export interface FormulaBinding {
   id: string;
   targetBlockId: string;
-  targetProperty: 'visible' | 'content' | 'backgroundColor' | 'disabled' | string;
+  targetProperty: 'value';
   formula: string;
   pageId: string;
 }
@@ -134,6 +121,9 @@ export interface BlockRuntimeState {
   max?: number;
   opacity?: number;
   width?: number;
+  height?: number;
+  text?: string;
+  role?: string | null;
   fontSize?: number;
   textColor?: string;
   mode?: 'countdown' | 'interval';
@@ -150,34 +140,10 @@ export interface BlockRuntimeState {
 export interface DatabaseField {
   id: string;
   name: string;
-  type: 'text' | 'number' | 'boolean' | 'date' | 'select' | 'url' | 'imageUrl';
-  defaultValue: any;
-  options?: string[];
+  type: 'text' | 'number' | 'boolean';
 }
 
-export interface DatabaseRow { id: string; [fieldId: string]: any; }
-
-export interface Database {
+export interface DatabaseRow {
   id: string;
-  name: string;
-  fields: DatabaseField[];
-  rows: DatabaseRow[];
-}
-
-export interface Page {
-  id: string;
-  name: string;
-  route: string;
-  layoutTemplateId: string | null;
-  blocks: Block[];
-  workflows: Workflow[];
-  formulas: FormulaBinding[];
-  databases: Database[];
-}
-
-export interface CreoraFile {
-  version: '1.0';
-  metadata: { name: string; created: string; modified: string };
-  pages: Page[];
-  layoutTemplates: Page[];
+  [key: string]: any;
 }
