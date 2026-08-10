@@ -34,9 +34,6 @@ const ButtonBlockComponent = (props: NodeViewProps) => {
   const onPointerUp = (e: React.PointerEvent) => {
     const wasClick = handlePointerUp(e);
     if (wasClick) {
-      const currentWorkflows = store.get(workflowsAtom);
-      console.log('[DIAG] ButtonBlock clicked! blockId =', blockId);
-      console.log('[DIAG] FULL current contents of workflowsAtom in store:', JSON.stringify(currentWorkflows, null, 2));
       executeWorkflow(blockId, 'onClick', store);
 
       // In Preview Mode, direct click-to-navigate is active if targetPageId is configured

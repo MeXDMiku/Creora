@@ -686,6 +686,20 @@ function RenderedBlock({ block }: { block: ExtractedBlock }) {
   const position = useAtomValue(blockPositionAtom(block.id));
   const runtimeState = useAtomValue(blockRuntimeAtom(block.id));
   const store = useStore();
+  const navigate = useNavigate();
+
+  /**
+   * A published page is a real route, so navigation is a router push, not the
+   * editor's switchPageFn (which is an editor-only concept and does not exist
+   * here). useNavigate was imported in this file but never called, so buttons
+   * with a target page did nothing at all on published pages.
+   */
+  const runTrigger = () => {
+    executeWorkflow(block.id, 'onClick', store);
+    recalculateAllFormulas(store);
+    const targetPageId = runtimeState?.targetPageId;
+    if (targetPageId) navigate(`/view/${targetPageId}`);
+  };
 
   const { outer: outerStyle, inner: innerStyle } = blockToCSS(block.type, position, runtimeState);
 
@@ -694,10 +708,7 @@ function RenderedBlock({ block }: { block: ExtractedBlock }) {
       <div style={outerStyle}>
         <button
           style={innerStyle}
-          onClick={() => {
-            executeWorkflow(block.id, 'onClick', store);
-            recalculateAllFormulas(store);
-          }}
+          onClick={runTrigger}
         >
           {block.attrs.label || 'Button'}
         </button>
@@ -790,10 +801,7 @@ function RenderedBlock({ block }: { block: ExtractedBlock }) {
             cursor: isTrigger ? 'pointer' : 'default',
           }}
           onClick={() => {
-            if (isTrigger) {
-              executeWorkflow(block.id, 'onClick', store);
-              recalculateAllFormulas(store);
-            }
+            if (isTrigger) runTrigger();
           }}
         >
           {String(runtimeState?.text ?? runtimeState?.value ?? '')}
