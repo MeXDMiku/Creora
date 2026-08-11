@@ -810,6 +810,76 @@ function RenderedBlock({ block }: { block: ExtractedBlock }) {
   return null;
 }
 
+/**
+ * Blocks sit at fixed x/y, which is fine on a monitor and unusable on a phone:
+ * the Feedback page put its Submissions table at x=420, entirely off the right
+ * edge of a 390px screen. Below `maxWidth` a published page stops using those
+ * coordinates and stacks instead. The editor and the desktop view are untouched.
+ */
+function useIsNarrow(maxWidth = 640) {
+  const query = `(max-width: ${maxWidth}px)`;
+  const [narrow, setNarrow] = useState(
+    typeof window !== 'undefined' && window.matchMedia(query).matches
+  );
+  useEffect(() => {
+    const mq = window.matchMedia(query);
+    const onChange = () => setNarrow(mq.matches);
+    onChange();
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, [query]);
+  return narrow;
+}
+
+// Blocks whose width is not stored explicitly still occupy real space.
+const FALLBACK_WIDTH: Record<string, number> = {
+  databaseBlock: 400,
+  listBlock: 300,
+  historyChartBlock: 300,
+  timerBlock: 240,
+};
+
+/**
+ * Reading order for a stacked phone layout.
+ *
+ * Sorting purely by y is wrong for anything laid out in columns: on the Feedback
+ * page the table shares a y with the first input, so it would land between the
+ * two form fields. Instead group blocks into columns by whether their horizontal
+ * extents overlap, order each column top-to-bottom, then read the columns left to
+ * right — the way a person reads a two-column layout on a narrow screen.
+ * A single-column page has one group and this degrades to a plain sort by y.
+ */
+function orderForNarrow(blocks: ExtractedBlock[], store: any): ExtractedBlock[] {
+  const measured = blocks.map((b) => {
+    const pos = store.get(blockPositionAtom(b.id)) || { x: 0, y: 0 };
+    const rs = store.get(blockRuntimeAtom(b.id));
+    const width = typeof rs?.width === 'number' ? rs.width : (FALLBACK_WIDTH[b.type] ?? 200);
+    const x = pos.x ?? 0;
+    return { b, x, y: pos.y ?? 0, right: x + width };
+  });
+
+  measured.sort((a, z) => a.x - z.x);
+
+  const columns: (typeof measured)[] = [];
+  let current: typeof measured = [];
+  let currentRight = -Infinity;
+  for (const m of measured) {
+    if (current.length === 0 || m.x < currentRight) {
+      current.push(m);
+      currentRight = Math.max(currentRight, m.right);
+    } else {
+      columns.push(current);
+      current = [m];
+      currentRight = m.right;
+    }
+  }
+  if (current.length) columns.push(current);
+
+  return columns.flatMap((col) =>
+    col.sort((a, z) => a.y - z.y || a.x - z.x).map((m) => m.b)
+  );
+}
+
 export default function PublishedRenderer() {
   const { pageId } = useParams<{ pageId: string }>();
   const store = useStore();
@@ -817,6 +887,14 @@ export default function PublishedRenderer() {
   const [error, setError] = useState<string | null>(null);
   const [pageName, setPageName] = useState('Published Page');
   const [docItemsList, setDocItemsList] = useState<DocItem[]>([]);
+  const isNarrow = useIsNarrow();
+  const narrowBlocks = useMemo(
+    () => orderForNarrow(
+      docItemsList.flatMap((i) => (i.kind === 'block' ? [i.block] : [])),
+      store
+    ),
+    [docItemsList, store]
+  );
 
   useEffect(() => {
     if (!pageId) return;
@@ -941,27 +1019,45 @@ export default function PublishedRenderer() {
           flex: 1,
           position: 'relative',
           overflow: 'auto',
-          padding: '24px'
+          padding: isNarrow ? '16px' : '24px',
         }}
       >
-        {docItemsList.map((item, idx) => {
-          if (item.kind === 'block') {
-            return (
-              <div
-                key={item.block.id}
-                style={{
-                  height: 0,
-                  overflow: 'visible',
-                  margin: 0,
-                  padding: 0,
-                }}
-              >
-                <RenderedBlock block={item.block} />
+        {isNarrow ? (
+          <>
+            <style>{`
+              .creora-stacked > div { position: static !important; max-width: 100% !important; box-sizing: border-box; }
+              .creora-stacked > div > * { max-width: 100%; box-sizing: border-box; }
+              .creora-stacked input, .creora-stacked table { max-width: 100%; box-sizing: border-box; }
+            `}</style>
+            {docItemsList.map((item, idx) =>
+              item.kind === 'block' ? null : <RenderDocNode key={`n${idx}`} node={item.node} />
+            )}
+            {narrowBlocks.map((block) => (
+              <div key={block.id} className="creora-stacked" style={{ marginBottom: '18px' }}>
+                <RenderedBlock block={block} />
               </div>
-            );
-          }
-          return <RenderDocNode key={idx} node={item.node} />;
-        })}
+            ))}
+          </>
+        ) : (
+          docItemsList.map((item, idx) => {
+            if (item.kind === 'block') {
+              return (
+                <div
+                  key={item.block.id}
+                  style={{
+                    height: 0,
+                    overflow: 'visible',
+                    margin: 0,
+                    padding: 0,
+                  }}
+                >
+                  <RenderedBlock block={item.block} />
+                </div>
+              );
+            }
+            return <RenderDocNode key={idx} node={item.node} />;
+          })
+        )}
       </div>
     </div>
   );
