@@ -314,14 +314,16 @@ The Role dropdown ships with exactly two options:
 
 So the real gap is not an importer. **It is roles.** "Paste a shape, tell it what
 it is" is the same operation whether the shape came from Figma or was drawn here.
-`TODO` Worth adding, cheapest first:
+`DONE` *(11 Aug, later)* Display, Input and Link all built and verified on the
+live domain — see PROJECT_STATE, "Shape roles". A shape's data type now comes
+from its role rather than being hardcoded `'unknown'`.
 
-| role | what the shape becomes | reuses |
-| :--- | :--- | :--- |
-| Display | shows a value from a wire | Number / Text Label |
-| Input | collects text | Input |
-| Link | navigates to a page on click | Button's `targetPageId` |
-| Image | shows a picture | needs the image pipeline, section 3 |
+| role | what the shape becomes | reuses | |
+| :--- | :--- | :--- | :--- |
+| Display | shows a value from a wire | Number / Text Label | `DONE` |
+| Input | collects text | Input | `DONE` |
+| Link | navigates to a page on click | Button's `targetPageId` | `DONE` |
+| Image | shows a picture | needs the image pipeline, section 3 | `TODO` |
 
 Every one of these already exists as a block type. A role is wiring an existing
 behaviour onto a roleless shape, not inventing anything.

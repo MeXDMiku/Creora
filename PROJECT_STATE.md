@@ -299,6 +299,41 @@ visible. At 1920px the same page still renders 5 absolutely positioned blocks at
 their stored coordinates and zero stacked wrappers, so the desktop view is
 genuinely untouched rather than merely looking similar.
 
+### Shape roles — VERIFIED on the live domain *(11 Aug 2026, later)*
+
+`ShapeBlock` is the "treat it like Lego" mechanism: a shape means nothing until
+it is told what it is. It had one role since 22 July. It now has four, and a
+shape's **data type is derived from its role** (`shapeRoleDataType` in
+`state/atoms.ts`), so wire type-checking can finally reason about it — previously
+`shapeBlock` was hardcoded `'unknown'`. This follows the precedent already in the
+code, where a Database block's type comes from its output mode.
+
+| role | ports | behaviour |
+| :--- | :--- | :--- |
+| None | none | drags only |
+| Trigger | both | click fires `onClick` |
+| Display | left | shows the value it receives |
+| Input | right | editable field, fires `onChange` |
+| Link | none | click navigates to `targetPageId` |
+
+Ports follow the role, not the block type: a left port when something can flow
+in, a right port when something can flow out.
+
+**Proven on a real published page**, `/view/e564ca73-03bc-452f-87a5-acf119241bac`
+("Shape Roles"), built entirely from shapes:
+
+```
+Input role     typed "Aridaman"  ->  the Display role shape showed it
+Trigger role   3 clicks          ->  counter 0 -> 3
+Link role      1 click           ->  navigated to the Feedback page
+```
+
+Every one of those is a different job done by the same block type. That page is
+a live demo of the model and is safe to delete.
+
+Note Link needed no code in the published renderer: `runTrigger` already
+navigates when `targetPageId` is set.
+
 ### The next thing to build
 
 The Feedback page exists, is published, and now shows a correct count to a
