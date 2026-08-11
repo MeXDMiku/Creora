@@ -16,8 +16,12 @@
     "directory": "./dist",
     // Every route is a client-side route: /view/:pageId is React Router's, not
     // the server's. Without this, a shared link 404s because there is no such
-    // file to serve and the router never gets to run. public/_redirects says
-    // the same thing for hosts that read it.
+    // file to serve and the router never gets to run.
+    //
+    // Do NOT also ship a public/_redirects with `/* /index.html 200`. That is
+    // the Cloudflare Pages idiom; Workers validates the file and rejects that
+    // rule as an infinite loop, which fails the deploy after a successful
+    // build. This setting replaces it.
     "not_found_handling": "single-page-application"
   }
 }

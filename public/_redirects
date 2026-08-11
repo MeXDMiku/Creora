@@ -1,5 +1,0 @@
-# Creora is a single-page app: React Router owns /view/:pageId, not the server.
-# Without this, opening a shared link directly returns 404 on any static host,
-# because there is no /view/abc file to serve. Every path serves index.html and
-# the router takes over.
-/*    /index.html   200
