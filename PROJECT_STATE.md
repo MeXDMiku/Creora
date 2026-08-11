@@ -43,7 +43,7 @@ All blocks are implemented as custom TipTap nodes in `src/blocks/` and render th
   * **Mechanism:** Evaluates matched triggers. Conditions can check another block's value with operators. If checks pass, executes steps like `increment`/`decrement`, `set` (with `__sourceValue__` support), `toggle`, `setVisible`, `setHidden`, `addRow`, `updateRow`, and `deleteRow`.
 * **Supabase Persistence & Multi-Page Support**
   * **Implementation:** `src/lib/supabase.ts` (Supabase client instance) and `src/App.tsx` (`initApp`, `savePageData`, `switchPage`, and `createNewPage` functions).
-  * **Mechanism:** Pages are saved and loaded independently using secure RPC calls. RLS on the `pages` and `database_rows` tables is fully locked down (direct access via the anon key returns nothing). All reads and writes are routed through eight security definer RPC functions: `get_page`, `list_pages`, `save_page`, `create_page`, `list_database_rows`, `add_database_row`, `update_database_row`, and `delete_database_row`. Switching pages uses `editor.commands.setContent()` with a 150ms crossfade without unmounting the TipTap editor. The active page ID is persisted in `localStorage` so refreshing the browser restores the last active page.
+  * **Mechanism:** Pages are saved and loaded independently using secure RPC calls. RLS on `pages` and `database_rows` blocks direct table access. **That alone was not security**: every RPC is SECURITY DEFINER and was granted to `anon` with no caller check, so until 11 Aug anyone with the public anon key could list, read and overwrite any page. Ownership now closes this — see Identity below. All reads and writes are routed through eight security definer RPC functions: `get_page`, `list_pages`, `save_page`, `create_page`, `list_database_rows`, `add_database_row`, `update_database_row`, and `delete_database_row`. Switching pages uses `editor.commands.setContent()` with a 150ms crossfade without unmounting the TipTap editor. The active page ID is persisted in `localStorage` so refreshing the browser restores the last active page.
 * **Right-Click Context Menu**
   * **Implementation:** `src/App.tsx` (`ContextMenu` component) and capturing-phase click listeners inside blocks.
   * **Mechanism:** Triggers on `contextmenu` events. Allows users to "Delete Block" (removing the node, removing Jotai state instances, cleaning up connections/workflows) or "Disconnect all wires".
@@ -70,16 +70,16 @@ All blocks are implemented as custom TipTap nodes in `src/blocks/` and render th
 2. **Native Event Capture for Context Menus**
    * Because ProseMirror intercepts clicks and context menus, typical React synthetic `onContextMenu` handlers on child inputs or divs can get lost or fail to stop propagation.
    * **Solution:** `InputBlock` and `ToggleBlock` register native DOM capturing-phase listeners (`el.addEventListener('contextmenu', handleContextMenu, true)`) directly on their wrapper DOM element reference to bypass ProseMirror.
-3. **Hardcoded IDs and Instance Limits**
-   * When inserting blocks via the Slash Menu, Creora attempts to assign hardcoded IDs like `test_btn_1`. If that ID is occupied, it assigns `test_btn_2`. If both are occupied, inserting that block type becomes a silent no-op.
+3. **Block IDs** *(changed 11 Aug 2026)*
+   * IDs are `<nodeType>__<random>`, from `newBlockId()` in `src/lib/blockRegistry.ts`. A page can hold any number of blocks of a type. Previously the slash menu assigned fixture IDs (`test_btn_1`, then `test_btn_2`) and a third insert was a **silent no-op**. Block type used to be guessed by substring-matching the ID (`id.includes('db')`); it is now read from the ID prefix via `nodeTypeFromBlockId()`, with a legacy fallback so old `test_*` pages still work.
 4. **Mirror Connections (Input -> Text Label)**
    * When connecting an `InputBlock` to a `TextLabelBlock` (string-to-string), the connection popup is bypassed. A workflow step is immediately created with a target action of `set` and a payload value of `'__sourceValue__'`.
 5. **No SQL/Direct Expression Evaluation**
    * In compliance with architecture rule 7/13, no direct SQL query or JavaScript `eval` is used. Conditional checks use hardcoded operator cases, and direct values use the binding engine parser.
 6. **Update Row Verification Status**
    * Update Row is implemented and fully verified — the matcher correctly uses the specified column for matching, and updates the mapped columns independently without cross-coupling.
-7. **No Local Supabase DB Credentials**
-   * There are no stored database passwords or credentials locally in the workspace. Any SQL/DDL operations must be executed manually in the Supabase Dashboard SQL Editor. After any DDL schema change, an explicit `NOTIFY pgrst, 'reload schema';` command must be run to refresh PostgREST's stale schema cache.
+7. **Supabase schema lives in the repo** *(changed 11 Aug 2026)*
+   * `supabase/schemas/prod.sql` is the captured production schema, `supabase/migrations/` holds applied migrations, and `supabase/README.md` explains the workflow. DDL is still run by hand in the Dashboard SQL Editor because the CLI has never been linked (`supabase login && supabase link` is the missing step); after any DDL change run `NOTIFY pgrst, 'reload schema';` or new functions return 404. The project is on the Free plan and pauses after ~1 week idle — a paused project stops resolving in DNS entirely. `.github/workflows/keep-supabase-awake.yml` pings it daily. This happened once, on 10 Aug.
 
 ---
 
@@ -88,6 +88,32 @@ All blocks are implemented as custom TipTap nodes in `src/blocks/` and render th
 The following concepts have been discussed but are **NOT** implemented in the codebase yet:
 * **Desktop App:** The codebase is purely a web application and lacks desktop environment wrappers.
 * **AI Integration:** No AI tools or prompt widgets are implemented in the UI.
+* **Real login:** Only anonymous sessions exist. See the warning under Identity.
+* **Publish UI:** `set_page_published` exists in the database but nothing in the interface calls it yet.
+
+---
+
+## Identity and Ownership *(added 11 Aug 2026)*
+
+Every page has an `owner_id` and an `is_published` flag. `database_rows` has a `page_id`, so a row can be authorised against the page that owns it.
+
+| action | who |
+| :--- | :--- |
+| read a page | owner, or the page is published |
+| list pages | owner only |
+| create / save | owner only, and only when signed in |
+| publish / unpublish | owner only |
+| read rows | owner, or the page is published |
+| add a row | owner, or the page is published — **visitors may submit** |
+| update / delete a row | owner only |
+
+Verified live against production on 11 Aug using a session-less client holding only the public anon key. Against a private page every call returned empty or "not allowed". After publishing, the stranger could read the page and add a row (3 rows -> 4) but could not overwrite the page, delete or update a row, unpublish it, or list any other page. The probe row was removed and the page set back to private.
+
+`src/lib/session.ts` signs in anonymously on boot and `initApp` awaits it before the first RPC, because `list_pages` returns nothing without a session. Visitors to a published page need no session at all.
+
+**Anonymous identity is fragile, and this has already bitten once.** The session lives in browser storage; clearing it, or using another browser or device, produces a new `auth.uid()` and silently orphans your own pages. On 11 Aug two anonymous users existed and the pages belonged to the wrong one — the app looked completely empty until `owner_id` was reassigned by hand. Real email sign-in for the owner is the next thing that should be built.
+
+**`claim_orphan_pages()` is temporary.** It adopts pages that predate ownership, and until it is dropped whoever calls it first inherits any unowned page. The three existing pages are claimed, so it should now be dropped from the database and from `src/lib/session.ts`.
 
 ---
 
