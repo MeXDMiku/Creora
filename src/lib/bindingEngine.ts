@@ -1,7 +1,7 @@
 import { getDefaultStore } from 'jotai';
 import jsep from 'jsep';
 import type { TriggerEvent } from '../types/creora';
-import { blockRuntimeAtom, workflowsAtom, formulasAtom, allBlockIdsAtom, getBlockDefaultValue } from '../state/atoms';
+import { blockRuntimeAtom, workflowsAtom, formulasAtom, allBlockIdsAtom, getBlockDefaultValue , recordRun, type RunStep } from '../state/atoms';
 import { supabase } from './supabase';
 
 
@@ -18,7 +18,15 @@ export function executeWorkflow(
   );
   console.log('executeWorkflow: matching workflows count =', matchingWorkflows.length);
 
+  // The most useful entry in the whole log is this one: the trigger fired and
+  // nothing was listening. "I clicked it and nothing happened" was previously
+  // indistinguishable from a broken action.
+  if (matchingWorkflows.length === 0) {
+    recordRun(store, { sourceId, event, workflowId: null, matched: 0, steps: [] });
+  }
+
   for (const workflow of matchingWorkflows) {
+    const runSteps: RunStep[] = [];
     for (const step of workflow.steps) {
       const targetAtom = blockRuntimeAtom(step.targetId);
       const currentTargetState = store.get(targetAtom);
@@ -74,12 +82,19 @@ export function executeWorkflow(
         }
 
         if (!conditionPassed) {
+          runSteps.push({
+            targetId: step.targetId,
+            action: step.action,
+            status: 'skipped',
+            reason: `condition not met — ${step.condition.fieldId} ${step.condition.operator} ${JSON.stringify(condValue)}, actual ${JSON.stringify(valToCompare)}`,
+          });
           continue; // Skip this step, but continue to the next step
         }
       }
 
       // Execute the step's action
       const currentValue = currentTargetState.value;
+      const valueBefore = currentValue;
 
       switch (step.action) {
         case 'increment': {
@@ -481,7 +496,23 @@ export function executeWorkflow(
           // Other actions are ignored or handled as no-ops in this step
           break;
       }
+
+      runSteps.push({
+        targetId: step.targetId,
+        action: step.action,
+        status: 'ran',
+        before: valueBefore,
+        after: store.get(targetAtom)?.value,
+      });
     }
+
+    recordRun(store, {
+      sourceId,
+      event,
+      workflowId: workflow.id,
+      matched: matchingWorkflows.length,
+      steps: runSteps,
+    });
   }
 
   // Live recalculate all formulas

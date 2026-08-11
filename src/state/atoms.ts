@@ -190,3 +190,47 @@ export const currentPageIsPublishedAtom = atom<boolean>(false);
 export const currentPageIdAtom = atom<string>('00000000-0000-0000-0000-000000000001');
 export const pagesListAtom = atom<PageSummary[]>([]);
 export const switchPageFnAtom = atom<((targetPageId: string) => Promise<void>) | null>(null);
+
+/* ---------------------------------------------------------------------------
+   Run log
+   ---------------------------------------------------------------------------
+   Twenty's workflow builder has "Workflow runs" for a reason, and docs/DIRECTION.md
+   ranks it third of the four things worth taking. Until now, when a workflow did
+   not fire there was nothing to look at — which is exactly what turned the July
+   debugging sessions into clicking things repeatedly and guessing.
+
+   In memory only, and deliberately so: a run log that survives reload needs a
+   table, a retention policy and a write on every click of every published page.
+   The value is in the last thirty seconds, not the last thirty days.
+--------------------------------------------------------------------------- */
+
+export interface RunStep {
+  targetId: string;
+  action: string;
+  status: 'ran' | 'skipped';
+  /** Why a step was skipped — the thing you actually want when nothing happened. */
+  reason?: string;
+  before?: any;
+  after?: any;
+}
+
+export interface WorkflowRun {
+  id: string;
+  at: number;
+  sourceId: string;
+  event: string;
+  /** null when the trigger fired and no workflow was listening. */
+  workflowId: string | null;
+  matched: number;
+  steps: RunStep[];
+}
+
+export const RUN_LOG_LIMIT = 50;
+export const workflowRunsAtom = atom<WorkflowRun[]>([]);
+
+let runSeq = 0;
+export function recordRun(store: any, run: Omit<WorkflowRun, 'id' | 'at'>) {
+  const entry: WorkflowRun = { ...run, id: `run_${++runSeq}`, at: Date.now() };
+  const prev = store.get(workflowRunsAtom) as WorkflowRun[];
+  store.set(workflowRunsAtom, [entry, ...prev].slice(0, RUN_LOG_LIMIT));
+}

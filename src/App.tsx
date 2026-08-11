@@ -23,6 +23,7 @@ import { AccountBadge } from './components/AccountBadge'
 import { PublishButton } from './components/PublishButton'
 import { recalculateAllFormulas } from './lib/bindingEngine'
 import { ANIMATION_PRESETS, animationClass } from './lib/animations'
+import { workflowRunsAtom, type WorkflowRun } from './state/atoms'
 import type { FormulaBinding, CreoraFile, Page, Block, BlockProps, StyleConfig, AnimationConfig, BlockType } from './types/creora'
 import './App.css'
 
@@ -120,6 +121,95 @@ function AnimationControl({ blockId }: { blockId: string }) {
           <span style={{ fontSize: '11px', color: '#9ca3af' }}>replay</span>
         </div>
       )}
+    </div>
+  )
+}
+
+function useBlockLabel() {
+  const store = useStore()
+  return (blockId: string) => {
+    const rt = store.get(blockRuntimeAtom(blockId))
+    return isGarbageName(rt?.blockName)
+      ? `${getBlockTypeDisplayName(nodeTypeFromBlockId(blockId) ?? '')} ${shortBlockId(blockId)}`
+      : (rt.blockName as string)
+  }
+}
+
+function ago(ms: number) {
+  const s = Math.max(0, Math.round((Date.now() - ms) / 1000))
+  if (s < 60) return `${s}s ago`
+  const m = Math.round(s / 60)
+  return m < 60 ? `${m}m ago` : `${Math.round(m / 60)}h ago`
+}
+
+function RunRow({ run, label }: { run: WorkflowRun; label: (id: string) => string }) {
+  const [open, setOpen] = useState(false)
+  const ran = run.steps.filter(s => s.status === 'ran').length
+  const skipped = run.steps.length - ran
+  const nothingListening = run.matched === 0
+
+  const summary = nothingListening
+    ? 'nothing wired to this'
+    : [ran ? `${ran} ran` : null, skipped ? `${skipped} skipped` : null].filter(Boolean).join(', ') || 'no steps'
+
+  return (
+    <div style={{ borderBottom: '1px solid #f1f5f9', padding: '8px 10px', fontSize: '12px' }}>
+      <div onClick={() => setOpen(o => !o)} style={{ display: 'flex', alignItems: 'baseline', gap: '6px', cursor: run.steps.length ? 'pointer' : 'default' }}>
+        <span style={{ width: '7px', height: '7px', borderRadius: '50%', flexShrink: 0,
+          background: nothingListening ? '#f59e0b' : (skipped && !ran ? '#94a3b8' : '#10b981') }} />
+        <strong style={{ color: '#0f172a' }}>{label(run.sourceId)}</strong>
+        <span style={{ color: '#94a3b8' }}>{run.event}</span>
+        <span style={{ marginLeft: 'auto', color: '#94a3b8', whiteSpace: 'nowrap' }}>{ago(run.at)}</span>
+      </div>
+      <div style={{ color: nothingListening ? '#b45309' : '#64748b', marginTop: '2px', marginLeft: '13px' }}>{summary}</div>
+
+      {open && run.steps.map((st, i) => (
+        <div key={i} style={{ marginLeft: '13px', marginTop: '6px', paddingLeft: '8px', borderLeft: '2px solid #e2e8f0' }}>
+          <div style={{ color: '#0f172a' }}>
+            {st.action} &rarr; {label(st.targetId)}
+          </div>
+          {st.status === 'ran' ? (
+            <div style={{ color: '#64748b' }}>
+              {JSON.stringify(st.before)} &rarr; {JSON.stringify(st.after)}
+            </div>
+          ) : (
+            <div style={{ color: '#b45309' }}>{st.reason}</div>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** The "See Runs" panel. When something does not fire, this is the thing to look at. */
+function RunsPanel({ onClose }: { onClose: () => void }) {
+  const [runs, setRuns] = useAtom(workflowRunsAtom)
+  const label = useBlockLabel()
+
+  return (
+    <div style={{
+      position: 'fixed', left: '16px', bottom: '16px', width: '340px', maxHeight: '46vh',
+      background: '#fff', border: '1px solid #e2e8f0', borderRadius: '10px',
+      boxShadow: '0 12px 28px -8px rgba(0,0,0,0.22)', zIndex: 3000,
+      display: 'flex', flexDirection: 'column', overflow: 'hidden',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 12px', borderBottom: '1px solid #e2e8f0' }}>
+        <strong style={{ fontSize: '13px', color: '#0f172a' }}>Runs</strong>
+        <span style={{ fontSize: '11px', color: '#94a3b8' }}>{runs.length ? `last ${runs.length}` : 'this session'}</span>
+        <button onClick={() => setRuns([])} style={{ marginLeft: 'auto', border: 'none', background: 'none', color: '#64748b', cursor: 'pointer', fontSize: '11px' }}>clear</button>
+        <button onClick={onClose} style={{ border: 'none', background: 'none', color: '#64748b', cursor: 'pointer', fontSize: '15px', lineHeight: 1 }}>&times;</button>
+      </div>
+
+      <div style={{ overflowY: 'auto' }}>
+        {runs.length === 0 ? (
+          <div style={{ padding: '16px 12px', fontSize: '12px', color: '#94a3b8' }}>
+            Nothing yet. Click a button or change an input, and every trigger that
+            fires shows up here &mdash; including the ones with nothing wired to them.
+          </div>
+        ) : (
+          runs.map(r => <RunRow key={r.id} run={r} label={label} />)
+        )}
+      </div>
     </div>
   )
 }
@@ -1050,6 +1140,8 @@ function App() {
   const [isCrossfading, setIsCrossfading] = useState(false)
   const setSwitchPageFn = useSetAtom(switchPageFnAtom)
   const [isPreviewMode, setIsPreviewMode] = useAtom(isPreviewModeAtom)
+  const [showRuns, setShowRuns] = useState(false)
+  const runCount = useAtomValue(workflowRunsAtom).length
   const [canvasMode, setCanvasMode] = useAtom(canvasModeAtom)
 
   const activePageIdRef = useRef(PAGE_ID)
@@ -2784,6 +2876,25 @@ function App() {
           </button>
 
           <button
+            onClick={() => setShowRuns((v: boolean) => !v)}
+            title="See what fired, and what did not"
+            style={{
+              padding: '6px 12px',
+              marginLeft: '8px',
+              border: '1px solid #cbd5e1',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '13px',
+              fontWeight: 600,
+              background: showRuns ? '#475569' : '#ffffff',
+              color: showRuns ? '#ffffff' : '#475569',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            ⟳ Runs{runCount ? ` (${runCount})` : ''}
+          </button>
+
+          <button
             onClick={() => setCanvasMode(canvasMode === 'action' ? 'design' : 'action')}
             style={{
               padding: '6px 12px',
@@ -2991,6 +3102,7 @@ function App() {
         </div>
       </div>
       {!isPreviewMode && <Inspector editor={editor} />}
+      {showRuns && <RunsPanel onClose={() => setShowRuns(false)} />}
     </div>
   )
 }
