@@ -166,11 +166,33 @@ localhost:5173, so email sign-in works in both.
 - Publish button, with share link, copy, open and unpublish
 - The production build actually builds (`npm run typecheck`, never `--noEmit`)
 
-### Done, not verified
-- Database blocks poll for new rows while the tab is visible. Automation could
-  not test it because the driven window is never foregrounded, so
-  visibilityState is always hidden and the hook correctly declines to poll.
-  Confirm by opening the editor on a laptop and submitting from a phone.
+### Live updating — VERIFIED 11 Aug 2026 (later)
+
+A Database block updating without a refresh is now proven on the live domain,
+end to end. This was previously unverifiable by automation because the driven
+tab is never foregrounded, so `visibilityState` is permanently `hidden` and the
+poll correctly declines to run. Getting past that does not need a real window:
+
+```js
+Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
+Object.defineProperty(document, 'hidden',          { get: () => false,     configurable: true });
+```
+
+With that in place, on `/view/a968f487-...`:
+
+```
+before          2 rows, count 2
+a stranger      add_database_row via the anon key with NO session  -> 204
+                (the open page was not touched, refreshed or navigated)
+after ~9s       3 rows, count 3, "LIVE TEST" visible
+```
+
+The count moving 2 -> 3 matters as much as the row appearing: it proves the new
+`onChange` fires on the **poll** path, not only on first load. The test row was
+then deleted with the owner session and the table is back to 2.
+
+That is the whole product in one observation — two people on the same page at
+the same time, one of whom owns nothing.
 
 ### The first real page exists — 11 Aug 2026
 
