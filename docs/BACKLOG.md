@@ -292,38 +292,68 @@ anywhere is `parentId: null` in the `.creora` exporter. So this is days of work,
 not weeks. The risk is not the code, it is that dragging into slots *feels*
 different from dragging anywhere.
 
-**`OPEN` 2. Is Figma / AI-generated visual import ever built?**
+**`DECIDED` 2. The import model — settled in notion 2, and already half built.**
 
-The rule, if it is: **import the visual layer only, always discard the logic**,
-and re-wire through nodes. Never parse their code to preserve behaviour —
-working spaghetti and broken spaghetti are indistinguishable from outside, and
-"this button opens a page" can be written a dozen ways. Creora never reads the
-spaghetti to know it is spaghetti.
+The owner's model, in his words: *"the website doesn't care about the code
+underneath — treat it like Lego. If a user made a button UI somewhere else and
+pastes it in, all they do is click that button and add the nodes behind it, like
+Unreal Engine."*
 
-Two honest problems: Figma's API hands over a clean tree, whereas a live site's
-DOM does not arrive organised — prove it on Figma first or not at all. And
-**nobody has asked for it**, because nobody has used Creora yet. Building an
-import path for a workflow no user has requested is the exact pattern that cost
-21 days in July.
+**This is not a question. It is `ShapeBlock`, and it already exists** — written
+22 July, and never touched since the day it was written. A shape with
+`role: null` renders no ports and does nothing; set `role: 'trigger'` and it
+grows the same ports as a Button and fires `onClick` workflows. It works on
+published pages too.
 
-### Why these two are one decision
+The Role dropdown ships with exactly two options:
 
-**A Figma frame *is* absolute pixel positions.** That is all it is.
+```
+<option value="">None</option>
+<option value="trigger">Trigger (Button)</option>
+```
 
-- Yes to Figma import is yes to x/y — importing the very model you would
-  otherwise be leaving.
-- Moving to stacks and grids makes Figma import much harder, because structure
-  then has to be *inferred* from pixels, which is the guessing problem again.
+So the real gap is not an importer. **It is roles.** "Paste a shape, tell it what
+it is" is the same operation whether the shape came from Figma or was drawn here.
+`TODO` Worth adding, cheapest first:
 
-**So deciding Figma first quietly decides layout, without anyone noticing.**
-Decide layout first, or decide neither.
+| role | what the shape becomes | reuses |
+| :--- | :--- | :--- |
+| Display | shows a value from a wire | Number / Text Label |
+| Input | collects text | Input |
+| Link | navigates to a page on click | Button's `targetPageId` |
+| Image | shows a picture | needs the image pipeline, section 3 |
 
-Suggested order: send the link to five people -> find out whether anyone actually
-asks to bring a design in -> then decide layout -> then Figma, if still wanted.
+Every one of these already exists as a block type. A role is wiring an existing
+behaviour onto a roleless shape, not inventing anything.
+
+### The genuinely hard case, split up
+
+The owner named it precisely: *a user takes an AI-made website they like — with
+animations, lots of pages, code — and now wants it to work their way.* That is
+three problems wearing one coat, and only one of them is hard:
+
+| part | status |
+| :--- | :--- |
+| **lots of pages** | `DONE`. Multi-page plus button navigation works, published and verified 11 Aug. |
+| **the animations and the look** | `PART`. Their CSS cannot come across without their code. But animation presets now exist, so the motion gets **re-applied**, not imported. |
+| **getting clean shapes out of a rendered website** | `OPEN`, and this is the actual hard part. Figma's API hands over a clean tree; a live site's DOM does not — you would be guessing what is a button and what is a div with padding. |
+
+`OPEN` So the only open question left is narrow: **is an importer built that
+produces ShapeBlocks with the right position, size, colour and text?** Framed
+that way it is much smaller than "import a website", and Figma should be proved
+first — or it should not be started at all until somebody actually asks for it.
+
+### Why this still couples to the x/y decision
+
+A Figma frame *is* absolute pixel positions, and an importer would emit exactly
+that. So an importer argues for keeping x/y, and stacks-and-grids makes an
+importer harder because structure would have to be inferred from pixels.
+
+**Decide layout first, or decide neither.** Deciding the importer first quietly
+decides layout without anyone noticing.
 
 **Not optional either way: do not start the theme or visual layer until layout is
-settled**, or the design work gets done twice. That is the real reason this
-matters now rather than later.
+settled**, or the design work gets done twice.
 
 ---
 
