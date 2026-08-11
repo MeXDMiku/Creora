@@ -50,8 +50,19 @@ not anything written in advance, including this file.
 
 These are already understood; do not rediscover them.
 
-- After inserting a block you must click back into the top text strip before
-  `/` works again.
+- **Inserting blocks is the worst part of the product, and worse than it looks.**
+  Attempted on 11 Aug by automation with pixel-accurate clicking; it produced a
+  Toggle when asked for an Input, then silently inserted nothing at all. Cause,
+  measured in the page: after an insert the editor loses focus entirely
+  (`document.activeElement` is BODY, ProseMirror is not focused) and the one
+  place text can be typed is a thin line that shifts down as blocks are added.
+  So every subsequent keystroke goes nowhere, with no feedback — no error, no
+  cursor, nothing. A stray `/` paragraph is left behind each time.
+  **Fix this before showing anyone.** Options, cheapest first: keep focus in the
+  editor after inserting; give the canvas a persistent insert affordance (a
+  visible + that does not move); or accept a slash menu that can be reopened
+  with a keyboard shortcut from anywhere. This is the single biggest reason a
+  first user would quit, and it is not a design problem — it is a focus bug.
 - Block names in dropdowns read like `Button (7b41)`.
 - Rows are scoped only by `database_block_id` — no collection model yet.
 - Blocks sit at fixed x/y, so a published page does not reflow on a phone.
