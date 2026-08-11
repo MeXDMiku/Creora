@@ -268,14 +268,62 @@ Both of these are the correct shape of answer for a solo builder with no
 revenue: refuse the liability you cannot carry, and refuse to guess a number
 before anyone has tried to pay one.
 
-### Still genuinely open
+### Still genuinely open — and they are the same question
 
-- `OPEN` Whether the editor canvas keeps free x/y placement at all, or moves to
-  stacks, rows and grids everywhere. Published pages already stack below 640px;
-  the editor does not.
-- `OPEN` Whether importing a Figma / AI-generated visual layer is ever built. The
-  rule if it is: **import the visual layer only, always discard the logic**, and
-  re-wire through nodes. Creora never reads the spaghetti to know it is spaghetti.
+**`OPEN` 1. Does the editor keep free x/y placement, or move to stacks and grids?**
+
+Today every block stores two pixel numbers. That is why the Feedback table sat at
+x=420 and fell off a 390px phone. Published pages below 640px now ignore those
+numbers and stack — but that is a patch that *guesses* reading order from
+coordinates, not a fix.
+
+| | keep x/y | stacks and grids |
+| :--- | :--- | :--- |
+| a block knows | "80 across, 240 down" | "third thing in this column" |
+| dragging | anywhere | into a slot |
+| phones | inferred from coordinates | correct by construction |
+| "side by side on desktop, stacked on phone" | cannot be expressed | just say it |
+| who works this way | Figma | Squarespace, Notion, Webflow |
+
+Cost, measured: **27 references to `blockPositionAtom` across 5 files**, most
+routed through `blockToCSS`. Blocks are a **flat list** — `parentId` and
+`children` exist in `types/creora.ts` but were never implemented; the only write
+anywhere is `parentId: null` in the `.creora` exporter. So this is days of work,
+not weeks. The risk is not the code, it is that dragging into slots *feels*
+different from dragging anywhere.
+
+**`OPEN` 2. Is Figma / AI-generated visual import ever built?**
+
+The rule, if it is: **import the visual layer only, always discard the logic**,
+and re-wire through nodes. Never parse their code to preserve behaviour —
+working spaghetti and broken spaghetti are indistinguishable from outside, and
+"this button opens a page" can be written a dozen ways. Creora never reads the
+spaghetti to know it is spaghetti.
+
+Two honest problems: Figma's API hands over a clean tree, whereas a live site's
+DOM does not arrive organised — prove it on Figma first or not at all. And
+**nobody has asked for it**, because nobody has used Creora yet. Building an
+import path for a workflow no user has requested is the exact pattern that cost
+21 days in July.
+
+### Why these two are one decision
+
+**A Figma frame *is* absolute pixel positions.** That is all it is.
+
+- Yes to Figma import is yes to x/y — importing the very model you would
+  otherwise be leaving.
+- Moving to stacks and grids makes Figma import much harder, because structure
+  then has to be *inferred* from pixels, which is the guessing problem again.
+
+**So deciding Figma first quietly decides layout, without anyone noticing.**
+Decide layout first, or decide neither.
+
+Suggested order: send the link to five people -> find out whether anyone actually
+asks to bring a design in -> then decide layout -> then Figma, if still wanted.
+
+**Not optional either way: do not start the theme or visual layer until layout is
+settled**, or the design work gets done twice. That is the real reason this
+matters now rather than later.
 
 ---
 
