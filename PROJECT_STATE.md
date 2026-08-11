@@ -172,6 +172,27 @@ localhost:5173, so email sign-in works in both.
   visibilityState is always hidden and the hook correctly declines to poll.
   Confirm by opening the editor on a laptop and submitting from a phone.
 
+### The first real page exists — 11 Aug 2026
+
+A published Feedback page, built and proven end to end:
+`/view/a968f487-0fe3-4743-9824-e1fe651654eb` (works on the live domain too).
+Two Inputs, a Submit button wired to addRow with column mappings, a
+Submissions table, and a count.
+
+Filling both fields and pressing Submit recorded `Ananya: This actually
+works!`. A session-less client holding only the public anon key then opened
+the page and submitted `Rahul (no account)`, and was refused with "not your
+page" when it tried to edit. Two rows, both produced by the product rather
+than by a test script.
+
+That is the whole thesis in one page: a stranger uses something they do not
+own, changes shared data, and cannot damage anything.
+
+It was assembled by writing the page structure through `save_page` rather than
+by clicking, because the automation tab is never the visible tab and cannot
+reliably drive the editor. Building the same page by hand through the UI is
+still worth doing once, as a test of whether the editor is usable by a person.
+
 ### The next thing to build
 One real public page, end to end: two Inputs, a Submit button wired to add a
 row, a Database showing submissions, and a Number Display of the count.
