@@ -1,3 +1,4 @@
+import { usePollWhileVisible } from '../hooks/usePollWhileVisible';
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useStore, useAtomValue } from 'jotai';
@@ -287,6 +288,7 @@ function PublishedDatabaseBlock({ block }: { block: ExtractedBlock }) {
   const rows = runtimeState?.rows || [];
   const outputMode = runtimeState?.outputMode || 'row_count';
 
+  const loadRowsRef = useRef<() => void>(() => {});
   useEffect(() => {
     async function loadRows() {
       try {
@@ -320,8 +322,11 @@ function PublishedDatabaseBlock({ block }: { block: ExtractedBlock }) {
         }
       } catch (err) {}
     }
+    loadRowsRef.current = loadRows;
     loadRows();
   }, [block.id, outputMode, columns.length, store]);
+
+  usePollWhileVisible(() => loadRowsRef.current());
 
   const debouncedSaveRef = useRef<Record<string, any>>({});
   const saveCellToSupabase = useCallback((rowId: string, rowData: any) => {

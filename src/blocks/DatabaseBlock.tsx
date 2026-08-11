@@ -1,3 +1,4 @@
+import { usePollWhileVisible } from '../hooks/usePollWhileVisible';
 import { Node } from '@tiptap/core';
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
 import type { NodeViewProps } from '@tiptap/react';
@@ -34,6 +35,7 @@ const DatabaseBlockComponent = (props: NodeViewProps) => {
   const outputMode = runtimeState?.outputMode || 'row_count';
 
   // Load rows from Supabase
+  const loadRowsRef = useRef<() => void>(() => {});
   useEffect(() => {
     async function loadRows() {
       try {
@@ -76,8 +78,12 @@ const DatabaseBlockComponent = (props: NodeViewProps) => {
         console.error('Error fetching database rows from Supabase:', err);
       }
     }
+    loadRowsRef.current = loadRows;
     loadRows();
   }, [blockId, outputMode, columns.length]);
+
+  // Rows can arrive from anyone using the published page, so keep looking.
+  usePollWhileVisible(() => loadRowsRef.current());
 
   // Debounced cell edit save
   const debouncedSaveRef = useRef<Record<string, any>>({});
