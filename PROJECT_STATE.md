@@ -223,6 +223,33 @@ Also removed from published pages: the "Edit Dashboard" link into the owner's
 editor, and the "DATABASE TABLE" caption. `document.title` is now the page name;
 every published tab used to be titled "a".
 
+### A Database block used to overwrite the page it had just loaded *(fixed 11 Aug 2026, later)*
+
+Worth knowing about because the same shape can exist elsewhere. `DatabaseBlock`'s
+row-loading effect spread `runtimeState` **as captured when the effect ran**. The
+Supabase fetch is async and races page hydration:
+
+1. the block mounts holding its defaults (`blockName: "Database"`, columns `Name`/`Age`)
+2. `App.tsx` hydrates the page's saved runtimeStates into the atoms
+3. the fetch resolves and writes the **defaults** back over them, keeping only
+   `rows` and `value`
+
+The poll then re-ran that same stale closure every few seconds. Symptom: the
+editor showed the Feedback page as `Database / Name / Age` while storage still
+said `Submissions / Name / Message`.
+
+Nothing had been persisted -- but `savePageData` collects
+`store.get(blockRuntimeAtom(id))`, so the next save of that page would have
+written `Name`/`Age` over `Name`/`Message`, and the Submit button maps a field to
+the `Message` column. Messages would have silently stopped being recorded.
+
+`PublishedRenderer` never had this bug because it spread `currentLocalState`,
+read fresh from the store -- which is why the published page showed the right
+columns while the editor showed the wrong ones. The editor now does the same.
+
+**The general rule:** inside an async effect or a polled callback, read block
+state from the store at write time. Never spread a value captured at render.
+
 ### The next thing to build
 
 The Feedback page exists, is published, and now shows a correct count to a
