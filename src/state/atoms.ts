@@ -168,6 +168,8 @@ export function getCanvasBlocks(editor: any, store: any, excludeBlockId?: string
 }
 
 export const formulasAtom = atom<FormulaBinding[]>([]);
+/** Publish state of the page currently open in the editor. Set on load from get_page. */
+export const currentPageIsPublishedAtom = atom<boolean>(false);
 export const currentPageIdAtom = atom<string>('00000000-0000-0000-0000-000000000001');
 export const pagesListAtom = atom<Page[]>([]);
 export const switchPageFnAtom = atom<((targetPageId: string) => Promise<void>) | null>(null);

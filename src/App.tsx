@@ -2,7 +2,7 @@ import { useEffect, useRef, useCallback, useState, useMemo } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { useSetAtom, useAtom, useAtomValue, useStore } from 'jotai'
-import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, getCanvasBlocks, currentPageIdAtom, pagesListAtom, switchPageFnAtom, isPreviewModeAtom, canvasModeAtom } from './state/atoms'
+import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, getCanvasBlocks, currentPageIdAtom, currentPageIsPublishedAtom, pagesListAtom, switchPageFnAtom, isPreviewModeAtom, canvasModeAtom } from './state/atoms'
 import { newBlockId, defaultRuntimeForNodeType, defaultAttrsForNodeType, BLOCK_FOOTPRINT, type BlockNodeType } from './lib/blockRegistry'
 import { ButtonBlock } from './blocks/ButtonBlock'
 import { NumberDisplayBlock } from './blocks/NumberDisplayBlock'
@@ -19,6 +19,7 @@ import { WireOverlay } from './components/WireOverlay'
 import { supabase } from './lib/supabase'
 import { ensureSession } from './lib/session'
 import { AccountBadge } from './components/AccountBadge'
+import { PublishButton } from './components/PublishButton'
 import { recalculateAllFormulas } from './lib/bindingEngine'
 import type { FormulaBinding, CreoraFile, Page, Block, BlockProps, StyleConfig, AnimationConfig, BlockType } from './types/creora'
 import './App.css'
@@ -2237,6 +2238,7 @@ function App() {
 
       if (data) {
         const blocksData = data.blocks || {}
+        store.set(currentPageIsPublishedAtom, !!(data as any).is_published)
         const workflowsData = data.workflows || []
 
         // Set TipTap Content
@@ -2312,6 +2314,8 @@ function App() {
   const createNewPage = async () => {
     setIsLoading(true)
     setSaveStatus('Saving...')
+    // A brand new page is private; do not inherit the previous page's state.
+    store.set(currentPageIsPublishedAtom, false)
     const newPageId = crypto.randomUUID()
     const newPageName = `Page ${pagesList.length + 1}`
     const defaultBlocks = {
@@ -2439,6 +2443,7 @@ function App() {
 
         if (activePageData && editor) {
           const blocksData = activePageData.blocks || {}
+          store.set(currentPageIsPublishedAtom, !!(activePageData as any).is_published)
           const workflowsData = activePageData.workflows || []
 
           // Migrate document content (textDisplayBlock -> numberDisplayBlock) if any
@@ -2741,6 +2746,7 @@ function App() {
               onChange={handleImportFile}
               style={{ display: 'none' }}
             />
+            <PublishButton />
             <AccountBadge />
           </div>
         </div>
