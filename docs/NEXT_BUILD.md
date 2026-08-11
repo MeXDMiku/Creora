@@ -50,19 +50,24 @@ not anything written in advance, including this file.
 
 These are already understood; do not rediscover them.
 
-- **Inserting blocks is the worst part of the product, and worse than it looks.**
-  Attempted on 11 Aug by automation with pixel-accurate clicking; it produced a
-  Toggle when asked for an Input, then silently inserted nothing at all. Cause,
-  measured in the page: after an insert the editor loses focus entirely
-  (`document.activeElement` is BODY, ProseMirror is not focused) and the one
-  place text can be typed is a thin line that shifts down as blocks are added.
-  So every subsequent keystroke goes nowhere, with no feedback — no error, no
-  cursor, nothing. A stray `/` paragraph is left behind each time.
-  **Fix this before showing anyone.** Options, cheapest first: keep focus in the
-  editor after inserting; give the canvas a persistent insert affordance (a
-  visible + that does not move); or accept a slash menu that can be reopened
-  with a keyboard shortcut from anywhere. This is the single biggest reason a
-  first user would quit, and it is not a design problem — it is a focus bug.
+- **Inserting blocks: partly a real problem, partly a false alarm.** On 11 Aug
+  this was recorded as a serious focus bug on the evidence that
+  `document.activeElement` was BODY after an insert. **That conclusion was
+  wrong**, and the correction is worth more than the original claim. The
+  automation tab was never the visible tab — `document.visibilityState` is
+  permanently `hidden` — and a hidden tab does not receive real input focus,
+  so synthetic clicks never focused the editor and every keystroke went
+  nowhere. Focusing the editor programmatically and typing `/` opened the menu
+  immediately. The same cause explains screenshots timing out on that tab and
+  the row polling appearing not to work.
+  What *was* real: after an insert the caret landed after an atom node, where
+  the slash detector reads `$from.nodeBefore?.text` as undefined and never
+  opens the menu. insertBlock now guarantees an empty trailing paragraph, puts
+  the caret in it, and restores focus. Verified: after inserting, typing `/`
+  again opened the menu with no click and no refocus.
+  Still worth doing for real users, but as polish rather than a fix: a visible
+  insert affordance that does not move, and a keyboard shortcut to open the
+  menu from anywhere.
 - Block names in dropdowns read like `Button (7b41)`.
 - Rows are scoped only by `database_block_id` — no collection model yet.
 - Blocks sit at fixed x/y, so a published page does not reflow on a phone.

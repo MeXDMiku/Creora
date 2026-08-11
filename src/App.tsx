@@ -2578,6 +2578,26 @@ function App() {
         attrs: { blockId, ...defaultAttrsForNodeType(nodeType) },
       })
       .run()
+
+    // Leave the editor usable for the NEXT insert.
+    //
+    // Two things break otherwise, and together they make the slash menu feel
+    // broken rather than fiddly. Choosing a command clicks a button outside
+    // ProseMirror, so focus lands on <body>; and the caret ends up after an
+    // atom node, where the slash detector reads `$from.nodeBefore?.text` as
+    // undefined and never opens the menu. The result is that every keystroke
+    // after the first insert goes nowhere, with no cursor and no error.
+    //
+    // So: guarantee an empty trailing paragraph, put the caret in it, and take
+    // focus back.
+    const { doc } = editor.state
+    const last = doc.lastChild
+    if (!last || last.type.name !== 'paragraph' || last.content.size > 0) {
+      editor.chain().insertContentAt(doc.content.size, { type: 'paragraph' }).run()
+    }
+    requestAnimationFrame(() => {
+      editor.chain().focus('end').run()
+    })
   }
 
 
