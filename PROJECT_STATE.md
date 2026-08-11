@@ -121,6 +121,29 @@ The built-in mail service allows only **2 auth emails per hour**; raising it nee
 
 ---
 
+## Type checking — use `npm run typecheck`, never `tsc --noEmit` *(11 Aug 2026)*
+
+`tsconfig.json` is `"files": []` with only project references, so `tsc --noEmit`
+compiles **zero files** and always exits 0. It is not a check; it is a no-op that
+looks like a passing check.
+
+The real command is `tsc -b`, exposed as `npm run typecheck`, and it is what
+`npm run build` runs. When this was first run properly on 11 Aug it reported 24
+errors that had accumulated invisibly — all of them type declarations that had
+drifted from what the code actually does at runtime, not broken logic:
+`matchValue` declared as a string while the engine reads `.source` and
+`.value`; `pendingConnectionAtom` missing the x1/y1/x2/y2 the overlay draws
+with; `connectionContextMenuAtom` declaring `wireId` while both writer and
+reader use `connectionId`; `pagesListAtom` typed as `Page[]` when it holds
+`{id, name}` summaries; a `reset` workflow action that is implemented but was
+not in the union; and the whole `.creora` export format, which serialises far
+more than the in-memory Block and Page types declared.
+
+The production build could not have succeeded in that state, so any deploy would
+have failed.
+
+---
+
 ## File Structure Summary
 
 ```

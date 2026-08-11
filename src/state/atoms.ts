@@ -1,6 +1,6 @@
 import { atom } from 'jotai';
 import { atomFamily } from 'jotai/utils';
-import type { Workflow, FormulaBinding, Page, BlockRuntimeState } from '../types/creora';
+import type { Workflow, FormulaBinding, PageSummary, BlockRuntimeState } from '../types/creora';
 import { nodeTypeFromBlockId, defaultValueForNodeType, defaultRuntimeForNodeType, shortBlockId } from '../lib/blockRegistry';
 
 /**
@@ -40,7 +40,7 @@ export const blockRuntimeAtom = atomFamily((blockId: string) => {
   return atom<BlockRuntimeState>(defaultRuntimeForNodeType(nodeTypeFromBlockId(blockId)));
 });
 
-export const blockPositionAtom = atomFamily((blockId: string) => {
+export const blockPositionAtom = atomFamily((_blockId: string) => {
   return atom<{ x: number; y: number }>({ x: 100, y: 100 });
 });
 
@@ -63,7 +63,12 @@ export const snapTargetAtom = atom<string | null>(null);
 export const pendingConnectionAtom = atom<{
   sourceBlockId: string;
   targetBlockId: string;
-  sourceEvent: 'onClick' | 'onChange' | 'onTick' | 'onComplete';
+  sourceEvent?: 'onClick' | 'onChange' | 'onTick' | 'onComplete';
+  // Port coordinates, so WireOverlay can draw the dashed pending wire.
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
 } | null>(null);
 
 export const triggerSaveAtom = atom<number>(0);
@@ -90,7 +95,7 @@ export const contextMenuAtom = atom(
 );
 
 const baseConnectionContextMenuAtom = atom<{
-  wireId: string;
+  connectionId: string;
   x: number;
   y: number;
   visible: boolean;
@@ -98,7 +103,7 @@ const baseConnectionContextMenuAtom = atom<{
 
 export const connectionContextMenuAtom = atom(
   (get) => get(baseConnectionContextMenuAtom),
-  (get, set, update: { wireId: string; x: number; y: number; visible: boolean } | null) => {
+  (get, set, update: { connectionId: string; x: number; y: number; visible: boolean } | null) => {
     if (get(isPreviewModeAtom)) {
       set(baseConnectionContextMenuAtom, null);
       return;
@@ -171,5 +176,5 @@ export const formulasAtom = atom<FormulaBinding[]>([]);
 /** Publish state of the page currently open in the editor. Set on load from get_page. */
 export const currentPageIsPublishedAtom = atom<boolean>(false);
 export const currentPageIdAtom = atom<string>('00000000-0000-0000-0000-000000000001');
-export const pagesListAtom = atom<Page[]>([]);
+export const pagesListAtom = atom<PageSummary[]>([]);
 export const switchPageFnAtom = atom<((targetPageId: string) => Promise<void>) | null>(null);

@@ -994,8 +994,9 @@ export default function PublishedRenderer() {
           return;
         }
 
-        const blocksData = data.blocks || {};
-        const workflowsData = data.workflows || [];
+        const row = data as any
+      const blocksData = row.blocks || {};
+        const workflowsData = row.workflows || [];
         setPageName(blocksData.pageName || 'Published Page');
 
         // Extract doc items and blocks from documentContent

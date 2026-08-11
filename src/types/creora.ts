@@ -12,18 +12,19 @@ export type BlockType =
 
 export interface WorkflowStep {
   targetId: string;
-  action: 'increment' | 'decrement' | 'set' | 'toggle' | 'setVisible' | 'setHidden' | 'addRow' | 'updateRow' | 'deleteRow';
+  action: 'increment' | 'decrement' | 'set' | 'toggle' | 'reset' | 'setVisible' | 'setHidden' | 'addRow' | 'updateRow' | 'deleteRow';
   amount?: number;
   value?: any;
   condition?: {
     fieldId: string;
     operator: 'is ON' | 'is OFF' | 'equals' | 'notEquals' | 'greaterThan' | 'lessThan' | 'contains' | 'isEmpty' | 'is_ON' | 'is_OFF' | 'greater than' | 'less than';
     value?: any;
-  };
+  } | null;
   mappings?: Record<string, { source: 'fixed' | 'block'; value: string }>;
   matchColumn?: string;
   matchSource?: 'fixed' | 'block';
-  matchValue?: string;
+  /** Matches the shape used by `mappings` — the engine reads .source and .value. */
+  matchValue?: { source: 'fixed' | 'block'; value: string };
 }
 
 export type TriggerEvent = 'onClick' | 'onChange' | 'onTick' | 'onComplete';
@@ -64,6 +65,12 @@ export interface StyleConfig {
 export interface AnimationConfig {
   hoverScale?: number;
   clickScale?: number;
+  entrance?: string;
+  entranceDuration?: number;
+  entranceDelay?: number;
+  entranceTrigger?: string;
+  hover?: any;
+  click?: any;
 }
 
 export interface BlockProps {
@@ -84,11 +91,26 @@ export interface Block {
   props: BlockProps;
   styles: StyleConfig;
   animations?: AnimationConfig;
+  // Written by the .creora exporter, which serialises more than the editor
+  // keeps in memory.
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  parentId?: string | null;
+  children?: any[];
+  pageId?: string;
 }
 
 export interface Page {
   id: string;
-  title: string;
+  /** Never set at runtime — the app and the .creora file both use `name`. */
+  title?: string;
+  /** Display name used by the tab bar and the .creora file. */
+  name?: string;
+  route?: string;
+  layoutTemplateId?: string | null;
+  databases?: any[];
   blocks: Block[];
   workflows: Workflow[];
   formulas?: FormulaBinding[];
@@ -96,8 +118,10 @@ export interface Page {
 
 export interface CreoraFile {
   version: string;
-  activePageId: string;
+  activePageId?: string;
   pages: Page[];
+  metadata?: Record<string, any>;
+  layoutTemplates?: any[];
 }
 
 export interface FormulaBinding {
@@ -135,6 +159,13 @@ export interface BlockRuntimeState {
   rows?: { id: string; [key: string]: any }[];
   outputMode?: string;
   targetPageId?: string;
+  // Style fields the inspector writes and renderBlockStyles reads. These were
+  // used at runtime long before they were declared.
+  borderWidth?: number;
+  borderColor?: string;
+  borderStyle?: string;
+  boxShadowPreset?: string;
+  textAlign?: string;
 }
 
 export interface DatabaseField {
@@ -146,4 +177,19 @@ export interface DatabaseField {
 export interface DatabaseRow {
   id: string;
   [key: string]: any;
+}
+
+/** What list_pages() actually returns, and what the page tab bar renders. */
+export interface PageSummary {
+  id: string;
+  name: string;
+}
+
+/** One row from get_page(). The RPC is untyped, so call sites cast to this. */
+export interface PageRow {
+  id: string;
+  blocks: any;
+  workflows: any;
+  updated_at: string;
+  is_published: boolean;
 }

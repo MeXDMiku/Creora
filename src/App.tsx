@@ -18,6 +18,7 @@ import { ShapeBlock } from './blocks/ShapeBlock'
 import { WireOverlay } from './components/WireOverlay'
 import { supabase } from './lib/supabase'
 import { ensureSession } from './lib/session'
+import type { PageRow } from './types/creora'
 import { AccountBadge } from './components/AccountBadge'
 import { PublishButton } from './components/PublishButton'
 import { recalculateAllFormulas } from './lib/bindingEngine'
@@ -2237,9 +2238,10 @@ function App() {
       if (error) throw error
 
       if (data) {
-        const blocksData = data.blocks || {}
-        store.set(currentPageIsPublishedAtom, !!(data as any).is_published)
-        const workflowsData = data.workflows || []
+        const row = data as unknown as PageRow
+        const blocksData = row.blocks || {}
+        store.set(currentPageIsPublishedAtom, !!row.is_published)
+        const workflowsData = row.workflows || []
 
         // Set TipTap Content
         editor.commands.setContent(blocksData.documentContent || '')
@@ -2380,7 +2382,7 @@ function App() {
         if (fetchErr) throw fetchErr
 
         let pages = allPagesList || []
-        const hasDefaultPage = pages.some(p => p.id === PAGE_ID)
+        const hasDefaultPage = pages.some((p: any) => p.id === PAGE_ID)
         
         if (!hasDefaultPage) {
           const defaultBlocks = {
@@ -2428,7 +2430,7 @@ function App() {
 
         // 2. Resolve active page ID
         let lastActiveId = localStorage.getItem('creora_active_page_id')
-        if (!lastActiveId || !pages.some(p => p.id === lastActiveId)) {
+        if (!lastActiveId || !pages.some((p: any) => p.id === lastActiveId)) {
           lastActiveId = PAGE_ID
         }
         setActivePageId(lastActiveId)
@@ -2442,9 +2444,10 @@ function App() {
         if (activePageErr) throw activePageErr
 
         if (activePageData && editor) {
-          const blocksData = activePageData.blocks || {}
-          store.set(currentPageIsPublishedAtom, !!(activePageData as any).is_published)
-          const workflowsData = activePageData.workflows || []
+          const activeRow = activePageData as unknown as PageRow
+          const blocksData = activeRow.blocks || {}
+          store.set(currentPageIsPublishedAtom, !!activeRow.is_published)
+          const workflowsData = activeRow.workflows || []
 
           // Migrate document content (textDisplayBlock -> numberDisplayBlock) if any
           const migrateNodes = (node: any) => {
