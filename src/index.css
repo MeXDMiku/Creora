@@ -175,3 +175,41 @@ div[data-node-view-wrapper][class*="list-block-wrapper"] {
   pointer-events: none !important;
 }
 
+
+/* ---------------------------------------------------------------------------
+   Animation presets. See src/lib/animations.ts — the preset ids there map to
+   these class names, and ANIMATION_DURATION_MS must match the duration below.
+   --------------------------------------------------------------------------- */
+@keyframes creora-pulse {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.06); }
+  100% { transform: scale(1); }
+}
+@keyframes creora-flash {
+  0%   { filter: brightness(1); }
+  35%  { filter: brightness(1.35); }
+  100% { filter: brightness(1); }
+}
+@keyframes creora-rise {
+  0%   { transform: translateY(7px); opacity: 0.35; }
+  100% { transform: translateY(0);   opacity: 1; }
+}
+@keyframes creora-shake {
+  0%, 100% { transform: translateX(0); }
+  25%      { transform: translateX(-3px); }
+  75%      { transform: translateX(3px); }
+}
+
+.creora-anim-pulse { animation: creora-pulse 460ms cubic-bezier(0.34, 1.4, 0.64, 1); }
+.creora-anim-flash { animation: creora-flash 460ms ease-out; }
+.creora-anim-rise  { animation: creora-rise  460ms cubic-bezier(0.16, 1, 0.3, 1); }
+.creora-anim-shake { animation: creora-shake 460ms ease-in-out; }
+
+/* Motion can cause real harm. If the visitor asked their system for less of it,
+   they get none of it, and the value still updates exactly the same. */
+@media (prefers-reduced-motion: reduce) {
+  .creora-anim-pulse,
+  .creora-anim-flash,
+  .creora-anim-rise,
+  .creora-anim-shake { animation: none !important; }
+}

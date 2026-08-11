@@ -157,8 +157,30 @@ design system on top of x/y coordinates.
 
 ## Order
 
-Identity and ownership are done. Next is a Publish button, because
-`set_page_published` exists in the database and nothing in the interface calls
-it — pages currently cannot be published without hand-calling an RPC. Then one
-real public page end to end. Collections, the renderer merge, named outputs and
-the AI block all sit after that.
+Done: identity and ownership, the Publish button, one real public page end to
+end, a phone layout for published pages, and animation presets.
+
+Next, in the order this document argues for:
+
+1. **Named, typed outputs** — partly done. Dropdowns now show a block's name and
+   only append its id when two blocks share a name. What is still missing is the
+   Twenty idea proper: a block publishing a *named variable* that later blocks
+   reference by name rather than by block id.
+2. **If/Else as a visible branch node.** Conditions are still buried inside a
+   workflow step, so a branch cannot be seen on the canvas.
+3. **Run history.** When a workflow does not fire there is nothing to inspect.
+   This is the direct cause of the July debugging sessions, which turned into
+   clicking things repeatedly and guessing.
+4. **Collections** — rows are still scoped only by `database_block_id`. Delete a
+   Database block and its rows orphan in Supabase, unreachable through the
+   product, and two pages cannot share data.
+5. **An Edge Function layer**, proven with the cheapest capability that needs it.
+   The one foundation under AI keys, OAuth secrets and un-cheatable rate limits.
+6. **End-user accounts** — the large one. Plan it as multi-tenant auth, not as
+   "add Google login".
+
+The layout decision is no longer entirely deferred: published pages stack below
+640px. That is the narrow first step, not the full model — blocks are still
+stored at fixed x/y, and the editor still positions absolutely. A theme and
+token layer should wait until positions are stacks, rows and grids, or the
+design work gets done twice.

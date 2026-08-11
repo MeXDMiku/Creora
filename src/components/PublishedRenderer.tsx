@@ -1,4 +1,5 @@
 import { usePollWhileVisible } from '../hooks/usePollWhileVisible';
+import { useValueChangeAnimation } from '../hooks/useValueChangeAnimation';
 import { useEffect, useState, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useStore, useAtomValue } from 'jotai';
@@ -816,6 +817,30 @@ function RenderedBlock({ block }: { block: ExtractedBlock }) {
  * edge of a 390px screen. Below `maxWidth` a published page stops using those
  * coordinates and stacks instead. The editor and the desktop view are untouched.
  */
+/**
+ * Carries the animation class for a block. It sits on the wrapper rather than
+ * inside each of the eleven block components: transform and filter apply to
+ * descendants, including the absolutely positioned child in the desktop layout,
+ * so one element covers every block type in both layouts.
+ */
+function AnimatedBlock({
+  block,
+  style,
+  className,
+}: {
+  block: ExtractedBlock;
+  style: React.CSSProperties;
+  className?: string;
+}) {
+  const animation = useValueChangeAnimation(block.id);
+  const classes = [className, animation].filter(Boolean).join(' ');
+  return (
+    <div style={style} className={classes || undefined}>
+      <RenderedBlock block={block} />
+    </div>
+  );
+}
+
 function useIsNarrow(maxWidth = 640) {
   const query = `(max-width: ${maxWidth}px)`;
   const [narrow, setNarrow] = useState(
@@ -1033,26 +1058,28 @@ export default function PublishedRenderer() {
               item.kind === 'block' ? null : <RenderDocNode key={`n${idx}`} node={item.node} />
             )}
             {narrowBlocks.map((block) => (
-              <div key={block.id} className="creora-stacked" style={{ marginBottom: '18px' }}>
-                <RenderedBlock block={block} />
-              </div>
+              <AnimatedBlock
+                key={block.id}
+                block={block}
+                className="creora-stacked"
+                style={{ marginBottom: '18px' }}
+              />
             ))}
           </>
         ) : (
           docItemsList.map((item, idx) => {
             if (item.kind === 'block') {
               return (
-                <div
+                <AnimatedBlock
                   key={item.block.id}
+                  block={item.block}
                   style={{
                     height: 0,
                     overflow: 'visible',
                     margin: 0,
                     padding: 0,
                   }}
-                >
-                  <RenderedBlock block={item.block} />
-                </div>
+                />
               );
             }
             return <RenderDocNode key={idx} node={item.node} />;

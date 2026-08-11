@@ -166,6 +166,8 @@ export interface BlockRuntimeState {
   borderStyle?: string;
   boxShadowPreset?: string;
   textAlign?: string;
+  /** Animation preset played when this block's value changes. See src/lib/animations.ts */
+  animateOnChange?: string;
 }
 
 export interface DatabaseField {

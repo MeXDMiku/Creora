@@ -22,6 +22,7 @@ import type { PageRow } from './types/creora'
 import { AccountBadge } from './components/AccountBadge'
 import { PublishButton } from './components/PublishButton'
 import { recalculateAllFormulas } from './lib/bindingEngine'
+import { ANIMATION_PRESETS, animationClass } from './lib/animations'
 import type { FormulaBinding, CreoraFile, Page, Block, BlockProps, StyleConfig, AnimationConfig, BlockType } from './types/creora'
 import './App.css'
 
@@ -69,6 +70,60 @@ function InspectorTitle({ blockId }: { blockId: string }) {
   )
 }
 
+/**
+ * Animation lives here rather than in each of the eleven per-type inspectors,
+ * because it applies to all of them: any block with a value can animate when it
+ * changes. Picking a preset replays it on the chip, since the editor canvas
+ * itself does not preview animation yet — published pages do.
+ */
+function AnimationControl({ blockId }: { blockId: string }) {
+  const [runtimeState, setRuntimeState] = useAtom(blockRuntimeAtom(blockId))
+  const triggerSave = useSetAtom(triggerSaveAtom)
+  const [demo, setDemo] = useState(0)
+  const preset = runtimeState.animateOnChange || 'none'
+  const cls = animationClass(preset)
+
+  return (
+    <div style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px solid #e5e7eb' }}>
+      <label style={{ display: 'block', fontSize: '13px' }}>
+        Animate on change
+        <select
+          value={preset}
+          onChange={(e) => {
+            setRuntimeState(prev => ({ ...prev, animateOnChange: e.target.value }))
+            triggerSave(prev => prev + 1)
+            setDemo(d => d + 1)
+          }}
+          style={{ display: 'block', marginTop: '4px', width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #ccc', background: '#f8fafc', color: '#0f172a', fontSize: '13px' }}
+        >
+          {ANIMATION_PRESETS.map(p => (
+            <option key={p.id} value={p.id}>{p.label}</option>
+          ))}
+        </select>
+      </label>
+
+      <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '6px' }}>
+        {ANIMATION_PRESETS.find(p => p.id === preset)?.hint}
+      </div>
+
+      {cls && (
+        <div
+          onClick={() => setDemo(d => d + 1)}
+          title="Click to replay"
+          style={{ marginTop: '10px', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
+        >
+          <div
+            key={demo}
+            className={cls}
+            style={{ width: '46px', height: '26px', borderRadius: '6px', background: '#4f46e5' }}
+          />
+          <span style={{ fontSize: '11px', color: '#9ca3af' }}>replay</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function Inspector({ editor }: { editor: any }) {
   const selectedBlockId = useAtomValue(selectedBlockIdAtom)
 
@@ -76,7 +131,10 @@ function Inspector({ editor }: { editor: any }) {
     <div style={{ width: '240px', borderLeft: '1px solid #e5e7eb', padding: '16px', background: '#fff' }}>
       {selectedBlockId ? <InspectorTitle blockId={selectedBlockId} /> : <h3 style={{ margin: '0 0 12px 0' }}>Inspector</h3>}
       {selectedBlockId ? (
-        <InspectorControls blockId={selectedBlockId} editor={editor} />
+        <>
+          <InspectorControls blockId={selectedBlockId} editor={editor} />
+          <AnimationControl blockId={selectedBlockId} />
+        </>
       ) : (
         <p style={{ color: '#9ca3af' }}>No block selected</p>
       )}
