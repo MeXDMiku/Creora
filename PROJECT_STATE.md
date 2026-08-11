@@ -144,6 +144,48 @@ have failed.
 
 ---
 
+## Where things stand — 11 Aug 2026
+
+**Creora is deployed.** https://creora.aridamanpratapsingh4.workers.dev — a
+Cloudflare Worker serving static assets, built from GitHub on every push to
+master. Config lives in `wrangler.jsonc` (the Workers flow has no dashboard
+field for the output directory). Do not add a `public/_redirects` with
+`/* /index.html 200` — Workers reads that as a redirect loop and fails the
+deploy after a successful build; `not_found_handling` already covers SPA
+routing. Build-time `VITE_*` variables are set under Settings -> Build, not
+runtime variables.
+
+Supabase Site URL and Redirect URLs point at the live address and at
+localhost:5173, so email sign-in works in both.
+
+### Done and verified against production
+- Block identity: unlimited blocks per page, unique type-tagged ids
+- Published pages navigate (useNavigate was imported and never called)
+- Identity and ownership, attacked live with a session-less client and held
+- Email sign-in, which keeps the same auth.uid() so pages follow the account
+- Publish button, with share link, copy, open and unpublish
+- The production build actually builds (`npm run typecheck`, never `--noEmit`)
+
+### Done, not verified
+- Database blocks poll for new rows while the tab is visible. Automation could
+  not test it because the driven window is never foregrounded, so
+  visibilityState is always hidden and the hook correctly declines to poll.
+  Confirm by opening the editor on a laptop and submitting from a phone.
+
+### The next thing to build
+One real public page, end to end: two Inputs, a Submit button wired to add a
+row, a Database showing submissions, and a Number Display of the count.
+Publish it, send the link to five people, watch rows arrive. **Every mechanism
+this needs already exists and has been tested separately** — the work is
+assembling them into one page, not inventing anything.
+
+After that, in order: collections (rows are still scoped only by
+database_block_id), an Edge Function layer as the single foundation for AI keys
+and OAuth secrets and rate limits, then end-user accounts. See docs/DIRECTION.md
+for what is deliberately not being built.
+
+---
+
 ## File Structure Summary
 
 ```
