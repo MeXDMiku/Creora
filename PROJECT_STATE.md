@@ -272,6 +272,33 @@ columns while the editor showed the wrong ones. The editor now does the same.
 **The general rule:** inside an async effect or a polled callback, read block
 state from the store at write time. Never spread a value captured at render.
 
+### Phone layout — VERIFIED 11 Aug 2026 (later)
+
+Measured in a real 390px viewport, not a simulated one. `resize_window` does not
+change this tab's viewport (`innerWidth` stays 1920), and patching `matchMedia`
+only proves the branch runs, not that it fits. **The reliable technique is a
+same-origin iframe sized to the phone width** — its `innerWidth` really is 390,
+its media queries genuinely match, and every geometry read is real:
+
+```js
+const f = document.createElement('iframe');
+f.style.cssText = 'width:390px;height:844px;position:fixed;right:0;top:0';
+f.src = '/view/<pageId>'; document.body.appendChild(f);
+```
+
+Result on the Feedback page at 390px:
+
+```
+scrollWidth 390 = clientWidth 390     no horizontal scroll
+every block   left 17, right 373, width 356
+order         name -> message -> Submit -> count -> submissions table
+```
+
+The table that used to sit at x=420, entirely off-screen, is now last and fully
+visible. At 1920px the same page still renders 5 absolutely positioned blocks at
+their stored coordinates and zero stacked wrappers, so the desktop view is
+genuinely untouched rather than merely looking similar.
+
 ### The next thing to build
 
 The Feedback page exists, is published, and now shows a correct count to a
