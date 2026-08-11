@@ -116,6 +116,23 @@ export const allBlockIdsAtom = atom<string[]>([]);
 
 export type BlockDataType = 'trigger' | 'number' | 'boolean' | 'string' | 'database' | 'unknown';
 
+/**
+ * A Shape's data type comes from the job it was given, not from what it is.
+ *
+ * This is the whole "treat it like Lego" idea: a shape arrives meaning nothing,
+ * you point at it and say what it is, and only then does it gain ports and a
+ * type. Same operation whether the shape was drawn here or pasted from a design.
+ */
+export function shapeRoleDataType(role: string | null | undefined): BlockDataType {
+  switch (role) {
+    case 'trigger': return 'trigger';
+    case 'link':    return 'trigger';
+    case 'display': return 'string';
+    case 'input':   return 'string';
+    default:        return 'unknown';
+  }
+}
+
 export function getBlockDataType(nodeType: string): BlockDataType {
   switch (nodeType) {
     case 'buttonBlock': return 'trigger';
@@ -162,8 +179,10 @@ export function getCanvasBlocks(editor: any, store: any, excludeBlockId?: string
       typeName === 'listBlock' ||
       typeName === 'shapeBlock'
     )) {
-      const dataType = getBlockDataType(typeName);
       const runtime = store.get(blockRuntimeAtom(bId));
+      const dataType = typeName === 'shapeBlock'
+        ? shapeRoleDataType(runtime?.role)
+        : getBlockDataType(typeName);
       const name = isGarbageName(runtime?.blockName)
         ? getBlockTypeDisplayName(typeName)
         : (runtime!.blockName as string);

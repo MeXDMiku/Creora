@@ -2,7 +2,7 @@ import { useEffect, useRef, useCallback, useState, useMemo } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { useSetAtom, useAtom, useAtomValue, useStore } from 'jotai'
-import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, getCanvasBlocks, currentPageIdAtom, currentPageIsPublishedAtom, pagesListAtom, switchPageFnAtom, isPreviewModeAtom, canvasModeAtom } from './state/atoms'
+import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, getCanvasBlocks, shapeRoleDataType, currentPageIdAtom, currentPageIsPublishedAtom, pagesListAtom, switchPageFnAtom, isPreviewModeAtom, canvasModeAtom } from './state/atoms'
 import { newBlockId, defaultRuntimeForNodeType, defaultAttrsForNodeType, BLOCK_FOOTPRINT, nodeTypeFromBlockId, shortBlockId, type BlockNodeType } from './lib/blockRegistry'
 import { ButtonBlock } from './blocks/ButtonBlock'
 import { NumberDisplayBlock } from './blocks/NumberDisplayBlock'
@@ -2078,7 +2078,16 @@ function App() {
         }
 
         let sourceDataType = getBlockDataType(sourceNodeType || '')
-        const targetDataType = getBlockDataType(targetNodeType || '')
+        let targetDataType = getBlockDataType(targetNodeType || '')
+
+        // A Shape's type is whatever role it was given, the same way a Database's
+        // type comes from its output mode just below.
+        if (sourceNodeType === 'shapeBlock') {
+          sourceDataType = shapeRoleDataType(store.get(blockRuntimeAtom(activeWire.sourceBlockId))?.role)
+        }
+        if (targetNodeType === 'shapeBlock') {
+          targetDataType = shapeRoleDataType(store.get(blockRuntimeAtom(droppedOnBlockId!))?.role)
+        }
 
         if (sourceNodeType === 'databaseBlock') {
           const srcState = store.get(blockRuntimeAtom(activeWire.sourceBlockId))

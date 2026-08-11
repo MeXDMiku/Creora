@@ -633,19 +633,41 @@ function RenderedBlock({ block }: { block: ExtractedBlock }) {
   }
 
   if (block.type === 'shapeBlock') {
-    const isTrigger = runtimeState?.role === 'trigger';
+    // The same shape, doing whatever job it was given. runTrigger already
+    // navigates when targetPageId is set, so Link needs nothing extra.
+    const role = runtimeState?.role ?? null;
+    const isClickable = role === 'trigger' || role === 'link';
     return (
       <div style={outerStyle}>
         <div
           style={{
             ...innerStyle,
-            cursor: isTrigger ? 'pointer' : 'default',
+            cursor: isClickable ? 'pointer' : 'default',
           }}
           onClick={() => {
-            if (isTrigger) runTrigger();
+            if (isClickable) runTrigger();
           }}
         >
-          {String(runtimeState?.text ?? runtimeState?.value ?? '')}
+          {role === 'input' ? (
+            <input
+              type="text"
+              value={String(runtimeState?.value ?? '')}
+              onChange={(e) => {
+                store.set(blockRuntimeAtom(block.id), {
+                  ...runtimeState,
+                  value: e.target.value,
+                });
+                executeWorkflow(block.id, 'onChange', store);
+                recalculateAllFormulas(store);
+              }}
+              placeholder={runtimeState?.text || 'Type something...'}
+              style={{ width: '100%', border: 'none', background: 'transparent', outline: 'none', color: 'inherit', font: 'inherit', boxSizing: 'border-box' }}
+            />
+          ) : role === 'display' ? (
+            String(runtimeState?.value ?? runtimeState?.text ?? '')
+          ) : (
+            String(runtimeState?.text ?? runtimeState?.value ?? '')
+          )}
         </div>
       </div>
     );

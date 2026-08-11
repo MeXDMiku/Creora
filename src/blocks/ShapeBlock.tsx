@@ -2,7 +2,7 @@ import { Node } from '@tiptap/core';
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
 import type { NodeViewProps } from '@tiptap/react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
-import { executeWorkflow } from '../lib/bindingEngine';
+import { executeWorkflow, recalculateAllFormulas } from '../lib/bindingEngine';
 import {
   blockRuntimeAtom,
   activeWireAtom,
@@ -10,6 +10,7 @@ import {
   triggerSaveAtom,
   contextMenuAtom,
   getPortBadge,
+  shapeRoleDataType,
   getBlockTypeDisplayName,
   switchPageFnAtom,
   isPreviewModeAtom,
@@ -43,7 +44,17 @@ const ShapeBlockComponent = (props: NodeViewProps) => {
     containerRef as React.RefObject<HTMLElement>
   );
 
-  const isTrigger = runtimeState?.role === 'trigger';
+  const role = runtimeState?.role ?? null;
+  const isTrigger = role === 'trigger';
+  const isLink = role === 'link';
+  const isDisplay = role === 'display';
+  const isInput = role === 'input';
+  // A shape earns a left port when something can flow INTO it and a right port
+  // when something can flow OUT. The role decides that, not the block type.
+  const hasInputPort = isTrigger || isDisplay;
+  const hasOutputPort = isTrigger || isInput;
+  const isClickable = isTrigger || isLink;
+  const portType = shapeRoleDataType(role);
 
   // Native DOM ref for context menu
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -77,7 +88,7 @@ const ShapeBlockComponent = (props: NodeViewProps) => {
 
   const onPointerUp = (e: React.PointerEvent) => {
     const wasClick = handlePointerUp(e);
-    if (wasClick && isTrigger) {
+    if (wasClick && isClickable) {
       executeWorkflow(blockId, 'onClick', store);
       if (isPreviewMode) {
         const targetPageId = runtimeState?.targetPageId;
@@ -150,14 +161,32 @@ const ShapeBlockComponent = (props: NodeViewProps) => {
         contentEditable={false}
         style={{
           ...innerStyle,
-          cursor: isTrigger ? 'pointer' : 'move',
+          cursor: isClickable ? 'pointer' : 'move',
         }}
       >
-        {runtimeState?.text ?? ''}
+        {isInput ? (
+          <input
+            type="text"
+            value={String(runtimeState?.value ?? '')}
+            onPointerDown={(e) => e.stopPropagation()}
+            onChange={(e) => {
+              store.set(atomInstance, { ...runtimeState, value: e.target.value });
+              executeWorkflow(blockId, 'onChange', store);
+              recalculateAllFormulas(store);
+              triggerSave(prev => prev + 1);
+            }}
+            placeholder={runtimeState?.text || 'Type something...'}
+            style={{ width: '100%', border: 'none', background: 'transparent', outline: 'none', color: 'inherit', font: 'inherit', boxSizing: 'border-box' }}
+          />
+        ) : isDisplay ? (
+          String(runtimeState?.value ?? runtimeState?.text ?? '')
+        ) : (
+          runtimeState?.text ?? ''
+        )}
       </div>
 
-      {/* Left (input) port when role === 'trigger' */}
-      {isTrigger && (
+      {/* Left (input) port — roles that can receive a value */}
+      {hasInputPort && (
         <div
           contentEditable={false}
           data-port-input={blockId}
@@ -188,13 +217,13 @@ const ShapeBlockComponent = (props: NodeViewProps) => {
             pointerEvents: 'none',
             userSelect: 'none',
           }}>
-            {getPortBadge('trigger')}
+            {getPortBadge(portType)}
           </span>
         </div>
       )}
 
-      {/* Right (output) port when role === 'trigger' */}
-      {isTrigger && (
+      {/* Right (output) port — roles that can emit one */}
+      {hasOutputPort && (
         <div
           contentEditable={false}
           data-port-output={blockId}
@@ -226,7 +255,7 @@ const ShapeBlockComponent = (props: NodeViewProps) => {
             pointerEvents: 'none',
             userSelect: 'none',
           }}>
-            {getPortBadge('trigger')}
+            {getPortBadge(portType)}
           </span>
         </div>
       )}

@@ -1,7 +1,9 @@
-import { useAtom, useSetAtom } from 'jotai';
-import { blockRuntimeAtom, triggerSaveAtom, getBlockTypeDisplayName } from '../state/atoms';
+import { useAtom, useSetAtom, useAtomValue } from 'jotai';
+import { blockRuntimeAtom, triggerSaveAtom, getBlockTypeDisplayName, pagesListAtom, switchPageFnAtom } from '../state/atoms';
 
 export default function ShapeBlockInspector({ blockId }: { blockId: string; editor: any }) {
+  const pagesList = useAtomValue(pagesListAtom)
+  const switchPageFn = useAtomValue(switchPageFnAtom)
   const [runtimeState, setRuntimeState] = useAtom(blockRuntimeAtom(blockId));
   const triggerSave = useSetAtom(triggerSaveAtom);
 
@@ -47,8 +49,45 @@ export default function ShapeBlockInspector({ blockId }: { blockId: string; edit
         >
           <option value="">None</option>
           <option value="trigger">Trigger (Button)</option>
+          <option value="display">Display (shows a value)</option>
+          <option value="input">Input (collects text)</option>
+          <option value="link">Link (goes to a page)</option>
         </select>
       </label>
+
+      {runtimeState.role === 'link' && (
+        <div style={{ borderTop: '1px solid #e5e7eb', marginTop: '12px', paddingTop: '12px' }}>
+          <label style={{ display: 'block', marginBottom: '8px', fontSize: '13px' }}>
+            On click, go to page
+            <select
+              value={runtimeState.targetPageId || ''}
+              onChange={(e) => {
+                const val = e.target.value === '' ? undefined : e.target.value;
+                setRuntimeState(prev => ({ ...prev, targetPageId: val }));
+                triggerSave(prev => prev + 1);
+              }}
+              style={{ display: 'block', marginTop: '4px', width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #ccc', background: '#fff', color: '#0f172a', fontSize: '13px', outline: 'none' }}
+            >
+              <option value="">None</option>
+              {pagesList.map(page => (
+                <option key={page.id} value={page.id}>{page.name}</option>
+              ))}
+            </select>
+          </label>
+          {runtimeState.targetPageId && (
+            <button
+              onClick={() => { if (switchPageFn && runtimeState.targetPageId) switchPageFn(runtimeState.targetPageId) }}
+              style={{ marginTop: '4px', width: '100%', padding: '6px 12px', background: '#4f46e5', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}
+            >
+              Test navigation &rarr;
+            </button>
+          )}
+          <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '6px' }}>
+            A real click navigates on the published page. In the editor a click
+            selects the shape, so use Test navigation.
+          </div>
+        </div>
+      )}
 
       <div style={{ borderTop: '1px solid #e2e8f0', margin: '16px 0 12px 0' }} />
       <div style={{ fontSize: '11px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', marginBottom: '12px' }}>
