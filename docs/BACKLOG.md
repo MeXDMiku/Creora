@@ -8,6 +8,7 @@ only in the transcript — which is how this project has lost decisions before.
 and what we refuse to build. **This file is the complete list, with status.**
 
 Status key: `DONE` · `PART` partly done · `TODO` decided, not built ·
+`DEFERRED` decided *not* to decide yet, on purpose · `NOTED` context for later ·
 `OPEN` genuinely undecided
 
 ---
@@ -135,10 +136,16 @@ typed output port. The binding engine already moves typed values between blocks.
 - `TODO` If Creora ever holds other people's keys: encrypted at rest, never
   returned by any API, never in a published page's source. One leak is someone
   else's four-figure bill and it is your fault.
-- `OPEN` BYOK quietly selects for developers — a person who "doesn't want to
-  think about backends" also doesn't want an OpenAI account and a card. The
-  resolution argued for was **both**: AI included in the subscription for normal
-  users, BYOK as the escape hatch.
+- `DECIDED` **No key custody until there is revenue and a hired backend dev.**
+  In the owner's words, 11 Aug: *"so we dont take the api risk for user will be
+  better until I make real money and get real backend coders for it."* So: the
+  zero-custody, key-stays-in-the-builder's-browser version is the only one built
+  for now. Creora-held keys and AI-included-in-the-subscription are a later
+  phase, gated on money and on someone qualified to own the security of it.
+- `NOTED` The known trade-off, for when that phase arrives: BYOK quietly selects
+  for developers — a person who "doesn't want to think about backends" also
+  doesn't want an OpenAI account and a card. The eventual answer is likely
+  **both**, with BYOK as the escape hatch. Not a decision to make now.
 - `TODO` **Gate AI behind login.** An account makes per-person rate limiting
   possible, which turns an unbounded bill into a capped one. These two features
   want each other.
@@ -245,12 +252,27 @@ And the primitives that matter more than block types:
 
 ---
 
-## 10. Still genuinely open
+## 10. Deferred on purpose, and still open
 
-- `OPEN` Price.
-- `OPEN` AI included in subscription vs BYOK only vs both.
+### Deferred on purpose — do not re-litigate these
+
+- `DEFERRED` **Price. Not planned yet; it comes later.** Confirmed by the owner,
+  12 Aug. This is a deliberate deferral, not an oversight — fix the shape of the
+  model first, and the number comes when somebody actually wants to hand over
+  money and you find out what they would pay. **A future session should not
+  treat this as an open question to solve.**
+- `DEFERRED` **AI key custody, until there is revenue and a hired backend dev.**
+  See section 4. Build the zero-custody version; do not hold anyone else's key.
+
+Both of these are the correct shape of answer for a solo builder with no
+revenue: refuse the liability you cannot carry, and refuse to guess a number
+before anyone has tried to pay one.
+
+### Still genuinely open
+
 - `OPEN` Whether the editor canvas keeps free x/y placement at all, or moves to
-  stacks, rows and grids everywhere.
+  stacks, rows and grids everywhere. Published pages already stack below 640px;
+  the editor does not.
 - `OPEN` Whether importing a Figma / AI-generated visual layer is ever built. The
   rule if it is: **import the visual layer only, always discard the logic**, and
   re-wire through nodes. Creora never reads the spaghetti to know it is spaghetti.
