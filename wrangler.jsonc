@@ -1,0 +1,23 @@
+{
+  // Cloudflare Workers deployment config.
+  //
+  // The dashboard never asks for a "build output directory" in the Workers
+  // flow — that lives here. Without this file `npx wrangler deploy` has no idea
+  // Creora is a static site, so the first build was cancelled and a placeholder
+  // Worker was deployed instead of the app.
+  //
+  // Build-time secrets are NOT here. VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY
+  // are baked into the bundle by Vite at build time, so they belong in
+  // Settings -> Build -> Variables and secrets, not in runtime variables and
+  // certainly not committed.
+  "name": "creora",
+  "compatibility_date": "2026-08-11",
+  "assets": {
+    "directory": "./dist",
+    // Every route is a client-side route: /view/:pageId is React Router's, not
+    // the server's. Without this, a shared link 404s because there is no such
+    // file to serve and the router never gets to run. public/_redirects says
+    // the same thing for hosts that read it.
+    "not_found_handling": "single-page-application"
+  }
+}
