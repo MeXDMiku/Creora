@@ -193,19 +193,54 @@ by clicking, because the automation tab is never the visible tab and cannot
 reliably drive the editor. Building the same page by hand through the UI is
 still worth doing once, as a test of whether the editor is usable by a person.
 
+### Published pages are not the editor *(added 11 Aug 2026, later)*
+
+The live Feedback page was opened as a stranger would see it and read back
+element by element. Four things were wrong; all four are fixed.
+
+**A Database block now has a real `onChange` event.** It fires whenever the row
+set changes -- on first load, on each poll, and after add/update/delete -- in
+both the editor and the published renderer. It is guarded on an actual change,
+because the published poll runs every ~4s and firing workflows unconditionally
+would re-run them forever. `onClick` still fires alongside it so pages wired
+before this keep working, and a wire drawn *from* a Database now creates an
+`onChange` workflow (`App.tsx`) rather than `onClick`.
+
+Why this mattered: a Database loaded its rows and set its own value, but nothing
+pushed that value along the wire, so a connected Number Display rendered whatever
+had been saved into the page JSON. The live page showed **"Count: 2" beside a 0**.
+A visitor only ever saw the true count if they submitted something themselves --
+which is the shared-state thesis failing at the one place a visitor can see it.
+
+**A published Database is display-only.** No cell editing, no per-row delete, no
+"+ Add Row". This is not cosmetic, it follows the ownership model: `update_database_row`
+and `delete_database_row` are owner-only, so those controls could only ever be
+refused; and "+ Add Row" *worked*, letting a stranger write straight past the form
+the page was designed around. Rows arrive through a wired action -- a Submit button
+running `addRow` -- which is the path ownership actually permits.
+
+Also removed from published pages: the "Edit Dashboard" link into the owner's
+editor, and the "DATABASE TABLE" caption. `document.title` is now the page name;
+every published tab used to be titled "a".
+
 ### The next thing to build
-One real public page, end to end: two Inputs, a Submit button wired to add a
-row, a Database showing submissions, and a Number Display of the count.
-Publish it, send the link to five people, watch rows arrive. **Every mechanism
-this needs already exists and has been tested separately** — the work is
-assembling them into one page, not inventing anything.
 
-After that, in order: collections (rows are still scoped only by
-database_block_id), an Edge Function layer as the single foundation for AI keys
-and OAuth secrets and rate limits, then end-user accounts. See docs/DIRECTION.md
-for what is deliberately not being built.
+The Feedback page exists, is published, and now shows a correct count to a
+stranger. **Send the link to five people and watch where they hesitate.** That
+list is the roadmap and nothing written in advance beats it.
 
----
+The one thing still unverified in a browser: a Database table updating live
+without a refresh. Automation cannot test it -- the driven tab is never
+foregrounded, so `visibilityState` is always hidden and the hook correctly
+declines to poll. Open the editor on a laptop, submit from a phone, watch the
+table grow within ~4s.
+
+Then, in order: build the same page **by hand through the editor** (the existing
+one was written through `save_page`, so it proves the engine, not the editor);
+collections (rows are still scoped only by `database_block_id`); the layout
+decision (blocks sit at fixed x/y and do not reflow on a phone); an Edge Function
+layer as the single foundation for AI keys, OAuth secrets and rate limits; then
+end-user accounts. See docs/DIRECTION.md for what is deliberately not being built.
 
 ## File Structure Summary
 

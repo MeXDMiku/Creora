@@ -1,4 +1,22 @@
-# Next build — one public page, end to end
+# Next build
+
+> **Update, 11 Aug 2026 (later).** The page described below now exists, is
+> published, and holds real submissions:
+> `/view/a968f487-0fe3-4743-9824-e1fe651654eb`. It was written through
+> `save_page`, not clicked together, so **it proves the engine, not the editor.**
+> Building it by hand is still worth doing once -- that is the real test of
+> whether a stranger could.
+>
+> Since then the published view was audited as a visitor sees it: the count was
+> stale (a Database never pushed its value along the wire), and the page carried
+> an "Edit Dashboard" link, a working "+ Add Row", and delete buttons that could
+> only fail. All fixed -- see PROJECT_STATE.md, "Published pages are not the editor".
+>
+> **The next action needs no code: send the link to five people.**
+
+---
+
+## The recipe (still accurate, for building it by hand)
 
 Nothing here is new. Every mechanism below already exists and has been tested
 on its own against production. This is assembly.
