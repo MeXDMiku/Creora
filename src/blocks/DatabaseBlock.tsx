@@ -128,6 +128,8 @@ const DatabaseBlockComponent = (props: NodeViewProps) => {
     });
 
     executeWorkflow(blockId, 'onClick', store);
+    // The rows changed. onClick is kept for pages wired before onChange existed.
+    executeWorkflow(blockId, 'onChange', store);
     recalculateAllFormulas(store);
     triggerSave(prev => prev + 1);
 
@@ -165,6 +167,8 @@ const DatabaseBlockComponent = (props: NodeViewProps) => {
     });
 
     executeWorkflow(blockId, 'onClick', store);
+    // The rows changed. onClick is kept for pages wired before onChange existed.
+    executeWorkflow(blockId, 'onChange', store);
     recalculateAllFormulas(store);
     triggerSave(prev => prev + 1);
 
@@ -202,6 +206,8 @@ const DatabaseBlockComponent = (props: NodeViewProps) => {
     });
 
     executeWorkflow(blockId, 'onClick', store);
+    // The rows changed. onClick is kept for pages wired before onChange existed.
+    executeWorkflow(blockId, 'onChange', store);
     recalculateAllFormulas(store);
     triggerSave(prev => prev + 1);
 

@@ -1,5 +1,5 @@
 import { usePollWhileVisible } from '../hooks/usePollWhileVisible';
-import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useStore, useAtomValue } from 'jotai';
 import { supabase } from '../lib/supabase';
@@ -312,12 +312,25 @@ function PublishedDatabaseBlock({ block }: { block: ExtractedBlock }) {
               const lastRow = parsedRows[parsedRows.length - 1];
               nextValue = lastRow ? lastRow[outputMode] : 0;
             }
+            // Did anything actually change? This runs on first paint AND on every
+            // poll, so firing workflows unconditionally would re-run them forever.
+            const changed =
+              JSON.stringify(currentLocalRows) !== JSON.stringify(parsedRows) ||
+              currentLocalState?.value !== nextValue;
+
             store.set(blockRuntimeAtom(block.id), {
               ...currentLocalState,
               rows: parsedRows,
               value: nextValue
             });
             recalculateAllFormulas(store);
+
+            if (changed) {
+              // Without this a visitor sees whatever count was saved into the page
+              // rather than the real one: "Count: 2" beside a Number Display of 0.
+              executeWorkflow(block.id, 'onChange', store);
+              recalculateAllFormulas(store);
+            }
           }
         }
       } catch (err) {}
@@ -328,109 +341,12 @@ function PublishedDatabaseBlock({ block }: { block: ExtractedBlock }) {
 
   usePollWhileVisible(() => loadRowsRef.current());
 
-  const debouncedSaveRef = useRef<Record<string, any>>({});
-  const saveCellToSupabase = useCallback((rowId: string, rowData: any) => {
-    if (debouncedSaveRef.current[rowId]) {
-      clearTimeout(debouncedSaveRef.current[rowId]);
-    }
-    debouncedSaveRef.current[rowId] = setTimeout(async () => {
-      try {
-        await supabase.rpc('update_database_row', { p_id: rowId, p_row_data: rowData });
-      } catch (err) {}
-    }, 500);
-  }, []);
-
-  const handleCellEdit = (rowId: string, colName: string, val: any) => {
-    const updatedRows = rows.map((r: any) => {
-      if (r.id === rowId) return { ...r, [colName]: val };
-      return r;
-    });
-
-    let nextValue = 0;
-    if (outputMode === 'row_count') {
-      nextValue = updatedRows.length;
-    } else {
-      const lastRow = updatedRows[updatedRows.length - 1];
-      nextValue = lastRow ? lastRow[outputMode] : 0;
-    }
-
-    store.set(blockRuntimeAtom(block.id), {
-      ...runtimeState,
-      rows: updatedRows,
-      value: nextValue
-    });
-
-    executeWorkflow(block.id, 'onClick', store);
-    recalculateAllFormulas(store);
-
-    const targetRow = updatedRows.find((r: any) => r.id === rowId);
-    if (targetRow) {
-      const { id, ...rowData } = targetRow;
-      saveCellToSupabase(rowId, rowData);
-    }
-  };
-
-  const handleAddRow = async () => {
-    const rowId = `row_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const defaultData: Record<string, any> = {};
-    columns.forEach((col: any) => {
-      if (col.type === 'number') defaultData[col.name] = 0;
-      else if (col.type === 'boolean') defaultData[col.name] = false;
-      else defaultData[col.name] = '';
-    });
-
-    const updatedRows = [...rows, { id: rowId, ...defaultData }];
-
-    let nextValue = 0;
-    if (outputMode === 'row_count') {
-      nextValue = updatedRows.length;
-    } else {
-      const lastRow = updatedRows[updatedRows.length - 1];
-      nextValue = lastRow ? lastRow[outputMode] : 0;
-    }
-
-    store.set(blockRuntimeAtom(block.id), {
-      ...runtimeState,
-      rows: updatedRows,
-      value: nextValue
-    });
-
-    executeWorkflow(block.id, 'onClick', store);
-    recalculateAllFormulas(store);
-
-    try {
-      await supabase.rpc('add_database_row', {
-        p_id: rowId,
-        p_block_id: block.id,
-        p_row_data: defaultData
-      });
-    } catch (err) {}
-  };
-
-  const handleDeleteRow = async (rowId: string) => {
-    const updatedRows = rows.filter((r: any) => r.id !== rowId);
-
-    let nextValue = 0;
-    if (outputMode === 'row_count') {
-      nextValue = updatedRows.length;
-    } else {
-      const lastRow = updatedRows[updatedRows.length - 1];
-      nextValue = lastRow ? lastRow[outputMode] : 0;
-    }
-
-    store.set(blockRuntimeAtom(block.id), {
-      ...runtimeState,
-      rows: updatedRows,
-      value: nextValue
-    });
-
-    executeWorkflow(block.id, 'onClick', store);
-    recalculateAllFormulas(store);
-
-    try {
-      await supabase.rpc('delete_database_row', { p_id: rowId });
-    } catch (err) {}
-  };
+  // A published Database is display-only. update_database_row and
+  // delete_database_row are owner-only, so a visitor pressing edit or delete
+  // was always going to be refused; and a direct "+ Add Row" let a stranger
+  // write straight past the form the page was designed around. Rows arrive
+  // through wired actions (a Submit button -> addRow), which the ownership
+  // model does permit.
 
   const customBg = runtimeState?.backgroundColor || '#ffffff';
   const customBorderRadius = `${runtimeState?.borderRadius ?? 8}px`;
@@ -455,19 +371,10 @@ function PublishedDatabaseBlock({ block }: { block: ExtractedBlock }) {
           fontSize: customFontSize,
         }}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', borderBottom: '1px solid #e2e8f0', paddingBottom: '6px' }}>
-          <span style={{ fontSize: '10px', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-            Database Table
-          </span>
-          <span style={{ fontSize: '9px', padding: '2px 6px', borderRadius: '4px', background: '#f1f5f9', color: '#64748b', fontWeight: 600 }}>
-            {outputMode === 'row_count' ? `Count: ${rows.length}` : `Output: ${outputMode}`}
-          </span>
-        </div>
-
         <div style={{ overflowX: 'auto', maxHeight: '160px', overflowY: 'auto', marginBottom: '8px' }}>
           {columns.length === 0 ? (
             <div style={{ padding: '16px', textAlign: 'center', color: '#94a3b8', fontStyle: 'italic', fontSize: '12px' }}>
-              No columns defined. Define columns in the Editor.
+              No columns defined.
             </div>
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '300px' }}>
@@ -478,7 +385,6 @@ function PublishedDatabaseBlock({ block }: { block: ExtractedBlock }) {
                       {col.name}
                     </th>
                   ))}
-                  <th style={{ width: '24px' }}></th>
                 </tr>
               </thead>
               <tbody>
@@ -486,73 +392,25 @@ function PublishedDatabaseBlock({ block }: { block: ExtractedBlock }) {
                   <tr key={row.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
                     {columns.map((col: any) => {
                       const cellVal = row[col.name];
+                      let display: string;
+                      if (col.type === 'boolean') display = cellVal ? 'Yes' : 'No';
+                      else if (cellVal === undefined || cellVal === null) display = '';
+                      else display = String(cellVal);
                       return (
-                        <td key={col.name} style={{ padding: '4px 6px' }}>
-                          {col.type === 'boolean' ? (
-                            <input
-                              type="checkbox"
-                              checked={!!cellVal}
-                              onChange={(e) => handleCellEdit(row.id, col.name, e.target.checked)}
-                              style={{ cursor: 'pointer' }}
-                            />
-                          ) : col.type === 'number' ? (
-                            <input
-                              type="number"
-                              value={cellVal !== undefined ? cellVal : ''}
-                              onChange={(e) => {
-                                const v = e.target.value === '' ? 0 : Number(e.target.value);
-                                handleCellEdit(row.id, col.name, v);
-                              }}
-                              style={{
-                                width: '100%',
-                                border: 'none',
-                                background: 'transparent',
-                                padding: '2px 4px',
-                                outline: 'none',
-                                fontSize: customFontSize,
-                                color: customTextColor,
-                                boxSizing: 'border-box'
-                              }}
-                            />
-                          ) : (
-                            <input
-                              type="text"
-                              value={cellVal !== undefined ? cellVal : ''}
-                              onChange={(e) => handleCellEdit(row.id, col.name, e.target.value)}
-                              style={{
-                                width: '100%',
-                                border: 'none',
-                                background: 'transparent',
-                                padding: '2px 4px',
-                                outline: 'none',
-                                fontSize: customFontSize,
-                                color: customTextColor,
-                                boxSizing: 'border-box'
-                              }}
-                            />
-                          )}
+                        <td
+                          key={col.name}
+                          style={{
+                            padding: '6px',
+                            fontSize: customFontSize,
+                            color: customTextColor,
+                            verticalAlign: 'top',
+                            wordBreak: 'break-word',
+                          }}
+                        >
+                          {display}
                         </td>
                       );
                     })}
-                    <td style={{ padding: '4px 6px', textAlign: 'center' }}>
-                      <button
-                        onClick={() => handleDeleteRow(row.id)}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          color: '#ef4444',
-                          cursor: 'pointer',
-                          fontSize: '14px',
-                          fontWeight: 'bold',
-                          padding: '0 4px',
-                          lineHeight: 1,
-                          opacity: 0.6
-                        }}
-                        title="Delete row"
-                      >
-                        ×
-                      </button>
-                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -560,29 +418,6 @@ function PublishedDatabaseBlock({ block }: { block: ExtractedBlock }) {
           )}
         </div>
 
-        {columns.length > 0 && (
-          <button
-            onClick={handleAddRow}
-            style={{
-              padding: '6px 12px',
-              borderRadius: '6px',
-              border: '1.5px dashed #cbd5e1',
-              background: '#f8fafc',
-              color: '#475569',
-              cursor: 'pointer',
-              fontSize: '11px',
-              fontWeight: 600,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '4px',
-              transition: 'all 0.15s',
-              outline: 'none',
-            }}
-          >
-            + Add Row
-          </button>
-        )}
       </div>
     </div>
   );
@@ -1042,6 +877,11 @@ export default function PublishedRenderer() {
     fetchPage();
   }, [pageId, store]);
 
+  // The browser tab said "a" - the index.html title - on every published page.
+  useEffect(() => {
+    if (pageName) document.title = pageName;
+  }, [pageName]);
+
   if (loading) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg)', fontFamily: 'sans-serif' }}>
@@ -1090,7 +930,8 @@ export default function PublishedRenderer() {
           <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#10b981' }} />
           <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 600, color: '#0f172a' }}>{pageName}</h1>
         </div>
-        <a href="/" style={{ fontSize: '13px', color: '#4f46e5', textDecoration: 'none', fontWeight: 500 }}>Edit Dashboard</a>
+        {/* No link back to the editor. A visitor is not the owner, and this page
+            is the whole product as far as they are concerned. */}
       </header>
 
       {/* Canvas view area */}

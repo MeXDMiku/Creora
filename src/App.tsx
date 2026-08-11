@@ -327,7 +327,12 @@ function ConnectionPopup({ editor }: { editor: any }) {
     const newWorkflow = {
       id: wfId,
       sourceId: pending.sourceBlockId,
-      sourceEvent: sourceNodeType === 'timerBlock' ? timerEvent : ('onClick' as const),
+      sourceEvent:
+        sourceNodeType === 'timerBlock'
+          ? timerEvent
+          : sourceNodeType === 'databaseBlock'
+            ? ('onChange' as const)
+            : ('onClick' as const),
       permission: 'public' as const,
       pageId: 'page_1',
       steps: [stepStep],
