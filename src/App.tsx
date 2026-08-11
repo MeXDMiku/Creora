@@ -18,6 +18,7 @@ import { ShapeBlock } from './blocks/ShapeBlock'
 import { WireOverlay } from './components/WireOverlay'
 import { supabase } from './lib/supabase'
 import { ensureSession, claimOrphanPages } from './lib/session'
+import { AccountBadge } from './components/AccountBadge'
 import { recalculateAllFormulas } from './lib/bindingEngine'
 import type { FormulaBinding, CreoraFile, Page, Block, BlockProps, StyleConfig, AnimationConfig, BlockType } from './types/creora'
 import './App.css'
@@ -2741,6 +2742,7 @@ function App() {
               onChange={handleImportFile}
               style={{ display: 'none' }}
             />
+            <AccountBadge />
           </div>
         </div>
 
