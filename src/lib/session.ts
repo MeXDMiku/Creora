@@ -31,15 +31,3 @@ export async function ensureSession(): Promise<string | null> {
   }
   return data?.user?.id ?? null;
 }
-
-/**
- * TEMPORARY. Adopts pages created before ownership existed so they are not
- * stranded when the migration lands. Fails harmlessly if the migration has not
- * been applied yet, because the function will not exist. Remove this, and the
- * claim_orphan_pages function in the database, once the existing pages are
- * claimed.
- */
-export async function claimOrphanPages(): Promise<void> {
-  const { error } = await supabase.rpc('claim_orphan_pages');
-  if (error) console.warn('[creora] claim_orphan_pages skipped:', error.message);
-}

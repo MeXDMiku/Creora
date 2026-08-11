@@ -17,7 +17,7 @@ import { ListBlock } from './blocks/ListBlock'
 import { ShapeBlock } from './blocks/ShapeBlock'
 import { WireOverlay } from './components/WireOverlay'
 import { supabase } from './lib/supabase'
-import { ensureSession, claimOrphanPages } from './lib/session'
+import { ensureSession } from './lib/session'
 import { AccountBadge } from './components/AccountBadge'
 import { recalculateAllFormulas } from './lib/bindingEngine'
 import type { FormulaBinding, CreoraFile, Page, Block, BlockProps, StyleConfig, AnimationConfig, BlockType } from './types/creora'
@@ -2368,7 +2368,6 @@ function App() {
         // 0. Identity before anything else. Every page RPC is now scoped to
         // auth.uid(), so without a session list_pages returns nothing.
         await ensureSession()
-        await claimOrphanPages()
 
         // 1. Fetch all pages
         const { data: allPagesList, error: fetchErr } = await supabase

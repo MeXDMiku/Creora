@@ -88,7 +88,7 @@ All blocks are implemented as custom TipTap nodes in `src/blocks/` and render th
 The following concepts have been discussed but are **NOT** implemented in the codebase yet:
 * **Desktop App:** The codebase is purely a web application and lacks desktop environment wrappers.
 * **AI Integration:** No AI tools or prompt widgets are implemented in the UI.
-* **Real login:** Only anonymous sessions exist. See the warning under Identity.
+* **Team / multi-user:** One account owns everything. There is no sharing, no roles, no invites.
 * **Publish UI:** `set_page_published` exists in the database but nothing in the interface calls it yet.
 
 ---
@@ -111,9 +111,13 @@ Verified live against production on 11 Aug using a session-less client holding o
 
 `src/lib/session.ts` signs in anonymously on boot and `initApp` awaits it before the first RPC, because `list_pages` returns nothing without a session. Visitors to a published page need no session at all.
 
-**Anonymous identity is fragile, and this has already bitten once.** The session lives in browser storage; clearing it, or using another browser or device, produces a new `auth.uid()` and silently orphans your own pages. On 11 Aug two anonymous users existed and the pages belonged to the wrong one — the app looked completely empty until `owner_id` was reassigned by hand. Real email sign-in for the owner is the next thing that should be built.
+**Email sign-in exists** (`src/components/AccountBadge.tsx`). The toolbar chip is amber "This browser only" while anonymous and green with the address once linked. One field does both jobs: `updateUser({ email })` attaches the address to the current anonymous user, which Supabase does **without changing the user id**, so pages already owned come along; if the address already belongs to an account it falls back to `signInWithOtp`, which signs into that id — so pages return on a second browser. Verified 11 Aug: after linking, all 3 pages still loaded and were owned by the email account.
 
-**`claim_orphan_pages()` is temporary.** It adopts pages that predate ownership, and until it is dropped whoever calls it first inherits any unowned page. The three existing pages are claimed, so it should now be dropped from the database and from `src/lib/session.ts`.
+The built-in mail service allows only **2 auth emails per hour**; raising it needs custom SMTP. The Site URL is still `http://localhost:3000` and there are no Redirect URLs configured, but Supabase accepted the localhost redirect anyway during testing.
+
+**Anonymous identity alone is fragile, which is why the above exists.** It lives in browser storage; clearing it or moving device produces a new `auth.uid()`. On 11 Aug two anonymous users existed and the pages belonged to the wrong one — the app looked completely empty until `owner_id` was reassigned by hand. One stale anonymous user remains in `auth.users`, owning nothing.
+
+**`claim_orphan_pages()` has been removed** from the client, and `supabase/migrations/0002_drop_claim_orphan_pages.sql` drops it from the database. It existed only to adopt the pages that predated ownership; while it existed, any caller could inherit an unowned page.
 
 ---
 
