@@ -3,7 +3,7 @@ import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { useSetAtom, useAtom, useAtomValue, useStore } from 'jotai'
 import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, getCanvasBlocks, currentPageIdAtom, currentPageIsPublishedAtom, pagesListAtom, switchPageFnAtom, isPreviewModeAtom, canvasModeAtom } from './state/atoms'
-import { newBlockId, defaultRuntimeForNodeType, defaultAttrsForNodeType, BLOCK_FOOTPRINT, type BlockNodeType } from './lib/blockRegistry'
+import { newBlockId, defaultRuntimeForNodeType, defaultAttrsForNodeType, BLOCK_FOOTPRINT, nodeTypeFromBlockId, shortBlockId, type BlockNodeType } from './lib/blockRegistry'
 import { ButtonBlock } from './blocks/ButtonBlock'
 import { NumberDisplayBlock } from './blocks/NumberDisplayBlock'
 import { TextLabelBlock } from './blocks/TextLabelBlock'
@@ -53,12 +53,28 @@ function InspectorControls({ blockId, editor }: { blockId: string; editor: any }
   return <InspectorComponent blockId={blockId} editor={editor} />
 }
 
+/** The header said `Inspector (buttonBlock__jdzm71nxbk)`. Nobody knows which block that is. */
+function InspectorTitle({ blockId }: { blockId: string }) {
+  const runtime = useAtomValue(blockRuntimeAtom(blockId))
+  const name = isGarbageName(runtime?.blockName)
+    ? getBlockTypeDisplayName(nodeTypeFromBlockId(blockId) ?? '')
+    : runtime.blockName
+  return (
+    <h3 style={{ margin: '0 0 12px 0' }}>
+      {name}{' '}
+      <span style={{ fontSize: '11px', fontWeight: 400, color: '#9ca3af' }}>
+        {shortBlockId(blockId)}
+      </span>
+    </h3>
+  )
+}
+
 function Inspector({ editor }: { editor: any }) {
   const selectedBlockId = useAtomValue(selectedBlockIdAtom)
 
   return (
     <div style={{ width: '240px', borderLeft: '1px solid #e5e7eb', padding: '16px', background: '#fff' }}>
-      <h3>Inspector {selectedBlockId ? `(${selectedBlockId})` : ''}</h3>
+      {selectedBlockId ? <InspectorTitle blockId={selectedBlockId} /> : <h3 style={{ margin: '0 0 12px 0' }}>Inspector</h3>}
       {selectedBlockId ? (
         <InspectorControls blockId={selectedBlockId} editor={editor} />
       ) : (

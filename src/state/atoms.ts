@@ -164,11 +164,23 @@ export function getCanvasBlocks(editor: any, store: any, excludeBlockId?: string
     )) {
       const dataType = getBlockDataType(typeName);
       const runtime = store.get(blockRuntimeAtom(bId));
-      const name = runtime?.blockName || getBlockTypeDisplayName(typeName);
-      const label = `${name} (${shortBlockId(bId)})`;
-      list.push({ id: bId, type: typeName, label, dataType });
+      const name = isGarbageName(runtime?.blockName)
+        ? getBlockTypeDisplayName(typeName)
+        : (runtime!.blockName as string);
+      list.push({ id: bId, type: typeName, label: name, dataType });
     }
   });
+
+  // A block id only earns its place in a label when the name alone is ambiguous.
+  // "Submit" beats "Submit (a3f2)" every time; "Button (7b41)" is only useful
+  // when there are two blocks called Button. Picking a block out of a dropdown
+  // was one of the things that made this editor hard to use.
+  const seen = new Map<string, number>();
+  for (const b of list) seen.set(b.label, (seen.get(b.label) ?? 0) + 1);
+  for (const b of list) {
+    if ((seen.get(b.label) ?? 0) > 1) b.label = `${b.label} (${shortBlockId(b.id)})`;
+  }
+
   return list;
 }
 
