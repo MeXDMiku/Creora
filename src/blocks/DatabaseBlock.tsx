@@ -66,12 +66,29 @@ const DatabaseBlockComponent = (props: NodeViewProps) => {
               nextValue = lastRow ? lastRow[outputMode] : 0;
             }
 
+            const changed =
+              JSON.stringify(currentLocalRows) !== JSON.stringify(parsedRows) ||
+              currentLocalState?.value !== nextValue;
+
+            // Spread the CURRENT stored state, not the one captured when this
+            // effect ran. This fetch is async and races page hydration: with the
+            // stale closure it wrote this block's *default* columns and name back
+            // over the page that had just loaded, and the next save persisted it.
+            // The Feedback page rendered as "Database / Name / Age" in the editor
+            // while disk still said "Submissions / Name / Message".
             store.set(atomInstance, {
-              ...runtimeState,
+              ...(currentLocalState || runtimeState),
               rows: parsedRows,
               value: nextValue
             });
             recalculateAllFormulas(store);
+
+            if (changed) {
+              // Same reason as the published renderer: a Number Display wired to
+              // this block otherwise shows whatever count was saved, not the real one.
+              executeWorkflow(blockId, 'onChange', store);
+              recalculateAllFormulas(store);
+            }
           }
         }
       } catch (err) {
