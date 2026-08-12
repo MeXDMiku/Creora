@@ -207,6 +207,46 @@ un-cheatable. **Three hats, one problem: there is nowhere private to run code.**
 | TODO | **Versions**, and a Draft / Activate distinction. |
 | TODO | **Per-node permissions** — the ownership model arriving at node level. |
 
+### How the surface area actually grows *(decided 11 Aug 2026)*
+
+The owner's point, and it is right: *"look at how any website is made and there
+are conditions we don't know about yet. Photoshop has options nobody would have
+guessed they needed. Right now we barely have a plus and minus button and a small
+table."*
+
+True. But the way to get there is the thing to be careful about, because it is
+the same trap this project already fell into once.
+
+**Photoshop does not have 500 features. It has about eight ideas.** Layers,
+masks, selections, blend modes, adjustments, filters, channels, history. Every
+one of the hundreds of menu items is those eight composed. Cloudflare is the same
+— routes, workers, storage, rules — and its "100+ functions" are combinations,
+organised, not 100 separately built things.
+
+The failure mode is already in this project's record: **eleven block types, each
+capped at two per page, and the power went *down*.** Eleven things that do not
+compose beat nothing.
+
+So the rule stands, and it is not a limit on ambition — it is how ambition
+actually gets reached:
+
+| adding this | gives you |
+| :--- | :--- |
+| one more block type | one more behaviour |
+| one more **primitive** | every combination of it with everything already there |
+
+Concretely, the four primitives that would multiply what exists today —
+`when a value changes`, `for each row`, `on page load`, `every N seconds` —
+produce more new behaviour between them than twenty new block types would.
+
+**Then, and only then, the organisation problem.** The owner is right that 100
+well-organised functions is itself a design achievement, and that Cloudflare has
+solved it. That is a real, separate piece of work — categories, search, sensible
+defaults, progressive disclosure. It should be done **when there is a lot to
+organise**, and it is wasted effort before that. Noted here so it is not lost:
+`TODO` an organised, searchable action and block catalogue, once the count
+justifies it.
+
 ### What the logic engine can and cannot express *(11 Aug 2026)*
 
 Written down because "the skeleton is not ready for many situations" is the right
@@ -222,6 +262,7 @@ diagnosis and deserves a real list rather than a feeling.
 | operators | is ON/OFF, equals, does not equal, >, >=, <, <=, contains, **does not contain**, is empty, **is not empty** |
 | chaining | formulas resolve one level deep in the same frame |
 | shared state | every visitor sees the same rows and numbers |
+| getting data out | **Download as CSV**, opens straight in Excel, columns in the order the builder set |
 
 Until today a step held **one** condition, so "do this, but not if X, and only if
 Y" was literally inexpressible. That is fixed: conditions are a list, every

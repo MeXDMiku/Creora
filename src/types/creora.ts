@@ -26,7 +26,7 @@ export interface StepCondition {
 
 export interface WorkflowStep {
   targetId: string;
-  action: 'increment' | 'decrement' | 'set' | 'toggle' | 'reset' | 'setVisible' | 'setHidden' | 'addRow' | 'updateRow' | 'deleteRow';
+  action: 'increment' | 'decrement' | 'set' | 'toggle' | 'reset' | 'setVisible' | 'setHidden' | 'addRow' | 'updateRow' | 'deleteRow' | 'exportCsv';
   amount?: number;
   value?: any;
   /** A single condition. Kept because every page saved before conditions[] uses it. */

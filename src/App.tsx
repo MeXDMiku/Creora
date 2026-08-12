@@ -442,7 +442,9 @@ function ConnectionPopup({ editor }: { editor: any }) {
       if (action === 'addRow' || action === 'updateRow') {
         stepStep.mappings = mappings
       }
-      if (action === 'updateRow' || action === 'deleteRow') {
+      if (action === 'exportCsv') {
+        // no mappings, no match column — it just takes the table as it stands
+      } else if (action === 'updateRow' || action === 'deleteRow') {
         stepStep.matchColumn = matchColumn
         stepStep.matchValue = {
           source: matchValueSource,
@@ -546,6 +548,7 @@ function ConnectionPopup({ editor }: { editor: any }) {
               <option value="addRow">Add Row</option>
               <option value="updateRow">Update Row</option>
               <option value="deleteRow">Delete Row</option>
+              <option value="exportCsv">Download as CSV (opens in Excel)</option>
             </>
           ) : (
             <>
