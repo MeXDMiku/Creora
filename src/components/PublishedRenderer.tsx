@@ -932,7 +932,7 @@ export default function PublishedRenderer() {
   const store = useStore();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [pageName, setPageName] = useState('Published Page');
+  const [pageName, setPageName] = useState('Untitled');
   const [docItemsList, setDocItemsList] = useState<DocItem[]>([]);
   const isNarrow = useIsNarrow();
   const narrowBlocks = useMemo(
@@ -962,7 +962,7 @@ export default function PublishedRenderer() {
         const row = data as any
       const blocksData = row.blocks || {};
         const workflowsData = row.workflows || [];
-        setPageName(blocksData.pageName || 'Published Page');
+        setPageName(blocksData.pageName || 'Untitled');
 
         // Extract doc items and blocks from documentContent
         const documentContent = blocksData.documentContent || {};
@@ -1108,6 +1108,34 @@ export default function PublishedRenderer() {
           })
         )}
       </div>
+
+      {/* Every free published page carries this. It is the whole marketing
+          budget -- the only way somebody handed a link finds out what made it.
+          Deliberately NOT a link into the owner's editor: that was removed for
+          good reason. TODO: point at a marketing page once one exists. */}
+      <footer
+        style={{
+          padding: '10px 24px 18px',
+          textAlign: 'center',
+          fontFamily: 'sans-serif',
+        }}
+      >
+        <a
+          href="/"
+          style={{
+            fontSize: '11px',
+            color: '#64748b',
+            textDecoration: 'none',
+            border: '1px solid #e2e8f0',
+            borderRadius: '999px',
+            padding: '4px 10px',
+            background: '#fff',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          Made with <strong style={{ color: '#4f46e5', fontWeight: 600 }}>Creora</strong>
+        </a>
+      </footer>
     </div>
   );
 }

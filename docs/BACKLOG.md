@@ -202,10 +202,42 @@ un-cheatable. **Three hats, one problem: there is nowhere private to run code.**
 | | |
 | :--- | :--- |
 | PART | **Named, typed outputs.** Dropdowns now show names. Still missing: a block publishing a *named variable* later blocks reference by name, not by block id. |
-| TODO | **If / Else as a visible branch node**, with labelled If and Else paths. Conditions are still buried inside a workflow step, so the branch cannot be seen. |
+| TODO | **If / Else as a visible branch node** — spec below. |
 | DONE | **Runs** — a run log exists. |
 | TODO | **Versions**, and a Draft / Activate distinction. |
 | TODO | **Per-node permissions** — the ownership model arriving at node level. |
+
+### If / Else — the design, so it is not rediscovered
+
+This is the **next real build**, and it is bigger than it looks. Sized honestly
+rather than started at the end of a session.
+
+Conditions today live *inside* a workflow step (`step.condition`, set in the
+ConnectionPopup). They work, but they are invisible: the branch cannot be seen on
+the canvas, which is the whole complaint.
+
+**The blocker is the port model.** A block has exactly one output today —
+`data-port-output={blockId}` — and a connection is
+`{id, sourceBlockId, targetBlockId}`. An If/Else node needs **two distinguishable
+outputs**. So:
+
+1. `connectionsAtom` and the `Connection` type gain `sourcePort?: 'out' | 'if' | 'else'`
+   (absent = `'out'`, so every existing page keeps working).
+2. Ports gain identity: `data-port-output` becomes `data-port-output-<port>`, or
+   carries a `data-port-name`. `App.tsx`'s `onPointerUp` snap resolution reads it.
+3. `WireOverlay` draws from the right port's coordinates and labels the two paths.
+4. A workflow step gains `sourcePort`, and `executeWorkflow` evaluates the branch
+   condition **once**, then runs only the steps whose `sourcePort` matches.
+5. The node itself: a new `branchBlock`, **or** a ShapeBlock role `branch` — the
+   role system now exists, so the second is worth considering first.
+
+**Do not start this in the last third of a session.** It touches wiring, the
+overlay, the engine and persistence at once, and a half-migrated port model would
+break every existing wire. Migration safety: absent `sourcePort` must always mean
+the single existing output.
+
+Once it exists, `step.condition` should stay for backwards compatibility but
+stop being the recommended way to branch.
 
 And the primitives that matter more than block types:
 
