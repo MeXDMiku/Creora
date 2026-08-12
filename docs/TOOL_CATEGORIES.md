@@ -112,6 +112,7 @@ how things run — separate from the page itself.
 | `MISSING` | **Visitors** — how many people opened a published page |
 | `MISSING` | Settings in one place: domain, sign-in methods, notifications |
 | `MISSING` | Versions and rollback — undo a publish |
+| `MISSING` | **Team permissions** — other developers, each seeing and changing only what you allow. Discord-style capabilities. Design in docs/TEAM_PERMISSIONS.md, and **much cheaper than it sounds**: builder identity already exists, so it does not wait behind end-user accounts |
 
 Note the shape: Layer 3 is mostly **seeing**, not doing. That is what makes a
 platform feel trustworthy rather than mysterious, and it is exactly what
