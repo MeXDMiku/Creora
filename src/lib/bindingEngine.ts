@@ -3,6 +3,7 @@ import jsep from 'jsep';
 import type { TriggerEvent } from '../types/creora';
 import { blockRuntimeAtom, workflowsAtom, formulasAtom, allBlockIdsAtom, getBlockDefaultValue , recordRun, type RunStep } from '../state/atoms';
 import { sendWebhook } from './webhook';
+import { computeDatabaseOutput } from './databaseOutput';
 import { supabase } from './supabase';
 
 
@@ -255,7 +256,6 @@ export function executeWorkflow(
           const targetState = store.get(targetAtom);
           const columns = targetState?.columns || [];
           const currentRows = targetState?.rows || [];
-          const outputMode = targetState?.outputMode || 'row_count';
 
           const rowId = `row_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
           const defaultData: Record<string, any> = {};
@@ -287,12 +287,7 @@ export function executeWorkflow(
           const updatedRows = [...currentRows, { id: rowId, ...defaultData }];
 
           let nextValue = 0;
-          if (outputMode === 'row_count') {
-            nextValue = updatedRows.length;
-          } else {
-            const lastRow = updatedRows[updatedRows.length - 1];
-            nextValue = lastRow ? lastRow[outputMode] : 0;
-          }
+          nextValue = computeDatabaseOutput(updatedRows, targetState);
 
           store.set(targetAtom, {
             ...targetState,
@@ -322,7 +317,6 @@ export function executeWorkflow(
           const targetState = store.get(targetAtom);
           const columns = targetState?.columns || [];
           const currentRows = targetState?.rows || [];
-          const outputMode = targetState?.outputMode || 'row_count';
 
           const matchCol = step.matchColumn;
           if (!matchCol) break;
@@ -408,12 +402,7 @@ export function executeWorkflow(
           updatedRows[matchedRowIndex] = updatedRowData;
 
           let nextValue = 0;
-          if (outputMode === 'row_count') {
-            nextValue = updatedRows.length;
-          } else {
-            const lastRow = updatedRows[updatedRows.length - 1];
-            nextValue = lastRow ? lastRow[outputMode] : 0;
-          }
+          nextValue = computeDatabaseOutput(updatedRows, targetState);
 
           store.set(targetAtom, {
             ...targetState,
@@ -496,7 +485,6 @@ export function executeWorkflow(
           const targetState = store.get(targetAtom);
           const columns = targetState?.columns || [];
           const currentRows = targetState?.rows || [];
-          const outputMode = targetState?.outputMode || 'row_count';
 
           const matchCol = step.matchColumn;
           if (!matchCol) break;
@@ -542,12 +530,7 @@ export function executeWorkflow(
           const updatedRows = currentRows.filter((_, idx) => idx !== matchedRowIndex);
 
           let nextValue = 0;
-          if (outputMode === 'row_count') {
-            nextValue = updatedRows.length;
-          } else {
-            const lastRow = updatedRows[updatedRows.length - 1];
-            nextValue = lastRow ? lastRow[outputMode] : 0;
-          }
+          nextValue = computeDatabaseOutput(updatedRows, targetState);
 
           store.set(targetAtom, {
             ...targetState,

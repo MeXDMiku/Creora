@@ -4,6 +4,7 @@ import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
 import type { NodeViewProps } from '@tiptap/react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { executeWorkflow, recalculateAllFormulas } from '../lib/bindingEngine';
+import { computeDatabaseOutput } from '../lib/databaseOutput';
 import { blockRuntimeAtom, activeWireAtom, snapTargetAtom, triggerSaveAtom, contextMenuAtom, getPortBadge, getBlockTypeDisplayName } from '../state/atoms';
 import { useMemo, useRef, useState, useEffect, useCallback } from 'react';
 import { useBlockDrag } from '../hooks/useBlockDrag';
@@ -59,12 +60,7 @@ const DatabaseBlockComponent = (props: NodeViewProps) => {
           if (parsedRows.length > 0 || currentLocalRows.length === 0) {
             // Sync value based on outputMode
             let nextValue = 0;
-            if (outputMode === 'row_count') {
-              nextValue = parsedRows.length;
-            } else {
-              const lastRow = parsedRows[parsedRows.length - 1];
-              nextValue = lastRow ? lastRow[outputMode] : 0;
-            }
+            nextValue = computeDatabaseOutput(parsedRows, currentLocalState || runtimeState);
 
             const changed =
               JSON.stringify(currentLocalRows) !== JSON.stringify(parsedRows) ||
@@ -131,12 +127,7 @@ const DatabaseBlockComponent = (props: NodeViewProps) => {
 
     // Re-evaluate output value
     let nextValue = 0;
-    if (outputMode === 'row_count') {
-      nextValue = updatedRows.length;
-    } else {
-      const lastRow = updatedRows[updatedRows.length - 1];
-      nextValue = lastRow ? lastRow[outputMode] : 0;
-    }
+    nextValue = computeDatabaseOutput(updatedRows, runtimeState);
 
     store.set(atomInstance, {
       ...runtimeState,
@@ -170,12 +161,7 @@ const DatabaseBlockComponent = (props: NodeViewProps) => {
     const updatedRows = [...rows, { id: rowId, ...defaultData }];
 
     let nextValue = 0;
-    if (outputMode === 'row_count') {
-      nextValue = updatedRows.length;
-    } else {
-      const lastRow = updatedRows[updatedRows.length - 1];
-      nextValue = lastRow ? lastRow[outputMode] : 0;
-    }
+    nextValue = computeDatabaseOutput(updatedRows, runtimeState);
 
     store.set(atomInstance, {
       ...runtimeState,
@@ -209,12 +195,7 @@ const DatabaseBlockComponent = (props: NodeViewProps) => {
     const updatedRows = rows.filter(r => r.id !== rowId);
 
     let nextValue = 0;
-    if (outputMode === 'row_count') {
-      nextValue = updatedRows.length;
-    } else {
-      const lastRow = updatedRows[updatedRows.length - 1];
-      nextValue = lastRow ? lastRow[outputMode] : 0;
-    }
+    nextValue = computeDatabaseOutput(updatedRows, runtimeState);
 
     store.set(atomInstance, {
       ...runtimeState,

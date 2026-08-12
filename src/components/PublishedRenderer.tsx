@@ -7,6 +7,7 @@ import { supabase } from '../lib/supabase';
 import { blockToCSS } from '../lib/renderBlockStyles';
 import { valueAtPath } from '../lib/jsonPaths';
 import { fetchDataSource } from '../lib/dataSource';
+import { computeDatabaseOutput } from '../lib/databaseOutput';
 import { executeWorkflow, recalculateAllFormulas } from '../lib/bindingEngine';
 import {
   blockPositionAtom,
@@ -349,12 +350,7 @@ function PublishedDatabaseBlock({ block }: { block: ExtractedBlock }) {
           const currentLocalRows = currentLocalState?.rows || [];
           if (parsedRows.length > 0 || currentLocalRows.length === 0) {
             let nextValue = 0;
-            if (outputMode === 'row_count') {
-              nextValue = parsedRows.length;
-            } else {
-              const lastRow = parsedRows[parsedRows.length - 1];
-              nextValue = lastRow ? lastRow[outputMode] : 0;
-            }
+            nextValue = computeDatabaseOutput(parsedRows, currentLocalState);
             // Did anything actually change? This runs on first paint AND on every
             // poll, so firing workflows unconditionally would re-run them forever.
             const changed =

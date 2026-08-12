@@ -1,4 +1,5 @@
 import { useAtom, useSetAtom } from 'jotai';
+import { computeDatabaseOutput } from '../lib/databaseOutput';
 import { blockRuntimeAtom, triggerSaveAtom, getBlockTypeDisplayName } from '../state/atoms';
 import { recalculateAllFormulas } from '../lib/bindingEngine';
 
@@ -37,12 +38,7 @@ export default function DatabaseBlockInspector({ blockId }: { blockId: string; e
 
     // Re-evaluate output value
     let nextValue = 0;
-    if (nextOutputMode === 'row_count') {
-      nextValue = updatedRows.length;
-    } else {
-      const lastRow = updatedRows[updatedRows.length - 1];
-      nextValue = lastRow ? lastRow[nextOutputMode] : 0;
-    }
+    nextValue = computeDatabaseOutput(updatedRows, { ...runtimeState, outputMode: nextOutputMode });
 
     setRuntimeState(prev => ({
       ...prev,
@@ -93,12 +89,7 @@ export default function DatabaseBlockInspector({ blockId }: { blockId: string; e
 
     // Re-evaluate output value
     let nextValue = 0;
-    if (nextOutputMode === 'row_count') {
-      nextValue = updatedRows.length;
-    } else {
-      const lastRow = updatedRows[updatedRows.length - 1];
-      nextValue = lastRow ? lastRow[nextOutputMode] : 0;
-    }
+    nextValue = computeDatabaseOutput(updatedRows, { ...runtimeState, outputMode: nextOutputMode });
 
     setRuntimeState(prev => ({
       ...prev,
@@ -136,12 +127,7 @@ export default function DatabaseBlockInspector({ blockId }: { blockId: string; e
 
     // Re-evaluate output value
     let nextValue = 0;
-    if (outputMode === 'row_count') {
-      nextValue = updatedRows.length;
-    } else {
-      const lastRow = updatedRows[updatedRows.length - 1];
-      nextValue = lastRow ? lastRow[outputMode] : 0;
-    }
+    nextValue = computeDatabaseOutput(updatedRows, runtimeState);
 
     setRuntimeState(prev => ({
       ...prev,
@@ -171,12 +157,7 @@ export default function DatabaseBlockInspector({ blockId }: { blockId: string; e
 
     // Re-evaluate output value
     let nextValue = 0;
-    if (nextOutputMode === 'row_count') {
-      nextValue = updatedRows.length;
-    } else {
-      const lastRow = updatedRows[updatedRows.length - 1];
-      nextValue = lastRow ? lastRow[nextOutputMode] : 0;
-    }
+    nextValue = computeDatabaseOutput(updatedRows, { ...runtimeState, outputMode: nextOutputMode });
 
     setRuntimeState(prev => ({
       ...prev,
@@ -192,12 +173,7 @@ export default function DatabaseBlockInspector({ blockId }: { blockId: string; e
   const handleSelectOutputMode = (mode: string) => {
     // Re-evaluate output value
     let nextValue = 0;
-    if (mode === 'row_count') {
-      nextValue = rows.length;
-    } else {
-      const lastRow = rows[rows.length - 1];
-      nextValue = lastRow ? lastRow[mode] : 0;
-    }
+    nextValue = computeDatabaseOutput(rows, { ...runtimeState, outputMode: mode });
 
     setRuntimeState(prev => ({
       ...prev,
@@ -305,7 +281,11 @@ export default function DatabaseBlockInspector({ blockId }: { blockId: string; e
             onChange={(e) => handleSelectOutputMode(e.target.value)}
             style={{ ...inputStyle, cursor: 'pointer' }}
           >
-            <option value="row_count">Row Count (#)</option>
+            <option value="row_count">How many rows (count)</option>
+            <option value="sum">Sum of a column</option>
+            <option value="average">Average of a column</option>
+            <option value="lowest">Lowest in a column</option>
+            <option value="highest">Highest in a column</option>
             {columns.map(col => (
               <option key={col.name} value={col.name}>
                 {col.name} ({col.type === 'number' ? '#' : col.type === 'boolean' ? '?' : 'T'}) (last row)
@@ -313,6 +293,51 @@ export default function DatabaseBlockInspector({ blockId }: { blockId: string; e
             ))}
           </select>
         </label>
+
+        {['sum', 'average', 'lowest', 'highest'].includes(outputMode) && (
+          <label style={controlLabelStyle}>
+            …of which column
+            <select
+              value={runtimeState.outputColumn || ''}
+              onChange={(e) => { setRuntimeState(prev => ({ ...prev, outputColumn: e.target.value })); triggerSave(prev => prev + 1) }}
+              style={{ ...inputStyle, cursor: 'pointer' }}
+            >
+              <option value="">Pick a column</option>
+              {columns.filter(c => c.type === 'number').map(col => (
+                <option key={col.name} value={col.name}>{col.name}</option>
+              ))}
+            </select>
+          </label>
+        )}
+
+        {/* "How many videos did THIS person upload" is a count with a condition.
+            One optional filter turns every mode above into a per-something answer. */}
+        <label style={controlLabelStyle}>
+          Only count rows where…
+          <select
+            value={runtimeState.filterColumn || ''}
+            onChange={(e) => { setRuntimeState(prev => ({ ...prev, filterColumn: e.target.value })); triggerSave(prev => prev + 1) }}
+            style={{ ...inputStyle, cursor: 'pointer' }}
+          >
+            <option value="">Every row (no filter)</option>
+            {columns.map(col => (
+              <option key={col.name} value={col.name}>{col.name}</option>
+            ))}
+          </select>
+        </label>
+
+        {runtimeState.filterColumn && (
+          <label style={controlLabelStyle}>
+            …equals
+            <input
+              type="text"
+              value={runtimeState.filterValue || ''}
+              onChange={(e) => { setRuntimeState(prev => ({ ...prev, filterValue: e.target.value })); triggerSave(prev => prev + 1) }}
+              placeholder="e.g. aridaman@example.com"
+              style={inputStyle}
+            />
+          </label>
+        )}
       </div>
 
       {/* Visual Styles */}

@@ -187,6 +187,11 @@ export interface BlockRuntimeState {
   columns?: { name: string; type: 'text' | 'number' | 'boolean' }[];
   rows?: { id: string; [key: string]: any }[];
   outputMode?: string;
+  /** Which column sum / average / lowest / highest works on. */
+  outputColumn?: string;
+  /** Optional "only rows where this column equals this value" - a count with a condition. */
+  filterColumn?: string;
+  filterValue?: string;
   targetPageId?: string;
   // Style fields the inspector writes and renderBlockStyles reads. These were
   // used at runtime long before they were declared.
