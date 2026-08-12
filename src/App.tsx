@@ -3,7 +3,7 @@ import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { useSetAtom, useAtom, useAtomValue, useStore } from 'jotai'
 import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, getCanvasBlocks, shapeRoleDataType, currentPageIdAtom, currentPageIsPublishedAtom, pagesListAtom, switchPageFnAtom, isPreviewModeAtom, canvasModeAtom } from './state/atoms'
-import { newBlockId, defaultRuntimeForNodeType, defaultAttrsForNodeType, BLOCK_FOOTPRINT, nodeTypeFromBlockId, shortBlockId, type BlockNodeType } from './lib/blockRegistry'
+import { newBlockId, defaultRuntimeForNodeType, defaultAttrsForNodeType, BLOCK_FOOTPRINT, nodeTypeFromBlockId, shortBlockId, isBlockNodeType, withoutVisitorState, type BlockNodeType } from './lib/blockRegistry'
 import { ButtonBlock } from './blocks/ButtonBlock'
 import { NumberDisplayBlock } from './blocks/NumberDisplayBlock'
 import { TextLabelBlock } from './blocks/TextLabelBlock'
@@ -285,6 +285,16 @@ function Inspector({ editor }: { editor: any }) {
   )
 }
 
+/**
+ * Which actions guard themselves against invalid input unless told otherwise.
+ *
+ * The two that write a row, because that is the moment a typo becomes permanent.
+ * Everything else stays off by default; the checkbox is there either way.
+ */
+function guardDefaultFor(action: string): boolean {
+  return action === 'addRow' || action === 'updateRow'
+}
+
 function ConnectionPopup({ editor }: { editor: any }) {
   const store = useStore()
   const [pending, setPending] = useAtom(pendingConnectionAtom)
@@ -292,6 +302,12 @@ function ConnectionPopup({ editor }: { editor: any }) {
   const setWorkflows = useSetAtom(workflowsAtom)
 
   const [action, setAction] = useState<string>('increment')
+  /**
+   * undefined means "whatever this action defaults to". Kept undefined rather
+   * than pre-filled so the default can change without silently rewriting what a
+   * builder chose on a step they already configured.
+   */
+  const [requireValid, setRequireValid] = useState<boolean | undefined>(undefined)
   const [amount, setAmount] = useState<number>(1)
   const [value, setValue] = useState<string>('')
   const [timerEvent, setTimerEvent] = useState<'onTick' | 'onComplete'>('onTick')
@@ -522,10 +538,16 @@ function ConnectionPopup({ editor }: { editor: any }) {
       } else if (action === 'set') {
         const parsedNum = Number(value)
         stepStep.value = isNaN(parsedNum) || value.trim() === '' ? value : parsedNum
-      } else {
+      } else if (action === 'toggle') {
         stepStep.action = 'toggle'
       }
+      // Anything else -- validate, switch off, switch on, show as busy -- needs
+      // no extra field and is already on stepStep.action. This used to be a
+      // catch-all `else` that forced 'toggle', which would have quietly turned
+      // every new action into a toggle the moment one was added.
     }
+
+    stepStep.requireValid = requireValid ?? guardDefaultFor(action)
 
     if (isConditional && elseEnabled) {
       stepStep.elseAction = elseAction as any
@@ -632,10 +654,36 @@ function ConnectionPopup({ editor }: { editor: any }) {
               <option value="toggle">Toggle</option>
               <option value="reset">Reset</option>
               <option value="sendWebhook">Send to another app</option>
+              <optgroup label="Form">
+                <option value="validate">Check its rules and show any problem</option>
+                <option value="setDisabled">Switch it off</option>
+                <option value="setEnabled">Switch it on</option>
+                <option value="setLoading">Show it as busy</option>
+                <option value="clearLoading">Stop showing it as busy</option>
+              </optgroup>
             </>
           )}
         </select>
       </label>
+
+      {action !== 'validate' && (
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '12px', color: '#475569', lineHeight: 1.4 }}>
+          <input
+            type="checkbox"
+            checked={requireValid ?? guardDefaultFor(action)}
+            onChange={(e) => setRequireValid(e.target.checked)}
+            style={{ marginTop: '2px' }}
+          />
+          <span>
+            Only do this if the fields it uses are valid
+            <span style={{ display: 'block', color: '#6b7280', fontSize: '11px' }}>
+              {guardDefaultFor(action)
+                ? 'On by default for anything that writes a row. Turn it off and a half-filled form still saves.'
+                : 'Off by default. Turn it on and this waits for the form to be right.'}
+            </span>
+          </span>
+        </label>
+      )}
 
       {action === 'sendWebhook' && (
         <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontWeight: 500, color: '#475569', fontSize: '13px' }}>
@@ -836,6 +884,7 @@ function ConnectionPopup({ editor }: { editor: any }) {
             const dt = picked ? picked.dataType : 'unknown'
             const needsValue = c.operator !== 'is ON' && c.operator !== 'is OFF'
               && c.operator !== 'isEmpty' && c.operator !== 'isNotEmpty'
+              && c.operator !== 'isValid' && c.operator !== 'isInvalid'
             return (
               <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: '6px', padding: '8px', border: '1px solid #e2e8f0', borderRadius: '6px', background: '#f8fafc' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -890,6 +939,10 @@ function ConnectionPopup({ editor }: { editor: any }) {
                       <option value="isNotEmpty">is not empty</option>
                     </>
                   )}
+                  {/* Asks the block's rules rather than its value, so it is
+                      offered whatever the field holds. */}
+                  <option value="isValid">passes its rules</option>
+                  <option value="isInvalid">fails its rules</option>
                 </select>
 
                 {needsValue && (
@@ -1371,19 +1424,7 @@ function App() {
       const blockIds: string[] = []
       editor.state.doc.descendants((node: any) => {
         const typeName = node.type.name
-        if (
-          typeName === 'buttonBlock' || 
-          typeName === 'numberDisplayBlock' || 
-          typeName === 'formulaDisplayBlock' || 
-          typeName === 'toggleBlock' || 
-          typeName === 'inputBlock' || 
-          typeName === 'textLabelBlock' ||
-          typeName === 'timerBlock' ||
-          typeName === 'historyChartBlock' ||
-          typeName === 'databaseBlock' ||
-          typeName === 'listBlock' ||
-          typeName === 'shapeBlock'
-        ) {
+        if (isBlockNodeType(typeName)) {
           if (node.attrs?.blockId) {
             blockIds.push(node.attrs.blockId)
           }
@@ -1528,19 +1569,7 @@ function App() {
 
     editor.state.doc.descendants((node: any) => {
       const typeName = node.type.name
-      if (
-        typeName === 'buttonBlock' || 
-        typeName === 'numberDisplayBlock' || 
-        typeName === 'formulaDisplayBlock' ||
-        typeName === 'toggleBlock' || 
-        typeName === 'inputBlock' || 
-        typeName === 'textLabelBlock' ||
-        typeName === 'timerBlock' ||
-        typeName === 'historyChartBlock' ||
-        typeName === 'databaseBlock' ||
-        typeName === 'listBlock' ||
-        typeName === 'shapeBlock'
-      ) {
+      if (isBlockNodeType(typeName)) {
         const blockId = node.attrs?.blockId
         if (blockId) {
           const pos = store.get(blockPositionAtom(blockId)) || { x: 100, y: 100 }
@@ -1553,7 +1582,7 @@ function App() {
           }
 
           positionsRecord[blockId] = pos
-          runtimeStatesRecord[blockId] = runtime
+          runtimeStatesRecord[blockId] = withoutVisitorState(runtime)
 
           let type: BlockType = 'text'
           if (typeName === 'buttonBlock') type = 'button'
@@ -1829,21 +1858,7 @@ function App() {
       editor.commands.command(({ tr, dispatch }: any) => {
         let foundPos = -1
         tr.doc.descendants((node: any, pos: number) => {
-          if (
-            (
-              node.type.name === 'buttonBlock' || 
-              node.type.name === 'timerBlock' ||
-              node.type.name === 'numberDisplayBlock' || 
-              node.type.name === 'formulaDisplayBlock' || 
-              node.type.name === 'toggleBlock' || 
-              node.type.name === 'inputBlock' || 
-              node.type.name === 'textLabelBlock' ||
-              node.type.name === 'historyChartBlock' ||
-              node.type.name === 'databaseBlock' ||
-              node.type.name === 'listBlock' ||
-              node.type.name === 'shapeBlock'
-            ) && node.attrs.blockId === blockId
-          ) {
+          if (isBlockNodeType(node.type.name) && node.attrs.blockId === blockId) {
             foundPos = pos
             return false
           }
@@ -2154,19 +2169,7 @@ function App() {
         // Extract all block IDs from editor content
         const blockIds: string[] = []
         const traverse = (node: any) => {
-          if (
-            node.type === 'buttonBlock' || 
-            node.type === 'timerBlock' || 
-            node.type === 'numberDisplayBlock' || 
-            node.type === 'formulaDisplayBlock' || 
-            node.type === 'toggleBlock' || 
-            node.type === 'inputBlock' || 
-            node.type === 'textLabelBlock' ||
-            node.type === 'historyChartBlock' ||
-            node.type === 'databaseBlock' ||
-            node.type === 'listBlock' ||
-            node.type === 'shapeBlock'
-          ) {
+          if (isBlockNodeType(node.type)) {
             if (node.attrs?.blockId) {
               blockIds.push(node.attrs.blockId)
             }
@@ -2182,7 +2185,7 @@ function App() {
 
         blockIds.forEach(id => {
           positions[id] = store.get(blockPositionAtom(id))
-          runtimeStates[id] = store.get(blockRuntimeAtom(id))
+          runtimeStates[id] = withoutVisitorState(store.get(blockRuntimeAtom(id)))
         })
 
         const workflows = store.get(workflowsAtom)
@@ -2440,19 +2443,7 @@ function App() {
     editor.state.doc.descendants((node: any) => {
       const bId = node.attrs?.blockId
       const typeName = node.type.name
-      if (bId && (
-        typeName === 'buttonBlock' ||
-        typeName === 'numberDisplayBlock' ||
-        typeName === 'formulaDisplayBlock' ||
-        typeName === 'toggleBlock' ||
-        typeName === 'inputBlock' ||
-        typeName === 'textLabelBlock' ||
-        typeName === 'timerBlock' ||
-        typeName === 'historyChartBlock' ||
-        typeName === 'databaseBlock' ||
-        typeName === 'listBlock' ||
-        typeName === 'shapeBlock'
-      )) {
+      if (bId && isBlockNodeType(typeName)) {
         currentBlocks.push({ id: bId, type: typeName })
       }
     })
@@ -2546,19 +2537,7 @@ function App() {
       const docJson = editor.getJSON()
       const blockIds: string[] = []
       const traverse = (node: any) => {
-        if (
-          node.type === 'buttonBlock' || 
-          node.type === 'timerBlock' || 
-          node.type === 'numberDisplayBlock' || 
-          node.type === 'formulaDisplayBlock' || 
-          node.type === 'toggleBlock' || 
-          node.type === 'inputBlock' || 
-          node.type === 'textLabelBlock' ||
-          node.type === 'historyChartBlock' ||
-          node.type === 'databaseBlock' ||
-          node.type === 'listBlock' ||
-          node.type === 'shapeBlock'
-        ) {
+        if (isBlockNodeType(node.type)) {
           if (node.attrs?.blockId) {
             blockIds.push(node.attrs.blockId)
           }
@@ -2574,7 +2553,7 @@ function App() {
 
       blockIds.forEach(id => {
         positions[id] = store.get(blockPositionAtom(id))
-        runtimeStates[id] = store.get(blockRuntimeAtom(id))
+        runtimeStates[id] = withoutVisitorState(store.get(blockRuntimeAtom(id)))
       })
 
       const workflows = store.get(workflowsAtom)
@@ -2669,7 +2648,7 @@ function App() {
         // Populate block runtime states
         if (blocksData.runtimeStates) {
           Object.entries(blocksData.runtimeStates).forEach(([id, rState]: [string, any]) => {
-            store.set(blockRuntimeAtom(id), rState)
+            store.set(blockRuntimeAtom(id), withoutVisitorState(rState))
           })
         }
 
@@ -2685,19 +2664,7 @@ function App() {
         // Sync allBlockIdsAtom
         const newBlockIds: string[] = []
         const traverseNew = (node: any) => {
-          if (
-            node.type === 'buttonBlock' || 
-            node.type === 'timerBlock' ||
-            node.type === 'numberDisplayBlock' || 
-            node.type === 'formulaDisplayBlock' || 
-            node.type === 'toggleBlock' || 
-            node.type === 'inputBlock' || 
-            node.type === 'textLabelBlock' ||
-            node.type === 'historyChartBlock' ||
-            node.type === 'databaseBlock' ||
-            node.type === 'listBlock' ||
-            node.type === 'shapeBlock'
-          ) {
+          if (isBlockNodeType(node.type)) {
             if (node.attrs?.blockId) {
               newBlockIds.push(node.attrs.blockId)
             }
@@ -2886,7 +2853,7 @@ function App() {
           // Populate block runtime states
           if (blocksData.runtimeStates) {
             Object.entries(blocksData.runtimeStates).forEach(([id, rState]: [string, any]) => {
-              store.set(blockRuntimeAtom(id), rState)
+              store.set(blockRuntimeAtom(id), withoutVisitorState(rState))
             })
           }
 
@@ -2902,19 +2869,7 @@ function App() {
           // Extract all block IDs to populate allBlockIdsAtom
           const blockIds: string[] = []
           const traverse = (node: any) => {
-            if (
-              node.type === 'buttonBlock' || 
-              node.type === 'timerBlock' ||
-              node.type === 'numberDisplayBlock' || 
-              node.type === 'formulaDisplayBlock' || 
-              node.type === 'toggleBlock' || 
-              node.type === 'inputBlock' || 
-              node.type === 'textLabelBlock' ||
-              node.type === 'historyChartBlock' ||
-              node.type === 'databaseBlock' ||
-              node.type === 'listBlock' ||
-              node.type === 'shapeBlock'
-            ) {
+            if (isBlockNodeType(node.type)) {
               if (node.attrs?.blockId) {
                 blockIds.push(node.attrs.blockId)
               }

@@ -4,8 +4,109 @@ import type { TriggerEvent } from '../types/creora';
 import { blockRuntimeAtom, workflowsAtom, formulasAtom, allBlockIdsAtom, getBlockDefaultValue , recordRun, type RunStep } from '../state/atoms';
 import { sendWebhook } from './webhook';
 import { computeDatabaseOutput } from './databaseOutput';
+import { validateValue } from './validation';
 import { supabase } from './supabase';
 
+
+/**
+ * The one place that asks "is this field's value acceptable?".
+ *
+ * Everything else -- the field itself, the submit guard, the isValid condition,
+ * the published page -- calls this, so the editor and the live site can never
+ * disagree about what counts as valid. That divergence is exactly how the
+ * editor and PublishedRenderer drifted apart before.
+ */
+export function validationErrorFor(
+  blockId: string,
+  store: ReturnType<typeof getDefaultStore>
+): string | null {
+  const state = store.get(blockRuntimeAtom(blockId));
+  if (!state || !state.rules || state.rules.length === 0) return null;
+  const name =
+    state.blockName && state.blockName.trim() !== '' ? state.blockName.trim() : 'This field';
+  return validateValue(state.value, state.rules, {
+    fieldName: name,
+    resolve: (id) => store.get(blockRuntimeAtom(id))?.value,
+  });
+}
+
+/**
+ * Recheck a field and, optionally, admit that it has been visited.
+ *
+ * `touched` is the difference between a form that helps and a form that shouts:
+ * an empty required field is invalid the instant the page loads, and showing
+ * that immediately is how you tell someone off for not having typed yet.
+ */
+export function markValidated(
+  blockId: string,
+  store: ReturnType<typeof getDefaultStore>,
+  touch: boolean
+): string | null {
+  const message = validationErrorFor(blockId, store);
+  const state = store.get(blockRuntimeAtom(blockId));
+  if (!state) return message;
+  const nextTouched = touch ? true : state.touched;
+  if (state.validationError === message && state.touched === nextTouched) return message;
+  store.set(blockRuntimeAtom(blockId), {
+    ...state,
+    validationError: message,
+    touched: nextTouched,
+  });
+  return message;
+}
+
+/** Every block on the page that has been given rules. */
+function blocksWithRules(store: ReturnType<typeof getDefaultStore>): string[] {
+  const ids: string[] = store.get(allBlockIdsAtom) || [];
+  return ids.filter((id) => {
+    const st = store.get(blockRuntimeAtom(id));
+    return !!(st && st.rules && st.rules.length);
+  });
+}
+
+/**
+ * Which fields a step actually reads.
+ *
+ * A step that names its inputs (addRow, updateRow) is checked against exactly
+ * those. A step that names none -- "send this form to Zapier" -- is checked
+ * against every field on the page that has rules, because that is what a person
+ * ticking "only if valid" on such a step means.
+ */
+function fieldsReadByStep(
+  step: { mappings?: Record<string, { source: string; value: string }>; matchValue?: { source: string; value: string } },
+  store: ReturnType<typeof getDefaultStore>
+): string[] {
+  const ids: string[] = [];
+  if (step.mappings) {
+    for (const m of Object.values(step.mappings)) {
+      if (m && m.source === 'block' && m.value) ids.push(m.value);
+    }
+  }
+  if (step.matchValue && step.matchValue.source === 'block' && step.matchValue.value) {
+    ids.push(step.matchValue.value);
+  }
+  const named = Array.from(new Set(ids));
+  return named.length ? named : blocksWithRules(store);
+}
+
+/**
+ * A condition, evaluated against a real block rather than a bare value.
+ *
+ * isValid / isInvalid cannot be answered by looking at a value alone -- they
+ * need the block's rules -- so they are resolved here and everything else falls
+ * through to the pure comparison below.
+ */
+export function conditionHolds(
+  fieldId: string,
+  operator: string,
+  expected: any,
+  store: ReturnType<typeof getDefaultStore>
+): boolean {
+  if (operator === 'isValid') return validationErrorFor(fieldId, store) === null;
+  if (operator === 'isInvalid') return validationErrorFor(fieldId, store) !== null;
+  const state = store.get(blockRuntimeAtom(fieldId));
+  return evaluateCondition(state?.value, operator, expected);
+}
 
 /**
  * One condition, evaluated. Pulled out of executeWorkflow so a step can hold a
@@ -72,7 +173,7 @@ export function evaluateCondition(actual: any, operator: string, expected: any):
  * which belong to the main switch, and an "otherwise, add a row" is not a thing
  * anyone has asked for.
  */
-export const ELSE_ACTIONS = ['increment', 'decrement', 'set', 'toggle', 'reset', 'setVisible', 'setHidden'] as const;
+export const ELSE_ACTIONS = ['increment', 'decrement', 'set', 'toggle', 'reset', 'setVisible', 'setHidden', 'setDisabled', 'setEnabled'] as const;
 
 function runElseAction(
   action: string,
@@ -114,6 +215,12 @@ function runElseAction(
     case 'setHidden':
       store.set(atom, { ...state, visible: false });
       break;
+    case 'setDisabled':
+      store.set(atom, { ...state, disabled: true });
+      break;
+    case 'setEnabled':
+      store.set(atom, { ...state, disabled: false });
+      break;
     default:
       break;
   }
@@ -126,6 +233,35 @@ export function executeWorkflow(
   event: TriggerEvent,
   store: ReturnType<typeof getDefaultStore>
 ) {
+  /**
+   * Disable while sending, enforced here rather than in each renderer.
+   *
+   * A second press while the first is still in flight is how you get two rows,
+   * two charges and two emails. Greying the button out is the visible half; this
+   * is the half that actually prevents it, and it holds even if a builder wires
+   * their own markup straight to this function.
+   */
+  const sourceState = store.get(blockRuntimeAtom(sourceId));
+  if ((event === 'onClick' || event === 'onChange') && (sourceState?.loading || sourceState?.disabled)) {
+    recordRun(store, {
+      sourceId,
+      event,
+      workflowId: null,
+      matched: 0,
+      steps: [
+        {
+          targetId: sourceId,
+          action: '(ignored)',
+          status: 'skipped',
+          reason: sourceState?.loading
+            ? 'it was still busy from the last time it ran'
+            : 'it is switched off',
+        },
+      ],
+    });
+    return;
+  }
+
   const workflows = store.get(workflowsAtom);
   console.log('executeWorkflow: all workflows in store:', workflows);
   console.log('executeWorkflow: filtering for sourceId =', sourceId, 'event =', event);
@@ -158,10 +294,9 @@ export function executeWorkflow(
             : [];
 
       if (stepConditions.length) {
-        const results = stepConditions.map((c) => {
-          const state = store.get(blockRuntimeAtom(c.fieldId));
-          return evaluateCondition(state?.value, c.operator, c.value);
-        });
+        const results = stepConditions.map((c) =>
+          conditionHolds(c.fieldId, c.operator, c.value, store)
+        );
         const matchMode = step.match === 'any' ? 'any' : 'all';
         const conditionPassed =
           matchMode === 'any' ? results.some(Boolean) : results.every(Boolean);
@@ -199,6 +334,42 @@ export function executeWorkflow(
             });
           }
           continue; // Either way this step is done; move to the next
+        }
+      }
+
+      /**
+       * The submit guard.
+       *
+       * On by default for the actions that write a row, because a form that
+       * writes rubbish into the database is the failure this whole feature
+       * exists to prevent. Off is one checkbox away in the action popup, so the
+       * default is a starting point rather than a ceiling.
+       *
+       * Every field involved is marked touched even when only one of them is
+       * wrong: pressing submit should reveal the whole form's complaints at
+       * once, not make someone fix them one press at a time.
+       */
+      const guardOn =
+        step.requireValid ?? (step.action === 'addRow' || step.action === 'updateRow');
+      if (guardOn) {
+        const fields = fieldsReadByStep(step, store);
+        const problems: string[] = [];
+        for (const fieldId of fields) {
+          const message = markValidated(fieldId, store, true);
+          if (message) {
+            const fieldState = store.get(blockRuntimeAtom(fieldId));
+            const label = fieldState?.blockName || fieldId;
+            problems.push(`${label}: ${message}`);
+          }
+        }
+        if (problems.length) {
+          runSteps.push({
+            targetId: step.targetId,
+            action: step.action,
+            status: 'skipped',
+            reason: `a field it uses is not valid — ${problems.join('; ')}`,
+          });
+          continue;
         }
       }
 
@@ -577,13 +748,48 @@ export function executeWorkflow(
             }
             let activePage: string | null = null;
             try { activePage = localStorage.getItem('creora_active_page_id'); } catch { activePage = null; }
+            /**
+             * The one action that genuinely takes time, so it is the one that
+             * owns the busy state. Set on the thing that was pressed, cleared
+             * when the request settles either way -- a button stuck on "Sending"
+             * forever is worse than one that reports a failure.
+             *
+             * Both writes re-read the state at write time. Spreading the
+             * render-time copy is the stale-closure bug that made a Database
+             * show a count from two edits ago.
+             */
+            const busyId = sourceId;
+            const setBusy = (busy: boolean) => {
+              const fresh = store.get(blockRuntimeAtom(busyId));
+              if (fresh) store.set(blockRuntimeAtom(busyId), { ...fresh, loading: busy });
+            };
+            setBusy(true);
             sendWebhook(hookUrl, {
               source: 'creora',
               pageId: activePage,
               block: currentTargetState?.blockName || step.targetId,
               sentAt: new Date().toISOString(),
               data: payloadData,
-            }).catch((e) => console.warn('[creora] webhook failed:', e && e.message ? e.message : e));
+            })
+              .catch((e) => {
+                const detail = e && e.message ? e.message : String(e);
+                console.warn('[creora] webhook failed:', detail);
+                recordRun(store, {
+                  sourceId,
+                  event,
+                  workflowId: workflow.id,
+                  matched: 1,
+                  steps: [
+                    {
+                      targetId: step.targetId,
+                      action: 'sendWebhook',
+                      status: 'skipped',
+                      reason: `the send failed — ${detail}`,
+                    },
+                  ],
+                });
+              })
+              .finally(() => setBusy(false));
           }
           break;
         }
@@ -621,6 +827,29 @@ export function executeWorkflow(
           }
           break;
         }
+        case 'validate': {
+          // Checks the target and, unlike typing in it, admits it has been seen.
+          // This is what a submit button wires to when it should light up the
+          // form's problems without writing anything.
+          markValidated(step.targetId, store, true);
+          break;
+        }
+        case 'setLoading': {
+          store.set(targetAtom, { ...currentTargetState, loading: true });
+          break;
+        }
+        case 'clearLoading': {
+          store.set(targetAtom, { ...currentTargetState, loading: false });
+          break;
+        }
+        case 'setDisabled': {
+          store.set(targetAtom, { ...currentTargetState, disabled: true });
+          break;
+        }
+        case 'setEnabled': {
+          store.set(targetAtom, { ...currentTargetState, disabled: false });
+          break;
+        }
         case 'setVisible': {
           store.set(targetAtom, {
             ...currentTargetState,
@@ -643,12 +872,23 @@ export function executeWorkflow(
           store.set(targetAtom, {
             ...currentTargetState,
             value: newVal,
+            // A reset form is a fresh form. Leaving the red behind after
+            // "clear" is the small thing that makes a page feel broken.
+            validationError: null,
+            touched: false,
           });
           break;
         }
         default:
           // Other actions are ignored or handled as no-ops in this step
           break;
+      }
+
+      // Any action that changes a value can change whether that value is valid.
+      // Rechecked without touching, so a change the page made itself never
+      // reveals a complaint the visitor has not had the chance to cause.
+      if (currentTargetState.rules && currentTargetState.rules.length && step.action !== 'validate') {
+        markValidated(step.targetId, store, false);
       }
 
       runSteps.push({

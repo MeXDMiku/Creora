@@ -31,9 +31,17 @@ const ButtonBlockComponent = (props: NodeViewProps) => {
 
   const isPreviewMode = useAtomValue(isPreviewModeAtom);
 
+  const isBusy = !!runtimeState?.loading;
+  const isOff = !!runtimeState?.disabled;
+  const inert = isBusy || isOff;
+
   const onPointerUp = (e: React.PointerEvent) => {
     const wasClick = handlePointerUp(e);
     if (wasClick) {
+      // executeWorkflow refuses a busy source on its own, but navigation is not
+      // a workflow step -- without this a second press while a send was in
+      // flight would still change the page out from under it.
+      if (inert) return;
       executeWorkflow(blockId, 'onClick', store);
 
       // In Preview Mode, direct click-to-navigate is active if targetPageId is configured
@@ -126,9 +134,15 @@ const ButtonBlockComponent = (props: NodeViewProps) => {
       </div>
       <div
         contentEditable={false}
-        style={innerStyle}
+        style={{
+          ...innerStyle,
+          ...(inert ? { opacity: 0.6, cursor: isBusy ? 'progress' : 'not-allowed' } : null),
+        }}
       >
-        {label}
+        {/* Busy text is the builder's, and blank means "keep saying the same
+            thing" -- a button that must change its words while working is a
+            default imposing itself. */}
+        {isBusy && runtimeState?.busyText ? runtimeState.busyText : label}
       </div>
       {/* Left (input) port — always in DOM for measurement, visibility controlled */}
       <div

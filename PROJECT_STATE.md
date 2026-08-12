@@ -387,6 +387,139 @@ decision (blocks sit at fixed x/y and do not reflow on a phone); an Edge Functio
 layer as the single foundation for AI keys, OAuth secrets and rate limits; then
 end-user accounts. See docs/DIRECTION.md for what is deliberately not being built.
 
+### Cycle 1 — validation and form states *(12 Aug 2026)*
+
+First cycle run under `docs/HOW_WE_WORK.md`. Queue item 1.
+
+**What a form can now say about itself**
+
+Every Input block carries an ordered list of rules. Fourteen kinds: required,
+email, number, whole number, web address, phone, min/max length, min/max value,
+starts with, ends with, **your own regular expression**, and **must match another
+field** (which is how "confirm your email" is built). The first rule that fails is
+the message shown, and the order is the builder's, so which complaint is heard is
+their choice, not ours.
+
+Every rule takes the builder's own wording. Leave it blank and ours is used.
+The message line under the field can be switched off entirely and coloured
+freely — a builder who wants the error inside their own markup turns it off and
+reads the field's state from their own design. **The default is a starting point,
+never a ceiling.**
+
+**The rule that shapes the behaviour: empty passes everything but `required`.**
+"Optional, but if they fill it in it must be an email" is the most common shape
+of an optional field and it is unsayable if `email` rejects blank.
+
+**When it complains**
+
+Per field: when they leave it (default), every keystroke, or only on submit.
+An error is *computed* immediately but only *shown* once the field is `touched`.
+Without that, an empty required field is invalid the moment the page loads, and
+saying so tells someone off for not having typed yet. Typing never reveals a new
+complaint but always clears one already on screen.
+
+**The submit guard**
+
+A step that writes a row refuses to run when a field it reads is invalid, and
+marks every field it reads as touched — so one press reveals the whole form's
+problems rather than one per press. On by default for `addRow`/`updateRow`,
+off for everything else, and a checkbox in the action popup either way. Steps
+that name no fields (send-to-another-app) check every field on the page that has
+rules.
+
+Pages that predate this are unaffected: a block with no rules is always valid.
+Proved, not assumed — see the check named "pages saved before any of this behave
+exactly as they did".
+
+**Busy, and disable-while-sending**
+
+`sendWebhook` marks the pressed button busy for the life of the request and
+clears it when it settles, either way. While busy or switched off, the button
+takes no clicks — enforced in `executeWorkflow` itself, not only in the renderer,
+so it holds even for a builder's own markup wired straight to the engine.
+Navigation is guarded separately in both renderers, because it is not a workflow
+step. Busy text is the builder's; blank keeps the same label.
+
+**New actions and a new condition**
+
+Actions: `validate`, `setLoading`, `clearLoading`, `setDisabled`, `setEnabled`.
+Conditions: `passes its rules` / `fails its rules`, offered on any field, because
+they ask the block's rules rather than its value. `reset` now also clears the red
+and un-touches the field — a reset form is a fresh form.
+
+---
+
+### The bug this cycle found: three blocks were never being saved *(fixed 12 Aug 2026)*
+
+**Live Data, My Design and Visitor could not persist anything.** Paste your HTML
+into a My Design block, reload, and it was back to the default markup. Same for a
+Live Data block's URL and a Visitor block's field.
+
+Cause: `"is this TipTap node one of our blocks?"` was hand-written as a
+`typeName === 'buttonBlock' || typeName === '...'` chain in **nine** places —
+App.tsx (×8) and `getCanvasBlocks` in atoms.ts — plus a tenth copy as an array in
+PublishedRenderer. Three of those nine were the save paths. Every block added
+after those chains were written was invisible to saving, to `allBlockIdsAtom`,
+and to every dropdown.
+
+All ten now call `isBlockNodeType()` from `blockRegistry.ts`, which is the file
+that already owned `BLOCK_NODE_TYPES`. One list.
+
+**Why the previous cycle's consistency check missed it:** it checked five
+registration points — published list, TipTap extension, `getBlockDataType`,
+inspector file, renders-when-published. The save path was not one of them. A
+check that only looks where you already looked confirms what you already believe.
+
+**Transient state was being persisted too.** `touched`, `validationError`,
+`loading` and `fetchError` belong to one person looking at one page right now.
+Saved, they mean a visitor arrives to a form already showing red, or worse, a
+button permanently stuck as busy with no way to press it. `withoutVisitorState()`
+strips them on save *and* on load — on load as well, because pages already saved
+with them have to come back clean.
+
+---
+
+### There are runnable checks now — `npm run check` *(12 Aug 2026)*
+
+`scripts/checks.ts`. **78 checks, all passing.** It imports the real modules —
+`validation.ts`, `bindingEngine.ts`, `blockRegistry.ts`, real Jotai stores — and
+runs them. It is not a copy of the logic.
+
+    npm run check      # 78 checks
+    npm run typecheck  # tsc -b
+
+Covers: every rule against real values including the near-misses, rule order and
+custom messages, cross-field matching, the touched gate, the submit guard both
+blocking and allowing, the guard switched off, **old pages behaving identically**,
+busy and disabled swallowing presses, the new actions, `isValid` conditions with
+an Otherwise branch, reset clearing the red, and what may and may not be saved.
+
+It also checks registration **mechanically**, which is what would have caught the
+bug above: every block type has an inspector, can be inserted, is a TipTap
+extension, and renders when published — plus two guards that fail if anyone
+hand-writes the block list again as a `||` chain or as a second array.
+
+**Both guards were negative-controlled**: a file containing a chain and a copied
+array was added on purpose, both checks failed as intended, and the file was
+removed. A check that has never been seen to fail is not a check.
+
+How it runs without a test runner: Node 22 strips the types, and
+`scripts/loader.mjs` bridges the two real gaps between Vite's resolution and
+Node's — extensionless imports, and `src/lib/supabase.ts` reading
+`import.meta.env`, which throws on import outside Vite. The source was not bent
+to fit the test.
+
+**Not verified this cycle, and not claimed:**
+
+- **The live site.** The browser extension was disconnected for the whole cycle,
+  so nothing was clicked on the real domain. Everything above is proved locally.
+  Cycle 2 opens with it.
+- **`vite build`.** Cannot run from the Linux side of the workspace: `node_modules`
+  holds only `win32-x64` native bindings for rolldown and oxlint, because the
+  install was done on Windows. `tsc -b` is pure JS and does run. Build on Windows.
+
+---
+
 ## File Structure Summary
 
 ```

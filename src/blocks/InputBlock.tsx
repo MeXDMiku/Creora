@@ -2,7 +2,7 @@ import { Node } from '@tiptap/core';
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
 import type { NodeViewProps } from '@tiptap/react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
-import { executeWorkflow, recalculateAllFormulas } from '../lib/bindingEngine';
+import { executeWorkflow, recalculateAllFormulas, markValidated } from '../lib/bindingEngine';
 import { blockRuntimeAtom, activeWireAtom, triggerSaveAtom, contextMenuAtom, getPortBadge, getBlockTypeDisplayName } from '../state/atoms';
 import { useMemo, useRef, useState, useEffect, useCallback } from 'react';
 import { useBlockDrag } from '../hooks/useBlockDrag';
@@ -28,6 +28,40 @@ const InputBlockComponent = (props: NodeViewProps) => {
   const { position, handlePointerDown, handlePointerMove, handlePointerUp } = useBlockDrag(blockId, containerRef as React.RefObject<HTMLElement>);
 
   const runtimeValue = typeof runtimeState?.value === 'string' ? runtimeState.value : '';
+
+  /**
+   * Show a complaint only once the field has been visited or submitted.
+   *
+   * An empty required field is invalid from the moment the page loads. Saying so
+   * immediately tells someone off for not having typed yet, which is why
+   * `touched` exists and why it gates the display rather than the check.
+   */
+  const showError = !!(runtimeState?.touched && runtimeState?.validationError);
+  const errorColor = runtimeState?.errorColor || '#dc2626';
+  const showErrorText = runtimeState?.showErrorText !== false;
+
+  /**
+   * Typing does not reveal a new complaint, but it does clear one that is
+   * already on screen. Fixing a field should feel like fixing it, not like
+   * waiting for permission to be told you were right.
+   */
+  const handleValueChange = (next: string) => {
+    const current = store.get(atomInstance);
+    store.set(atomInstance, { ...current, value: next });
+    if (current?.validateOn === 'change') {
+      markValidated(blockId, store, true);
+    } else if (current?.touched) {
+      markValidated(blockId, store, false);
+    }
+    executeWorkflow(blockId, 'onChange', store);
+    recalculateAllFormulas(store);
+    triggerSave(prev => prev + 1);
+  };
+
+  const handleBlur = () => {
+    if (store.get(atomInstance)?.validateOn === 'submit') return;
+    markValidated(blockId, store, true);
+  };
 
   // Native DOM ref for context menu — bypasses React's synthetic events entirely
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -139,19 +173,44 @@ const InputBlockComponent = (props: NodeViewProps) => {
       <input
         type="text"
         value={runtimeValue}
+        disabled={!!runtimeState?.disabled}
         onPointerDown={(e) => e.stopPropagation()} // Stop propagation so clicking in text box focuses it instead of dragging
-        onChange={(e) => {
-          store.set(atomInstance, {
-            ...runtimeState,
-            value: e.target.value
-          });
-          executeWorkflow(blockId, 'onChange', store);
-          recalculateAllFormulas(store);
-          triggerSave(prev => prev + 1);
+        onChange={(e) => handleValueChange(e.target.value)}
+        onBlur={handleBlur}
+        style={{
+          ...innerStyle,
+          ...(showError
+            ? { borderColor: errorColor, borderWidth: 2, borderStyle: 'solid', outlineColor: errorColor }
+            : null),
+          ...(runtimeState?.disabled ? { opacity: 0.55, cursor: 'not-allowed' } : null),
         }}
-        style={innerStyle}
-        placeholder="Type something..."
+        placeholder={runtimeState?.placeholder ?? 'Type something...'}
       />
+      {/*
+        The complaint. Absolutely positioned so appearing does not shove the rest
+        of the canvas down, and switchable off entirely -- a builder who wants
+        the message inside their own design turns this off and reads the field's
+        error from their markup instead.
+      */}
+      {showError && showErrorText && (
+        <div
+          contentEditable={false}
+          style={{
+            position: 'absolute',
+            top: '100%',
+            left: 0,
+            marginTop: '4px',
+            fontSize: '12px',
+            lineHeight: 1.3,
+            color: errorColor,
+            whiteSpace: 'nowrap',
+            pointerEvents: 'none',
+            userSelect: 'none',
+          }}
+        >
+          {runtimeState?.validationError}
+        </div>
+      )}
       {/* Right (output) port */}
       <div
         contentEditable={false}

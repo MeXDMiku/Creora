@@ -1,3 +1,4 @@
+import { withoutVisitorState, isBlockNodeType } from '../lib/blockRegistry';
 import { usePollWhileVisible } from '../hooks/usePollWhileVisible';
 import { useValueChangeAnimation } from '../hooks/useValueChangeAnimation';
 import { useEffect, useState, useRef, useMemo } from 'react';
@@ -10,7 +11,7 @@ import { fetchDataSource } from '../lib/dataSource';
 import { computeDatabaseOutput } from '../lib/databaseOutput';
 import { CustomHtmlView } from '../blocks/CustomHtmlBlock';
 import { refreshVisitor } from '../lib/visitor';
-import { executeWorkflow, recalculateAllFormulas } from '../lib/bindingEngine';
+import { executeWorkflow, recalculateAllFormulas, markValidated } from '../lib/bindingEngine';
 import {
   blockPositionAtom,
   blockRuntimeAtom,
@@ -31,22 +32,9 @@ type DocItem =
   | { kind: 'block'; block: ExtractedBlock }
   | { kind: 'text'; node: any };
 
-const supportedBlockTypes = [
-  'buttonBlock',
-  'numberDisplayBlock',
-  'toggleBlock',
-  'inputBlock',
-  'textLabelBlock',
-  'formulaDisplayBlock',
-  'timerBlock',
-  'historyChartBlock',
-  'databaseBlock',
-  'listBlock',
-  'shapeBlock',
-  'dataSourceBlock',
-  'customHtmlBlock',
-  'visitorBlock',
-];
+// The list this used to hold was a second copy of BLOCK_NODE_TYPES that
+// happened to be up to date. The copies in App.tsx were not, and that is how
+// three blocks ended up unsaveable. One list.
 
 const extractDocItems = (node: any): { docItems: DocItem[]; blocks: ExtractedBlock[] } => {
   if (!node) return { docItems: [], blocks: [] };
@@ -56,7 +44,7 @@ const extractDocItems = (node: any): { docItems: DocItem[]; blocks: ExtractedBlo
   const traverse = (n: any) => {
     if (!n) return;
 
-    if (n.attrs?.blockId && supportedBlockTypes.includes(n.type)) {
+    if (n.attrs?.blockId && isBlockNodeType(n.type)) {
       const extBlock: ExtractedBlock = {
         id: n.attrs.blockId,
         type: n.type,
@@ -80,7 +68,7 @@ const extractDocItems = (node: any): { docItems: DocItem[]; blocks: ExtractedBlo
     // Also check for embedded custom block nodes inside
     if (n.content && Array.isArray(n.content)) {
       n.content.forEach((child: any) => {
-        if (child.attrs?.blockId && supportedBlockTypes.includes(child.type)) {
+        if (child.attrs?.blockId && isBlockNodeType(child.type)) {
           const extBlock: ExtractedBlock = {
             id: child.attrs.blockId,
             type: child.type,
@@ -602,6 +590,9 @@ function RenderedBlock({ block }: { block: ExtractedBlock }) {
    * with a target page did nothing at all on published pages.
    */
   const runTrigger = () => {
+    // Busy or switched off stops everything, navigation included. The engine
+    // guards its own steps; this guards the half that is not a step.
+    if (runtimeState?.loading || runtimeState?.disabled) return;
     executeWorkflow(block.id, 'onClick', store);
     recalculateAllFormulas(store);
     const targetPageId = runtimeState?.targetPageId;
@@ -611,13 +602,22 @@ function RenderedBlock({ block }: { block: ExtractedBlock }) {
   const { outer: outerStyle, inner: innerStyle } = blockToCSS(block.type, position, runtimeState);
 
   if (block.type === 'buttonBlock') {
+    const isBusy = !!runtimeState?.loading;
+    const inert = isBusy || !!runtimeState?.disabled;
     return (
       <div style={outerStyle}>
         <button
-          style={innerStyle}
+          style={{
+            ...innerStyle,
+            ...(inert ? { opacity: 0.6, cursor: isBusy ? 'progress' : 'not-allowed' } : null),
+          }}
+          disabled={inert}
+          aria-busy={isBusy}
           onClick={runTrigger}
         >
-          {block.attrs.label || 'Button'}
+          {isBusy && runtimeState?.busyText
+            ? runtimeState.busyText
+            : block.attrs.label || 'Button'}
         </button>
       </div>
     );
@@ -668,22 +668,66 @@ function RenderedBlock({ block }: { block: ExtractedBlock }) {
   }
 
   if (block.type === 'inputBlock') {
+    /**
+     * Byte-for-byte the same rules, the same touched gate and the same messages
+     * as the editor, because both call markValidated. The editor and this file
+     * having their own opinion about a block is exactly how they drifted apart
+     * before, and validation is the worst possible place to let it happen again:
+     * a form that accepts in preview and rejects when published is unshippable.
+     */
+    const showError = !!(runtimeState?.touched && runtimeState?.validationError);
+    const errorColor = runtimeState?.errorColor || '#dc2626';
+    const showErrorText = runtimeState?.showErrorText !== false;
+    const isOff = !!runtimeState?.disabled;
+
     return (
       <div style={outerStyle}>
         <input
           type="text"
-          style={innerStyle}
+          style={{
+            ...innerStyle,
+            ...(showError
+              ? { borderColor: errorColor, borderWidth: 2, borderStyle: 'solid', outlineColor: errorColor }
+              : null),
+            ...(isOff ? { opacity: 0.55, cursor: 'not-allowed' } : null),
+          }}
           value={String(runtimeState?.value ?? '')}
+          disabled={isOff}
+          aria-invalid={showError}
           onChange={(e) => {
+            // Read at write time, never the render-time copy.
+            const current = store.get(blockRuntimeAtom(block.id));
             store.set(blockRuntimeAtom(block.id), {
-              ...runtimeState,
+              ...current,
               value: e.target.value,
             });
+            if (current?.validateOn === 'change') {
+              markValidated(block.id, store, true);
+            } else if (current?.touched) {
+              markValidated(block.id, store, false);
+            }
             executeWorkflow(block.id, 'onChange', store);
             recalculateAllFormulas(store);
           }}
-          placeholder="Type something..."
+          onBlur={() => {
+            if (store.get(blockRuntimeAtom(block.id))?.validateOn === 'submit') return;
+            markValidated(block.id, store, true);
+          }}
+          placeholder={runtimeState?.placeholder ?? 'Type something...'}
         />
+        {showError && showErrorText && (
+          <div
+            role="alert"
+            style={{
+              marginTop: '4px',
+              fontSize: '12px',
+              lineHeight: 1.3,
+              color: errorColor,
+            }}
+          >
+            {runtimeState?.validationError}
+          </div>
+        )}
       </div>
     );
   }
@@ -1069,7 +1113,9 @@ export default function PublishedRenderer() {
 
         if (blocksData.runtimeStates) {
           Object.entries(blocksData.runtimeStates).forEach(([id, rState]: [string, any]) => {
-            store.set(blockRuntimeAtom(id), rState);
+            // A visitor arrives with a clean form: no red, no button stuck busy,
+            // no error left over from whatever the builder was doing at save time.
+            store.set(blockRuntimeAtom(id), withoutVisitorState(rState));
           });
         }
 

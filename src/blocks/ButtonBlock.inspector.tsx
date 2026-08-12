@@ -23,6 +23,36 @@ export default function ButtonBlockInspector({ blockId }: { blockId: string; edi
         />
       </label>
 
+      <label style={{ display: 'block', marginBottom: '12px' }}>
+        What it says while it is busy
+        <input
+          type="text"
+          value={runtimeState.busyText ?? ''}
+          onChange={(e) => {
+            setRuntimeState(prev => ({ ...prev, busyText: e.target.value }))
+            triggerSave(prev => prev + 1)
+          }}
+          placeholder="Leave blank to keep the same words"
+          style={{ display: 'block', marginTop: '4px', width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #ccc', boxSizing: 'border-box', background: '#f8fafc', color: '#0f172a', outline: 'none', fontSize: '13px' }}
+        />
+        <span style={{ display: 'block', fontSize: '11px', color: '#64748b', marginTop: '4px', lineHeight: 1.4 }}>
+          While a send is in flight the button stops responding, so a second
+          press cannot post the form twice. This is what it shows meanwhile.
+        </span>
+      </label>
+
+      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', fontSize: '13px' }}>
+        <input
+          type="checkbox"
+          checked={!!runtimeState.disabled}
+          onChange={(e) => {
+            setRuntimeState(prev => ({ ...prev, disabled: e.target.checked }))
+            triggerSave(prev => prev + 1)
+          }}
+        />
+        Switched off to start with
+      </label>
+
       <label style={{ display: 'block', marginBottom: '8px' }}>
         Background Color
         <input

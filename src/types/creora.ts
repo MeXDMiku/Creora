@@ -1,3 +1,6 @@
+import type { ValidationRule } from '../lib/validation';
+export type { ValidationRule };
+
 export type BlockType = 
   | 'button'
   | 'number'
@@ -16,7 +19,10 @@ export type ConditionOperator =
   | 'greaterThan' | 'greater than' | 'lessThan' | 'less than'
   | 'greaterOrEqual' | 'lessOrEqual'
   | 'contains' | 'notContains'
-  | 'isEmpty' | 'isNotEmpty';
+  | 'isEmpty' | 'isNotEmpty'
+  // Asks the block's own rules, not its value. "Only submit if the email field
+  // is actually an email" needs this and cannot be said with the operators above.
+  | 'isValid' | 'isInvalid';
 
 export interface StepCondition {
   fieldId: string;
@@ -26,7 +32,18 @@ export interface StepCondition {
 
 export interface WorkflowStep {
   targetId: string;
-  action: 'increment' | 'decrement' | 'set' | 'toggle' | 'reset' | 'setVisible' | 'setHidden' | 'addRow' | 'updateRow' | 'deleteRow' | 'exportCsv' | 'sendWebhook';
+  action:
+    | 'increment' | 'decrement' | 'set' | 'toggle' | 'reset'
+    | 'setVisible' | 'setHidden'
+    | 'addRow' | 'updateRow' | 'deleteRow'
+    | 'exportCsv' | 'sendWebhook'
+    // --- Form states ---
+    // `validate` shows the errors that were already true but hidden: a field is
+    // only marked touched once, so a page does not shout at someone the moment
+    // it loads. Pressing submit is what makes every field touched at once.
+    | 'validate'
+    | 'setLoading' | 'clearLoading'
+    | 'setDisabled' | 'setEnabled';
   amount?: number;
   value?: any;
   /** A single condition. Kept because every page saved before conditions[] uses it. */
@@ -43,6 +60,14 @@ export interface WorkflowStep {
   matchSource?: 'fixed' | 'block';
   /** Matches the shape used by `mappings` — the engine reads .source and .value. */
   matchValue?: { source: 'fixed' | 'block'; value: string };
+  /**
+   * Refuse to run this step when a field it reads is invalid.
+   *
+   * Defaults to ON for row-writing actions, which is the safe default and not a
+   * ceiling: the checkbox is right there in the action popup, so a builder who
+   * wants a draft row written from a half-filled form can have one.
+   */
+  requireValid?: boolean;
   /** Where a sendWebhook step posts to. */
   webhookUrl?: string;
   // --- Otherwise: what to do when the conditions do NOT pass ---
@@ -221,6 +246,26 @@ export interface BlockRuntimeState {
   lastFetchedAt?: number;
   /** Set when a fetch fails, so a live page never silently shows stale data. */
   fetchError?: string | null;
+  // --- Validation and form states ---
+  /** Ordered. The first rule that fails is the message shown. */
+  rules?: ValidationRule[];
+  /** When to check. 'blur' by default: complaining mid-word is hostile. */
+  validateOn?: 'change' | 'blur' | 'submit';
+  /** Has this field been visited or submitted yet? Errors stay hidden until it has. */
+  touched?: boolean;
+  /**
+   * Kept apart from `error` on purpose. `error` is the formula channel, and one
+   * shared field would mean a formula failure and a bad email overwriting each
+   * other with no way to tell which was which.
+   */
+  validationError?: string | null;
+  /** The grey hint inside an empty field. */
+  placeholder?: string;
+  /** The builder can turn our error line off entirely and show it their own way. */
+  showErrorText?: boolean;
+  errorColor?: string;
+  /** What a button says while it is busy. Blank keeps the normal label. */
+  busyText?: string;
 }
 
 export interface DatabaseField {

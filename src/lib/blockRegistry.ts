@@ -34,6 +34,23 @@ export const BLOCK_NODE_TYPES = [
 
 export type BlockNodeType = (typeof BLOCK_NODE_TYPES)[number];
 
+const NODE_TYPE_SET: ReadonlySet<string> = new Set(BLOCK_NODE_TYPES);
+
+/**
+ * "Is this TipTap node one of our blocks?"
+ *
+ * This existed nine times as a hand-written `name === 'buttonBlock' || ...`
+ * chain across App.tsx and atoms.ts, and three of those chains were the save
+ * paths. Every block added after those chains were written -- Live Data, My
+ * Design, Visitor -- was therefore invisible to saving, to the block-id index
+ * and to every dropdown, which meant their settings were thrown away on reload.
+ *
+ * One list, in the file that already owns the list.
+ */
+export function isBlockNodeType(name: string | undefined | null): name is BlockNodeType {
+  return !!name && NODE_TYPE_SET.has(name);
+}
+
 const ID_SEPARATOR = '__';
 
 function randomSuffix(): string {
@@ -194,6 +211,30 @@ export function defaultRuntimeForNodeType(nodeType: BlockNodeType | null): Block
     default:
       return base;
   }
+}
+
+/**
+ * Strip the parts of a block's state that belong to one person looking at the
+ * page right now, rather than to the page itself.
+ *
+ * `touched` and `validationError` are the reason this exists: the builder types
+ * into their own form while designing it, the field goes red, and without this
+ * that red is saved and shown to every visitor before they have typed anything.
+ * `loading` is worse -- a page saved mid-send would come back with a button
+ * permanently stuck as busy and no way to press it. `fetchError` is the same
+ * shape of mistake: last week's failed API call is not a fact about the page.
+ *
+ * Applied on save AND on load. On save so it is never written; on load so pages
+ * that were already saved with it come back clean.
+ */
+export function withoutVisitorState<T extends Record<string, any>>(state: T): T {
+  if (!state || typeof state !== 'object') return state;
+  const next: Record<string, any> = { ...state };
+  delete next.touched;
+  delete next.validationError;
+  delete next.fetchError;
+  next.loading = false;
+  return next as T;
 }
 
 /** Extra TipTap node attrs a freshly inserted block needs beyond blockId. */

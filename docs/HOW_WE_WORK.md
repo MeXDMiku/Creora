@@ -22,9 +22,17 @@ One pass = one shippable thing. Never start step 3 of a new cycle before
 finishing step 6 of the current one.
 
 **1. VERIFY what already exists**
-Open the live site. Load every page. Attack the security model as a stranger.
-Nothing new gets built on top of something that quietly broke. Ten minutes,
-every cycle, no exceptions.
+
+    npm run check      # 78 checks, runs the real modules
+    npm run typecheck
+
+Then the half a machine cannot do: open the live site, load every page, attack
+the security model as a stranger. Nothing new gets built on top of something that
+quietly broke. Ten minutes, every cycle, no exceptions.
+
+If the live half cannot be done -- browser disconnected, site down -- say so in
+the same breath as the result. A cycle that reports "verified" on the local half
+alone is the "everything works" failure wearing a clean shirt.
 
 **2. FIX what verify found**
 Bugs before features, always. A bug found and not fixed becomes a bug found
@@ -39,6 +47,11 @@ session, it gets split and re-queued, not half-built.
 Not a type-check. Not a build. Run the thing: click it, submit to it, attack it,
 measure it, open it at 390px. Every real problem this project has ever had was
 found this way and none were found by discussion.
+
+Anything that can be checked without a browser goes into `scripts/checks.ts` and
+stays there, so the next cycle re-proves it for free. **A new check must be seen
+to fail once** -- break the thing on purpose, watch it go red, put it back. A
+check that has never failed is decoration.
 
 **5. RECORD it**
 PROJECT_STATE gets what now exists and what is verified against production.
@@ -93,24 +106,25 @@ DIRECTION.md.
 
 Ordered by how much each unblocks, not by size or appeal. Cycle takes the top.
 
-    1  Validation and form states     required, format, error message, loading,
-                                      disable-while-sending. No form is usable
-                                      without it and no server is needed.
-    2  Images                         upload, display, gallery. Blocks more site
+    -- Validation and form states     DONE, cycle 1, 12 Aug. Not verified on the
+                                      live site -- the browser was disconnected.
+                                      Cycle 2 opens there.
+
+    1  Images                         upload, display, gallery. Blocks more site
                                       types than anything else.
-    3  For each row                   until this exists no list can be laid out,
+    2  For each row                   until this exists no list can be laid out,
                                       which blocks blogs, directories, galleries,
                                       search results.
-    4  Collections + per-visitor data rows stop belonging to a block, gain an
+    3  Collections + per-visitor data rows stop belonging to a block, gain an
                                       owner. Opens carts and "my things".
-    5  Text and date primitives       join, format, now, add days. Small, needed
+    4  Text and date primitives       join, format, now, add days. Small, needed
                                       by nearly every site.
-    6  Search, filter, sort, paginate a table of 500 rows is unusable today.
-    7  Real sign-in for visitors      the multi-tenant one. Visitor already
+    5  Search, filter, sort, paginate a table of 500 rows is unusable today.
+    6  Real sign-in for visitors      the multi-tenant one. Visitor already
                                       exists; this makes it mean something.
-    8  Status dashboard (Layer 3)     what is running, what failed, usage.
-    9  Team permissions               independent of 7, cheaper than it looks.
-    10 Payments and entitlements      then perks and commission become settings.
+    7  Status dashboard (Layer 3)     what is running, what failed, usage.
+    8  Team permissions               independent of 6, cheaper than it looks.
+    9  Payments and entitlements      then perks and commission become settings.
 
 Everything else lives in BACKLOG.md and does not jump this queue without a reason
 written down at step 6.

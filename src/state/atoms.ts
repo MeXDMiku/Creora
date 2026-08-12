@@ -1,7 +1,7 @@
 import { atom } from 'jotai';
 import { atomFamily } from 'jotai/utils';
 import type { Workflow, FormulaBinding, PageSummary, BlockRuntimeState } from '../types/creora';
-import { nodeTypeFromBlockId, defaultValueForNodeType, defaultRuntimeForNodeType, shortBlockId } from '../lib/blockRegistry';
+import { nodeTypeFromBlockId, defaultValueForNodeType, defaultRuntimeForNodeType, shortBlockId, isBlockNodeType } from '../lib/blockRegistry';
 
 /**
  * Block type is resolved from the ID via the registry, which is exact for
@@ -172,19 +172,7 @@ export function getCanvasBlocks(editor: any, store: any, excludeBlockId?: string
   editor.state.doc.descendants((node: any) => {
     const bId = node.attrs?.blockId;
     const typeName = node.type.name;
-    if (bId && bId !== excludeBlockId && (
-      typeName === 'buttonBlock' || 
-      typeName === 'numberDisplayBlock' || 
-      typeName === 'formulaDisplayBlock' || 
-      typeName === 'toggleBlock' || 
-      typeName === 'inputBlock' || 
-      typeName === 'textLabelBlock' ||
-      typeName === 'timerBlock' ||
-      typeName === 'historyChartBlock' ||
-      typeName === 'databaseBlock' ||
-      typeName === 'listBlock' ||
-      typeName === 'shapeBlock'
-    )) {
+    if (bId && bId !== excludeBlockId && isBlockNodeType(typeName)) {
       const runtime = store.get(blockRuntimeAtom(bId));
       const dataType = typeName === 'shapeBlock'
         ? shapeRoleDataType(runtime?.role)
