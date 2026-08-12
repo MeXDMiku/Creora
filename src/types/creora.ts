@@ -45,6 +45,15 @@ export interface WorkflowStep {
   matchValue?: { source: 'fixed' | 'block'; value: string };
   /** Where a sendWebhook step posts to. */
   webhookUrl?: string;
+  // --- Otherwise: what to do when the conditions do NOT pass ---
+  // Real if/else, without needing a second output port on the canvas. The
+  // visible branch node is a separate, larger piece of work; this is the
+  // capability, which is what a page actually needs.
+  elseAction?: WorkflowStep['action'];
+  /** Defaults to the step's own targetId when not set. */
+  elseTargetId?: string;
+  elseValue?: any;
+  elseAmount?: number;
 }
 
 export type TriggerEvent = 'onClick' | 'onChange' | 'onTick' | 'onComplete';

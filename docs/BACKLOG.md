@@ -259,6 +259,7 @@ diagnosis and deserves a real list rather than a feeling.
 | actions | increment, decrement, set, toggle, reset, show, hide, add row, update row, delete row |
 | events | onClick, onChange, onTick, onComplete |
 | conditions | **many per step**, combined with all (AND) or any (OR) |
+| if / else | an **Otherwise** branch runs when the conditions fail |
 | operators | is ON/OFF, equals, does not equal, >, >=, <, <=, contains, **does not contain**, is empty, **is not empty** |
 | chaining | formulas resolve one level deep in the same frame |
 | shared state | every visitor sees the same rows and numbers |
@@ -270,9 +271,12 @@ positive operator has a negative, and the run log names which condition failed.
 
 **Cannot yet — the honest gaps, hardest last:**
 
-1. `TODO` **Else.** A step either runs or is skipped; there is no "otherwise do
-   this instead". Today it takes two steps with opposite conditions. Needs the
-   port model change — spec directly below.
+1. `DONE (11 Aug)` **Else.** A step now carries an `Otherwise` branch: when the
+   conditions do not pass, it runs a different action on the same or another
+   block instead of silently doing nothing. This is the *capability*; the
+   *visible* branch node on the canvas still needs the port model change spec'd
+   below. Capability first, drawing second — the page works either way, and one
+   of the two is risky.
 2. `TODO` **Memory of what happened earlier.** "Only if Y happened *before*" can
    only be faked with a Toggle used as a flag. A real `remember this` primitive
    (a value that persists per visitor) would make a whole class of behaviour

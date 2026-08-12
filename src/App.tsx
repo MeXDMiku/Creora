@@ -248,6 +248,11 @@ function ConnectionPopup({ editor }: { editor: any }) {
   const [isConditional, setIsConditional] = useState(false)
   // A list, not one. "Do this, but not if X, and only if Y" needs at least two.
   const [webhookUrl, setWebhookUrl] = useState('')
+  const [elseEnabled, setElseEnabled] = useState(false)
+  const [elseAction, setElseAction] = useState('set')
+  const [elseTargetId, setElseTargetId] = useState('')
+  const [elseValue, setElseValue] = useState('')
+  const [elseAmount, setElseAmount] = useState(1)
   const [conds, setConds] = useState<{ fieldId: string; operator: string; value: string }[]>([
     { fieldId: '', operator: 'equals', value: '' },
   ])
@@ -467,6 +472,16 @@ function ConnectionPopup({ editor }: { editor: any }) {
         stepStep.value = isNaN(parsedNum) || value.trim() === '' ? value : parsedNum
       } else {
         stepStep.action = 'toggle'
+      }
+    }
+
+    if (isConditional && elseEnabled) {
+      stepStep.elseAction = elseAction as any
+      stepStep.elseTargetId = elseTargetId || pending.targetBlockId
+      if (elseAction === 'increment' || elseAction === 'decrement') stepStep.elseAmount = elseAmount
+      if (elseAction === 'set') {
+        const n = Number(elseValue)
+        stepStep.elseValue = isNaN(n) || elseValue.trim() === '' ? elseValue : n
       }
     }
 
@@ -844,6 +859,67 @@ function ConnectionPopup({ editor }: { editor: any }) {
           >
             + Add condition
           </button>
+
+          {/* The other half of "if". Without this a failed condition just means
+              nothing happens, which is rarely what a page actually wants. */}
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontWeight: 600, color: '#334155', fontSize: '12px', marginTop: '4px' }}>
+            <input
+              type="checkbox"
+              checked={elseEnabled}
+              onChange={(e) => setElseEnabled(e.target.checked)}
+              style={{ width: '14px', height: '14px', accentColor: '#6366f1', cursor: 'pointer' }}
+            />
+            Otherwise, do something else
+          </label>
+
+          {elseEnabled && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', padding: '8px', border: '1px solid #fde68a', borderRadius: '6px', background: '#fffbeb' }}>
+              <span style={{ fontSize: '11px', fontWeight: 600, color: '#b45309' }}>ELSE</span>
+
+              <select
+                value={elseTargetId}
+                onChange={(e) => setElseTargetId(e.target.value)}
+                style={{ ...selectStyle, fontSize: '12px', padding: '6px 32px 6px 10px' }}
+              >
+                <option value="">(the same block)</option>
+                {canvasBlocks.map(b => (
+                  <option key={b.id} value={b.id}>{b.label}</option>
+                ))}
+              </select>
+
+              <select
+                value={elseAction}
+                onChange={(e) => setElseAction(e.target.value)}
+                style={{ ...selectStyle, fontSize: '12px', padding: '6px 32px 6px 10px' }}
+              >
+                <option value="set">Set to value</option>
+                <option value="increment">Increment</option>
+                <option value="decrement">Decrement</option>
+                <option value="toggle">Toggle</option>
+                <option value="reset">Reset</option>
+                <option value="setVisible">Show it</option>
+                <option value="setHidden">Hide it</option>
+              </select>
+
+              {elseAction === 'set' && (
+                <input
+                  type="text"
+                  value={elseValue}
+                  onChange={(e) => setElseValue(e.target.value)}
+                  placeholder="e.g. Please fill this in"
+                  style={{ ...inputStyle, fontSize: '12px' }}
+                />
+              )}
+              {(elseAction === 'increment' || elseAction === 'decrement') && (
+                <input
+                  type="number"
+                  value={elseAmount}
+                  onChange={(e) => setElseAmount(Number(e.target.value))}
+                  style={{ ...inputStyle, fontSize: '12px' }}
+                />
+              )}
+            </div>
+          )}
         </div>
       )}
 

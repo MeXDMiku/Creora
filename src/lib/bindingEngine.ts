@@ -58,6 +58,68 @@ export function evaluateCondition(actual: any, operator: string, expected: any):
   }
 }
 
+/**
+ * Runs the "otherwise" branch of a step.
+ *
+ * Deliberately handles only the simple value actions, and the Otherwise dropdown
+ * offers exactly these and nothing more -- so the interface cannot create a
+ * branch this cannot run. That matters more than it looks: silent divergence
+ * between two code paths is how the editor and the published renderer drifted
+ * apart, and this keeps the two in lockstep by construction.
+ *
+ * Row actions are excluded on purpose. They need mappings and match columns,
+ * which belong to the main switch, and an "otherwise, add a row" is not a thing
+ * anyone has asked for.
+ */
+export const ELSE_ACTIONS = ['increment', 'decrement', 'set', 'toggle', 'reset', 'setVisible', 'setHidden'] as const;
+
+function runElseAction(
+  action: string,
+  targetId: string,
+  store: ReturnType<typeof getDefaultStore>,
+  value: any,
+  amount: number | undefined
+): { before: any; after: any } {
+  const atom = blockRuntimeAtom(targetId);
+  const state = store.get(atom);
+  const before = state?.value;
+
+  switch (action) {
+    case 'increment':
+    case 'decrement': {
+      const step = amount ?? 1;
+      const num = typeof before === 'number' ? before : 0;
+      let next = action === 'increment' ? num + step : num - step;
+      if (state?.min !== undefined) next = Math.max(state.min, next);
+      if (state?.max !== undefined) next = Math.min(state.max, next);
+      store.set(atom, { ...state, value: next });
+      break;
+    }
+    case 'set': {
+      const num = Number(value);
+      const parsed = value === '' || value === null || value === undefined || isNaN(num) ? value : num;
+      store.set(atom, { ...state, value: parsed });
+      break;
+    }
+    case 'toggle':
+      store.set(atom, { ...state, value: !before });
+      break;
+    case 'reset':
+      store.set(atom, { ...state, value: getBlockDefaultValue(targetId) });
+      break;
+    case 'setVisible':
+      store.set(atom, { ...state, visible: true });
+      break;
+    case 'setHidden':
+      store.set(atom, { ...state, visible: false });
+      break;
+    default:
+      break;
+  }
+
+  return { before, after: store.get(atom)?.value };
+}
+
 export function executeWorkflow(
   sourceId: string,
   event: TriggerEvent,
@@ -110,13 +172,32 @@ export function executeWorkflow(
               return `${c.fieldId} ${c.operator} ${JSON.stringify(c.value)} -> ${results[i] ? 'pass' : 'FAIL'} (actual ${JSON.stringify(actual)})`;
             })
             .join('; ');
-          runSteps.push({
-            targetId: step.targetId,
-            action: step.action,
-            status: 'skipped',
-            reason: `${matchMode === 'any' ? 'none of' : 'not all'} the conditions met — ${detail}`,
-          });
-          continue; // Skip this step, but continue to the next step
+          if (step.elseAction) {
+            const elseTarget = step.elseTargetId || step.targetId;
+            const { before, after } = runElseAction(
+              step.elseAction,
+              elseTarget,
+              store,
+              step.elseValue,
+              step.elseAmount
+            );
+            runSteps.push({
+              targetId: elseTarget,
+              action: `otherwise: ${step.elseAction}`,
+              status: 'ran',
+              before,
+              after,
+              reason: `conditions did not pass, so the otherwise branch ran — ${detail}`,
+            });
+          } else {
+            runSteps.push({
+              targetId: step.targetId,
+              action: step.action,
+              status: 'skipped',
+              reason: `${matchMode === 'any' ? 'none of' : 'not all'} the conditions met — ${detail}`,
+            });
+          }
+          continue; // Either way this step is done; move to the next
         }
       }
 
