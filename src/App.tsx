@@ -215,6 +215,55 @@ function RunsPanel({ onClose }: { onClose: () => void }) {
   )
 }
 
+/**
+ * The escape hatch. Every block gets one, because the alternative is guessing in
+ * advance every way somebody might want a thing to look -- which is impossible,
+ * and is how a tool ends up with fifty checkboxes and still says no.
+ */
+function CustomCssControl({ blockId }: { blockId: string }) {
+  const [runtimeState, setRuntimeState] = useAtom(blockRuntimeAtom(blockId))
+  const triggerSave = useSetAtom(triggerSaveAtom)
+  const [open, setOpen] = useState(!!runtimeState.customCss)
+
+  return (
+    <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #e5e7eb' }}>
+      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 600, color: '#334155' }}>
+        <input
+          type="checkbox"
+          checked={open}
+          onChange={(e) => setOpen(e.target.checked)}
+          style={{ width: '14px', height: '14px', accentColor: '#6366f1', cursor: 'pointer' }}
+        />
+        Write my own CSS
+      </label>
+
+      {open && (
+        <>
+          <textarea
+            value={runtimeState.customCss || ''}
+            onChange={(e) => { setRuntimeState(prev => ({ ...prev, customCss: e.target.value })); triggerSave(prev => prev + 1) }}
+            placeholder={'color: #e11d48;\nletter-spacing: 1px;\nborder: 2px solid gold;'}
+            spellCheck={false}
+            rows={5}
+            style={{
+              display: 'block', marginTop: '6px', width: '100%', padding: '8px',
+              borderRadius: '4px', border: '1px solid #ccc', boxSizing: 'border-box',
+              background: '#0f172a', color: '#e2e8f0', outline: 'none',
+              fontSize: '12px', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+              lineHeight: 1.5, resize: 'vertical',
+            }}
+          />
+          <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '6px', lineHeight: 1.4 }}>
+            Anything you write here wins over Creora&rsquo;s own styling. Declarations
+            only &mdash; <code>color: red;</code> &mdash; no selectors or media queries,
+            so a block can never break the page around it.
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 function Inspector({ editor }: { editor: any }) {
   const selectedBlockId = useAtomValue(selectedBlockIdAtom)
 
@@ -225,6 +274,7 @@ function Inspector({ editor }: { editor: any }) {
         <>
           <InspectorControls blockId={selectedBlockId} editor={editor} />
           <AnimationControl blockId={selectedBlockId} />
+          <CustomCssControl blockId={selectedBlockId} />
         </>
       ) : (
         <p style={{ color: '#9ca3af' }}>No block selected</p>

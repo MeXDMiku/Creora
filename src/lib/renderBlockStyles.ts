@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react';
 import type { BlockRuntimeState } from '../types/creora';
+import { parseCustomCss } from './customCss';
 
 export function blockToCSS(
   type: string,
@@ -172,6 +173,11 @@ export function blockToCSS(
       userSelect: 'none',
     });
   }
+
+  // The builder's own CSS goes on last, so it beats anything computed above.
+  // A default is a starting point, never a ceiling.
+  Object.assign(inner, parseCustomCss(runtimeState?.customCss));
+
 
   return { outer, inner };
 }

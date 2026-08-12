@@ -202,6 +202,8 @@ export interface BlockRuntimeState {
   textAlign?: string;
   /** Animation preset played when this block's value changes. See src/lib/animations.ts */
   animateOnChange?: string;
+  /** Raw CSS declarations the builder wrote, merged last so they win. */
+  customCss?: string;
   // --- Data Source: live data pulled from an API ---
   /** The address to call. */
   url?: string;

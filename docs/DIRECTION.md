@@ -80,6 +80,37 @@ The user supplies logic and content. Creora supplies the parts that normally
 need an engineer: accounts, data, AI, payments. That is the position — not a
 design tool.
 
+### Defaults are a starting point, never a ceiling *(added 11 Aug 2026)*
+
+A correction from the owner, and it needs recording because it sits right next to
+the rule below and could look like a contradiction:
+
+> *"I don't want any default option. A blank screen with all the functions and
+> tools there. If the user wants to hide views, show views, show a certain
+> amount, or write their own CSS for the view count -- give them the tools."*
+
+Both are true, and the resolution is one sentence: **Creora decides nothing on
+the builder's behalf that cannot be undone.**
+
+- "No drawing tools" means the *defaults* are opinionated, so a person who is not
+  a designer gets a modern-looking page without choosing anything. That stays.
+- It does **not** mean the ceiling is the default. Anyone who knows exactly what
+  they want must be able to say it.
+
+So every block now takes **custom CSS**, merged last so it beats everything
+Creora computed. Squarespace, Webflow and Notion all work this way: strong
+defaults plus a code escape hatch. It is the difference between a tool that is
+*opinionated* and a tool that is *restrictive*.
+
+The fence on the hatch: declarations only, no selectors and no media queries.
+A block can restyle itself as far as it likes and can never reach out and break
+the page around it.
+
+The same principle applies past styling, and is the standing test for any new
+feature: **is this a starting point, or a ceiling?** A default anyone can
+override is the first. A behaviour nobody can turn off is the second, and needs
+an argument.
+
 ### No drawing tools. Ever.
 
 Modern-looking output comes from **constraint, not freedom**. Squarespace,
