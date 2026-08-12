@@ -2,6 +2,7 @@ import { getDefaultStore } from 'jotai';
 import jsep from 'jsep';
 import type { TriggerEvent } from '../types/creora';
 import { blockRuntimeAtom, workflowsAtom, formulasAtom, allBlockIdsAtom, getBlockDefaultValue , recordRun, type RunStep } from '../state/atoms';
+import { sendWebhook } from './webhook';
 import { supabase } from './supabase';
 
 
@@ -492,6 +493,34 @@ export function executeWorkflow(
             ...currentTargetState,
             value: !currentValue,
           });
+          break;
+        }
+        case 'sendWebhook': {
+          // Whatever the target block holds, flattened so the receiving tool can
+          // map it onto columns without anyone writing a transform.
+          const hookUrl = (step.webhookUrl || '').trim();
+          if (hookUrl) {
+            let payloadData: Record<string, any>;
+            const hookRows = (currentTargetState?.rows || []) as Record<string, any>[];
+            if (hookRows.length) {
+              // A Database sends its NEWEST row -- that is the submission that
+              // just happened, which is what anyone wiring this actually means.
+              const newest = { ...hookRows[hookRows.length - 1] };
+              delete newest.id;
+              payloadData = newest;
+            } else {
+              payloadData = { value: currentTargetState?.value };
+            }
+            let activePage: string | null = null;
+            try { activePage = localStorage.getItem('creora_active_page_id'); } catch { activePage = null; }
+            sendWebhook(hookUrl, {
+              source: 'creora',
+              pageId: activePage,
+              block: currentTargetState?.blockName || step.targetId,
+              sentAt: new Date().toISOString(),
+              data: payloadData,
+            }).catch((e) => console.warn('[creora] webhook failed:', e && e.message ? e.message : e));
+          }
           break;
         }
         case 'exportCsv': {

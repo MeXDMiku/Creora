@@ -247,6 +247,7 @@ function ConnectionPopup({ editor }: { editor: any }) {
   // Conditional state
   const [isConditional, setIsConditional] = useState(false)
   // A list, not one. "Do this, but not if X, and only if Y" needs at least two.
+  const [webhookUrl, setWebhookUrl] = useState('')
   const [conds, setConds] = useState<{ fieldId: string; operator: string; value: string }[]>([
     { fieldId: '', operator: 'equals', value: '' },
   ])
@@ -443,7 +444,9 @@ function ConnectionPopup({ editor }: { editor: any }) {
       if (action === 'addRow' || action === 'updateRow') {
         stepStep.mappings = mappings
       }
-      if (action === 'exportCsv') {
+      if (action === 'sendWebhook') {
+        stepStep.webhookUrl = webhookUrl
+      } else if (action === 'exportCsv') {
         // no mappings, no match column — it just takes the table as it stands
       } else if (action === 'updateRow' || action === 'deleteRow') {
         stepStep.matchColumn = matchColumn
@@ -453,7 +456,9 @@ function ConnectionPopup({ editor }: { editor: any }) {
         }
       }
     } else {
-      if (action === 'reset') {
+      if (action === 'sendWebhook') {
+        stepStep.webhookUrl = webhookUrl
+      } else if (action === 'reset') {
         stepStep.action = 'reset'
       } else if (action === 'increment' || action === 'decrement') {
         stepStep.amount = amount
@@ -550,6 +555,7 @@ function ConnectionPopup({ editor }: { editor: any }) {
               <option value="updateRow">Update Row</option>
               <option value="deleteRow">Delete Row</option>
               <option value="exportCsv">Download as CSV (opens in Excel)</option>
+              <option value="sendWebhook">Send to another app</option>
             </>
           ) : (
             <>
@@ -558,10 +564,29 @@ function ConnectionPopup({ editor }: { editor: any }) {
               <option value="set">Set to value</option>
               <option value="toggle">Toggle</option>
               <option value="reset">Reset</option>
+              <option value="sendWebhook">Send to another app</option>
             </>
           )}
         </select>
       </label>
+
+      {action === 'sendWebhook' && (
+        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontWeight: 500, color: '#475569', fontSize: '13px' }}>
+          Where to send it
+          <input
+            type="text"
+            value={webhookUrl}
+            onChange={(e) => setWebhookUrl(e.target.value)}
+            placeholder="https://hooks.zapier.com/hooks/catch/..."
+            style={inputStyle}
+          />
+          <span style={{ fontSize: '11px', color: '#6b7280', lineHeight: 1.4 }}>
+            Paste a webhook address from Zapier, Make or n8n and point that at
+            Google Sheets, Excel, email or a CRM. Creora sends the submitted
+            fields; the tool on the other end decides where they land.
+          </span>
+        </label>
+      )}
 
       {!isToggleBlock && !isDatabaseBlock && (action === 'increment' || action === 'decrement') && (
         <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontWeight: 500, color: '#475569', fontSize: '13px' }}>

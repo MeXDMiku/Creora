@@ -26,7 +26,7 @@ export interface StepCondition {
 
 export interface WorkflowStep {
   targetId: string;
-  action: 'increment' | 'decrement' | 'set' | 'toggle' | 'reset' | 'setVisible' | 'setHidden' | 'addRow' | 'updateRow' | 'deleteRow' | 'exportCsv';
+  action: 'increment' | 'decrement' | 'set' | 'toggle' | 'reset' | 'setVisible' | 'setHidden' | 'addRow' | 'updateRow' | 'deleteRow' | 'exportCsv' | 'sendWebhook';
   amount?: number;
   value?: any;
   /** A single condition. Kept because every page saved before conditions[] uses it. */
@@ -43,6 +43,8 @@ export interface WorkflowStep {
   matchSource?: 'fixed' | 'block';
   /** Matches the shape used by `mappings` — the engine reads .source and .value. */
   matchValue?: { source: 'fixed' | 'block'; value: string };
+  /** Where a sendWebhook step posts to. */
+  webhookUrl?: string;
 }
 
 export type TriggerEvent = 'onClick' | 'onChange' | 'onTick' | 'onComplete';
