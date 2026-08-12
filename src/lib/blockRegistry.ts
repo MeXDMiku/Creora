@@ -29,6 +29,7 @@ export const BLOCK_NODE_TYPES = [
   'shapeBlock',
   'dataSourceBlock',
   'customHtmlBlock',
+  'visitorBlock',
 ] as const;
 
 export type BlockNodeType = (typeof BLOCK_NODE_TYPES)[number];
@@ -108,6 +109,17 @@ export function defaultRuntimeForNodeType(nodeType: BlockNodeType | null): Block
   };
 
   switch (nodeType) {
+    case 'visitorBlock':
+      return {
+        ...base,
+        blockName: 'Visitor',
+        visitorField: 'signedIn',
+        value: false,
+        backgroundColor: '#334155',
+        textColor: '#ffffff',
+        borderRadius: 8,
+        fontSize: 16,
+      };
     case 'customHtmlBlock':
       return {
         ...base,

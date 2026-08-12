@@ -18,7 +18,20 @@ export function blockToCSS(
 
   const inner: CSSProperties = {};
 
-  if (type === 'dataSourceBlock') {
+  if (type === 'visitorBlock') {
+    Object.assign(inner, {
+      padding: '8px 14px',
+      background: runtimeState?.backgroundColor || '#334155',
+      color: runtimeState?.textColor || '#ffffff',
+      borderRadius: runtimeState?.borderRadius !== undefined ? runtimeState.borderRadius + 'px' : '8px',
+      fontSize: runtimeState?.fontSize !== undefined ? runtimeState.fontSize + 'px' : '16px',
+      fontWeight: 600,
+      display: 'inline-block',
+      textAlign: 'center',
+      minWidth: '100px',
+      boxSizing: 'border-box',
+    });
+  } else if (type === 'dataSourceBlock') {
     Object.assign(inner, {
       padding: '10px 14px',
       background: runtimeState?.backgroundColor || '#0f172a',

@@ -9,6 +9,7 @@ import { valueAtPath } from '../lib/jsonPaths';
 import { fetchDataSource } from '../lib/dataSource';
 import { computeDatabaseOutput } from '../lib/databaseOutput';
 import { CustomHtmlView } from '../blocks/CustomHtmlBlock';
+import { refreshVisitor } from '../lib/visitor';
 import { executeWorkflow, recalculateAllFormulas } from '../lib/bindingEngine';
 import {
   blockPositionAtom,
@@ -44,6 +45,7 @@ const supportedBlockTypes = [
   'shapeBlock',
   'dataSourceBlock',
   'customHtmlBlock',
+  'visitorBlock',
 ];
 
 const extractDocItems = (node: any): { docItems: DocItem[]; blocks: ExtractedBlock[] } => {
@@ -280,6 +282,30 @@ function PublishedTimerBlock({ block }: { block: ExtractedBlock }) {
           {isRunning ? '⏸️ Stop' : '▶️ Start'}
         </button>
       </div>
+    </div>
+  );
+}
+
+function PublishedVisitorBlock({ block }: { block: ExtractedBlock }) {
+  const position = useAtomValue(blockPositionAtom(block.id));
+  const runtimeState = useAtomValue(blockRuntimeAtom(block.id));
+  const store = useStore();
+  const { outer: outerStyle, inner: innerStyle } = blockToCSS(block.type, position, runtimeState);
+  const field = runtimeState?.visitorField;
+
+  // createSession: true. A page that ASKS who you are may make you an anonymous
+  // identity; a page that never asks must not, because every session is a row in
+  // auth.users and the free tier counts 50,000 monthly active users in total.
+  useEffect(() => {
+    refreshVisitor(block.id, store, true);
+  }, [block.id, store, field]);
+
+  const v = runtimeState?.value;
+  const shown = typeof v === 'boolean' ? (v ? 'yes' : 'no') : String(v ?? '');
+
+  return (
+    <div style={outerStyle}>
+      <div style={innerStyle}>{shown || '\u2014'}</div>
     </div>
   );
 }
@@ -670,6 +696,10 @@ function RenderedBlock({ block }: { block: ExtractedBlock }) {
         </div>
       </div>
     );
+  }
+
+  if (block.type === 'visitorBlock') {
+    return <PublishedVisitorBlock block={block} />;
   }
 
   if (block.type === 'customHtmlBlock') {

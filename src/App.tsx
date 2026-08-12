@@ -17,6 +17,7 @@ import { ListBlock } from './blocks/ListBlock'
 import { ShapeBlock } from './blocks/ShapeBlock'
 import { DataSourceBlock } from './blocks/DataSourceBlock'
 import { CustomHtmlBlock } from './blocks/CustomHtmlBlock'
+import { VisitorBlock } from './blocks/VisitorBlock'
 import { WireOverlay } from './components/WireOverlay'
 import { supabase } from './lib/supabase'
 import { ensureSession } from './lib/session'
@@ -1360,6 +1361,7 @@ function App() {
       ShapeBlock,
       DataSourceBlock,
       CustomHtmlBlock,
+      VisitorBlock,
     ],
     content: '',
     onUpdate: ({ editor }) => {
@@ -2047,6 +2049,18 @@ function App() {
         </svg>
       ),
       action: () => insertBlock('listBlock')
+    },
+    {
+      id: 'visitor',
+      title: 'Visitor',
+      description: 'Who is looking at this page — gate content on it',
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+          <circle cx="12" cy="7" r="4" />
+        </svg>
+      ),
+      action: () => insertBlock('visitorBlock')
     },
     {
       id: 'customHtml',

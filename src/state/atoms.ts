@@ -25,6 +25,7 @@ export function getBlockTypeDisplayName(nodeType: string): string {
   if (type.includes('history') || type.includes('chart')) return 'History Chart';
   if (type.includes('database')) return 'Database';
   if (type.includes('list')) return 'List';
+  if (type.includes('visitor')) return 'Visitor';
   if (type.includes('customhtml')) return 'My Design';
   if (type.includes('datasource')) return 'Live Data';
   if (type.includes('shape')) return 'Shape';
@@ -150,6 +151,7 @@ export function getBlockDataType(nodeType: string): BlockDataType {
     case 'shapeBlock': return 'unknown';
     case 'dataSourceBlock': return 'unknown'; // resolved from the picked field at wire time
     case 'customHtmlBlock': return 'unknown';
+    case 'visitorBlock': return 'unknown'; // boolean or text, depending on the field
     default: return 'unknown';
   }
 }
