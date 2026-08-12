@@ -149,24 +149,108 @@ already speak webhook.
 
 ---
 
+## Part 3b — Live data coming IN, and why it is its own category
+
+Prompted by a question this audit answered badly: *"what if someone wants to
+build a live weather site? The data comes from him, but how he connects it and
+how we show it is on us."*
+
+Correct. Part 3 listed "fetch from an API" as one line. It is not one line, it is
+a category with a real design problem inside it, and it is the whole **pull**
+half of connecting — Part 3 §6 only really thought about **push**.
+
+### The correction that changes the build order
+
+**A public API needs no server at all.** A browser can call Open-Meteo or any
+API that sends CORS headers, directly, today. Only these need the Edge Function
+layer:
+
+| | needs a server |
+| :--- | :--- |
+| public API, CORS allowed (most weather, currency, sports feeds) | **no** |
+| API that needs a secret key | yes — the key cannot sit in a published page |
+| API that refuses browser calls (no CORS) | yes — as a proxy |
+| caching so 1,000 visitors do not make 1,000 calls | yes, eventually |
+
+So a live weather site is buildable **before** the server layer exists. That is a
+genuine correction to the ranking below: this moves up.
+
+### The actual design problem: how a non-coder picks a field
+
+A weather response looks like this:
+
+```json
+{ "current": { "temperature_2m": 21.3, "weather_code": 3 },
+  "daily":   { "time": ["2026-08-11","2026-08-12"], "temperature_2m_max": [24.1, 26.8] } }
+```
+
+Nobody who cannot code should ever type `current.temperature_2m`. So:
+
+**Fetch once, show the real response as a clickable tree, and let them click the
+value they want.** Clicking creates a *named output* on the block — `temperature`,
+type number — and that name is what wires and formulas reference. No paths typed,
+no JSON understood, and the name is theirs to change.
+
+### Why this design pays for three other things at once
+
+This is worth building partly because it is not one feature:
+
+1. **Named, typed outputs** — item 1 on the Twenty list (BACKLOG §7), still
+   unbuilt. A Data Source block publishing `temperature: number` *is* that
+   feature, arriving where it is most obviously needed.
+2. **`on page load` and `every N seconds`** — the refresh setting on this block
+   is exactly those two missing primitives, and once they exist as triggers they
+   are available to everything else.
+3. **`for each row`** — a forecast is a list of days. Showing it needs the repeat
+   primitive, which collections need too.
+
+Three known gaps, one build. That is the difference between a primitive and a
+feature, and it is the argument for doing this properly rather than bolting on a
+"weather block".
+
+### What the block needs
+
+| | |
+| :--- | :--- |
+| address | a URL, method (GET default), optional headers |
+| refresh | on page load · every N minutes · when a trigger fires |
+| outputs | named, typed, created by clicking values in the real response |
+| states | loading, error, last-updated — a live page that silently shows stale data is worse than one that says it failed |
+| honesty | when an API refuses browser calls, say *that*, not "failed". It is the difference between a five-minute fix and an hour lost |
+
+### What is genuinely hard here, kept in view
+
+- **Cost and rate limits.** Every visitor fetching means a popular page hammers
+  the source. Server-side caching is the real answer and needs the server layer.
+- **Lists.** Most live data is an array. Without `for each row` you can show
+  today's temperature but not a 7-day forecast.
+- **Shape changes.** If the API changes its response, bindings break silently.
+  The last-updated and error states are what make that visible.
+
+---
+
 ## Part 4 — What this says to build, in order
 
 Ranked by **how many blocked things each unblocks**, not by size.
 
-1. **A webhook action.** One action, one Edge Function. Unblocks Excel, Sheets,
-   email, CRMs and every automation tool at once, because they all accept
-   webhooks. It is also the cheapest possible proof of the server layer that
-   AI keys, OAuth secrets and rate limits all need. **Highest leverage on the
-   whole list.**
-2. **Validation and form states.** Required, format, error message, loading,
+1. **A Data Source block — live data in.** Revised up from Part 3b: a public,
+   CORS-friendly API needs **no server**, so this is buildable now, and it
+   delivers named typed outputs, `on page load` and `every N seconds` in the same
+   piece of work. Three known gaps closed by one build, and it is what makes a
+   weather site, a currency page or any live feed possible.
+2. **A webhook action — data out.** One action, one Edge Function. Unblocks
+   Excel, Sheets, email, CRMs and every automation tool at once, because they all
+   accept webhooks, and it is the cheapest possible proof of the server layer
+   that AI keys, OAuth secrets and rate limits also need.
+3. **Validation and form states.** Required, format, error message, loading,
    success, disable-while-sending. Nothing that calls itself a form builder can
    skip these, and none of it needs a server.
-3. **Images.** Upload, display, gallery — with the compress-in-browser rule from
+4. **Images.** Upload, display, gallery — with the compress-in-browser rule from
    BACKLOG §3. Blocks more site types than anything else in Part 2.
-4. **Collections + private rows.** Rows stop belonging to a block, gain an owner,
+5. **Collections + private rows.** Rows stop belonging to a block, gain an owner,
    and gain search / filter / sort. Opens carts, profiles, "my things".
-5. **Text and date primitives.** Small, cheap, and needed by nearly every site.
-6. **End-user accounts.** The largest, and correctly last — everything above
+6. **Text and date primitives.** Small, cheap, and needed by nearly every site.
+7. **End-user accounts.** The largest, and correctly last — everything above
    makes it more useful, and it makes nothing above possible.
 
 **Then** the organisation problem: categories, search, sensible defaults,
