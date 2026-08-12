@@ -155,6 +155,84 @@ TipTap-as-canvas question.
 Nothing above is a reason to start it today. It is the reason not to build a
 design system on top of x/y coordinates.
 
+## "Are we just an extension?" — the positioning question *(11 Aug 2026)*
+
+Asked directly: *can Creora let a user build the whole UI, animation and all? If
+not, are we just an extension that takes a Figma or AI-made site and makes it
+work — which is worrying, because people are making six figures from AI-made
+sites alone.*
+
+The premise is true. Lovable, Bolt, v0 and Base44 generate real working sites
+with backends today, and at least one solo non-technical founder has scaled a
+Lovable-built app to real revenue. That is not a threat to wave away.
+
+But **both halves of the question set up a false choice.**
+
+### Creora should not try to be Figma, and does not need to be
+
+A blank canvas requires skill. Squarespace, Notion and Linear all produce
+modern-looking output and none of them hands anyone a drawing tool. What they
+give is a small set of choices that cannot be combined badly.
+
+So "can a user build the whole UI here?" — **yes**, the Squarespace way:
+templates, themes, tokens, sections, animation presets. Not the Figma way. That
+is the existing no-drawing-tools decision, and it is what makes Creora
+**standalone rather than dependent**.
+
+This reorders something: **the theme and template layer matters more than the
+importer.** If Creora needs a Figma import to produce a decent-looking page, then
+it really is an extension. If it has its own good defaults, import becomes a
+bonus for the minority who arrive with a design. Import is the optional path, not
+the core one.
+
+### Generation and editing are different jobs
+
+An AI builder hands back a **finished, frozen artifact**. For someone who cannot
+code, that is excellent at creation and bad at change:
+
+- change one thing → describe it in English again and hope nothing else broke
+- something breaks → no way to see why
+- wire a real backend safely → CVE-2025-48757: ~1 in 10 analysed Lovable projects
+  had Supabase tables any stranger could read
+
+**Generation is a creation technology. Creora is a change technology.** Nobody
+finishes a website. Prices change, a form needs one more field, a page gets
+added. That is the whole life of a site after day one, and it is where "describe
+it and hope" is at its worst.
+
+### So the position is not extension, and not Figma
+
+| layer | who supplies it | status |
+| :--- | :--- | :--- |
+| looks | Creora, via themes / templates / sections | **the gap that keeps this standalone** |
+| looks, if you already have a design | imported shapes, roles assigned | mechanism exists (ShapeBlock roles) |
+| logic, data, backend | Creora | the part nobody gives a non-coder |
+
+And the strongest version, already recorded: **AI writes the first draft as a
+node graph**, not as code. Then generation and editability stop being opposites.
+Generation gets 80% in ten seconds; the nodes get the last 20% without a
+developer.
+
+### The real risk, stated plainly
+
+Not that AI generates well — it does, and that is fine. The risk is **AI
+*editing*.** If Lovable lets someone say "make the button blue and add a phone
+field" and it simply works, then a node graph has to be genuinely *better* than
+that, not merely different.
+
+The honest answer to why it can be: nodes win when the change is one you need to
+be **sure** about. Money, permissions, whether something actually saved, who can
+see what. English-to-code is pleasant for cosmetic changes and frightening for
+anything you must verify. That is why Unreal's Blueprints survive next to AI
+coding assistants, and why spreadsheet formulas survive next to scripts — a thing
+you can see and trust beats a thing you must take on faith, for a lot of people.
+
+**And the one advantage nothing else has:** a published Creora page runs on
+shared server state. Every visitor sees the same numbers change. No AI builder
+output does that by default, because each generated site gives every visitor a
+private session. That is not a design feature, and it cannot be copied by
+generating prettier code.
+
 ## Order
 
 Done: identity and ownership, the Publish button, one real public page end to
