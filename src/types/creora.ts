@@ -10,16 +10,34 @@ export type BlockType =
   | 'list'
   | 'shape';
 
+export type ConditionOperator =
+  | 'is ON' | 'is OFF' | 'is_ON' | 'is_OFF'
+  | 'equals' | 'notEquals'
+  | 'greaterThan' | 'greater than' | 'lessThan' | 'less than'
+  | 'greaterOrEqual' | 'lessOrEqual'
+  | 'contains' | 'notContains'
+  | 'isEmpty' | 'isNotEmpty';
+
+export interface StepCondition {
+  fieldId: string;
+  operator: ConditionOperator;
+  value?: any;
+}
+
 export interface WorkflowStep {
   targetId: string;
   action: 'increment' | 'decrement' | 'set' | 'toggle' | 'reset' | 'setVisible' | 'setHidden' | 'addRow' | 'updateRow' | 'deleteRow';
   amount?: number;
   value?: any;
-  condition?: {
-    fieldId: string;
-    operator: 'is ON' | 'is OFF' | 'equals' | 'notEquals' | 'greaterThan' | 'lessThan' | 'contains' | 'isEmpty' | 'is_ON' | 'is_OFF' | 'greater than' | 'less than';
-    value?: any;
-  } | null;
+  /** A single condition. Kept because every page saved before conditions[] uses it. */
+  condition?: StepCondition | null;
+  /**
+   * Many conditions, combined by `match`. This is what makes "do it, but not if
+   * X, and only if Y" expressible — one condition never could.
+   */
+  conditions?: StepCondition[];
+  /** 'all' = every condition must pass (AND). 'any' = one is enough (OR). Default 'all'. */
+  match?: 'all' | 'any';
   mappings?: Record<string, { source: 'fixed' | 'block'; value: string }>;
   matchColumn?: string;
   matchSource?: 'fixed' | 'block';

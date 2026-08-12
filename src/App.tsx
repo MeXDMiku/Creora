@@ -245,9 +245,13 @@ function ConnectionPopup({ editor }: { editor: any }) {
 
   // Conditional state
   const [isConditional, setIsConditional] = useState(false)
-  const [conditionFieldId, setConditionFieldId] = useState('')
-  const [conditionOperator, setConditionOperator] = useState('equals')
-  const [conditionValue, setConditionValue] = useState('')
+  // A list, not one. "Do this, but not if X, and only if Y" needs at least two.
+  const [conds, setConds] = useState<{ fieldId: string; operator: string; value: string }[]>([
+    { fieldId: '', operator: 'equals', value: '' },
+  ])
+  const [matchMode, setMatchMode] = useState<'all' | 'any'>('all')
+  const setCond = (i: number, patch: Partial<{ fieldId: string; operator: string; value: string }>) =>
+    setConds(prev => prev.map((c, n) => (n === i ? { ...c, ...patch } : c)))
 
   // Determine target block node type
   let targetNodeType: string | null = null
@@ -333,27 +337,12 @@ function ConnectionPopup({ editor }: { editor: any }) {
 
   // Initialize and update default condition block selection
   useEffect(() => {
-    if (canvasBlocks.length > 0 && !conditionFieldId) {
-      setConditionFieldId(canvasBlocks[0].id)
+    if (canvasBlocks.length > 0 && !conds[0]?.fieldId) {
+      setConds(prev => prev.map((c, n) => (n === 0 ? { ...c, fieldId: canvasBlocks[0].id } : c)))
     }
-  }, [canvasBlocks, conditionFieldId])
-
-  // Automatically update operator default based on selected block type
-  useEffect(() => {
-    const picked = canvasBlocks.find(b => b.id === conditionFieldId)
-    if (picked) {
-      if (picked.dataType === 'boolean') {
-        setConditionOperator('is ON')
-      } else {
-        setConditionOperator('equals')
-      }
-    }
-  }, [conditionFieldId, canvasBlocks])
+  }, [canvasBlocks, conds])
 
   if (!pending) return null
-
-  const pickedBlock = canvasBlocks.find(b => b.id === conditionFieldId)
-  const pickedDataType = pickedBlock?.dataType || 'unknown'
 
   // Standard select input styles that look consistent in light/dark mode and include a dropdown arrow
   const selectStyle: React.CSSProperties = {
@@ -473,18 +462,25 @@ function ConnectionPopup({ editor }: { editor: any }) {
       }
     }
 
-    if (isConditional && conditionFieldId) {
-      let condVal: any = conditionValue
-      if (conditionOperator === 'equals' || conditionOperator === 'greaterThan' || conditionOperator === 'lessThan') {
-        const parsed = Number(conditionValue)
-        if (!isNaN(parsed) && conditionValue.trim() !== '') {
-          condVal = parsed
-        }
-      }
-      stepStep.condition = {
-        fieldId: conditionFieldId,
-        operator: conditionOperator,
-        value: condVal
+    if (isConditional) {
+      const built = conds
+        .filter(c => c.fieldId)
+        .map(c => {
+          let condVal: any = c.value
+          const numeric = ['equals', 'notEquals', 'greaterThan', 'lessThan', 'greaterOrEqual', 'lessOrEqual']
+          if (numeric.includes(c.operator)) {
+            const parsed = Number(c.value)
+            if (!isNaN(parsed) && c.value.trim() !== '') condVal = parsed
+          }
+          return { fieldId: c.fieldId, operator: c.operator as any, value: condVal }
+        })
+      if (built.length === 1) {
+        // Keep the old shape for a single condition, so pages stay readable by
+        // anything that only knows about `condition`.
+        stepStep.condition = built[0]
+      } else if (built.length > 1) {
+        stepStep.conditions = built
+        stepStep.match = matchMode
       }
     }
 
@@ -724,61 +720,101 @@ function ConnectionPopup({ editor }: { editor: any }) {
       </label>
 
       {isConditional && canvasBlocks.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '2px' }}>
-          {/* Pick block */}
-          <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontWeight: 500, color: '#475569', fontSize: '12px' }}>
-            Block
-            <select
-              value={conditionFieldId}
-              onChange={(e) => setConditionFieldId(e.target.value)}
-              style={{ ...selectStyle, fontSize: '12px', padding: '6px 32px 6px 10px' }}
-            >
-              {canvasBlocks.map(b => (
-                <option key={b.id} value={b.id}>{b.label}</option>
-              ))}
-            </select>
-          </label>
-
-          {/* Pick operator */}
-          <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontWeight: 500, color: '#475569', fontSize: '12px' }}>
-            Condition
-            <select
-              value={conditionOperator}
-              onChange={(e) => setConditionOperator(e.target.value)}
-              style={{ ...selectStyle, fontSize: '12px', padding: '6px 32px 6px 10px' }}
-            >
-              {pickedDataType === 'boolean' ? (
-                <>
-                  <option value="is ON">is ON</option>
-                  <option value="is OFF">is OFF</option>
-                </>
-              ) : pickedDataType === 'number' ? (
-                <>
-                  <option value="equals">equals</option>
-                  <option value="greaterThan">greater than</option>
-                  <option value="lessThan">less than</option>
-                </>
-              ) : (
-                <>
-                  <option value="equals">equals</option>
-                </>
-              )}
-            </select>
-          </label>
-
-          {/* Value input (only show if not boolean state check) */}
-          {conditionOperator !== 'is ON' && conditionOperator !== 'is OFF' && (
-            <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontWeight: 500, color: '#475569', fontSize: '12px' }}>
-              Value
-              <input
-                type="text"
-                value={conditionValue}
-                onChange={(e) => setConditionValue(e.target.value)}
-                placeholder="e.g. 10"
-                style={{ ...inputStyle, fontSize: '12px' }}
-              />
-            </label>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '2px' }}>
+          {conds.length > 1 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#475569' }}>
+              <span>Run when</span>
+              <select
+                value={matchMode}
+                onChange={(e) => setMatchMode(e.target.value as 'all' | 'any')}
+                style={{ ...selectStyle, fontSize: '12px', padding: '4px 26px 4px 8px', width: 'auto' }}
+              >
+                <option value="all">all of these are true</option>
+                <option value="any">any of these is true</option>
+              </select>
+            </div>
           )}
+
+          {conds.map((c, i) => {
+            const picked = canvasBlocks.find(b => b.id === c.fieldId)
+            const dt = picked ? picked.dataType : 'unknown'
+            const needsValue = c.operator !== 'is ON' && c.operator !== 'is OFF'
+              && c.operator !== 'isEmpty' && c.operator !== 'isNotEmpty'
+            return (
+              <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: '6px', padding: '8px', border: '1px solid #e2e8f0', borderRadius: '6px', background: '#f8fafc' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: '#94a3b8' }}>
+                    {i === 0 ? 'IF' : matchMode === 'any' ? 'OR' : 'AND'}
+                  </span>
+                  {conds.length > 1 && (
+                    <button
+                      onClick={() => setConds(prev => prev.filter((_, n) => n !== i))}
+                      title="Remove this condition"
+                      style={{ marginLeft: 'auto', border: 'none', background: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '14px', lineHeight: 1 }}
+                    >&times;</button>
+                  )}
+                </div>
+
+                <select
+                  value={c.fieldId}
+                  onChange={(e) => setCond(i, { fieldId: e.target.value })}
+                  style={{ ...selectStyle, fontSize: '12px', padding: '6px 32px 6px 10px' }}
+                >
+                  {canvasBlocks.map(b => (
+                    <option key={b.id} value={b.id}>{b.label}</option>
+                  ))}
+                </select>
+
+                <select
+                  value={c.operator}
+                  onChange={(e) => setCond(i, { operator: e.target.value })}
+                  style={{ ...selectStyle, fontSize: '12px', padding: '6px 32px 6px 10px' }}
+                >
+                  {dt === 'boolean' ? (
+                    <>
+                      <option value="is ON">is ON</option>
+                      <option value="is OFF">is OFF</option>
+                    </>
+                  ) : dt === 'number' ? (
+                    <>
+                      <option value="equals">equals</option>
+                      <option value="notEquals">does not equal</option>
+                      <option value="greaterThan">greater than</option>
+                      <option value="greaterOrEqual">greater than or equal to</option>
+                      <option value="lessThan">less than</option>
+                      <option value="lessOrEqual">less than or equal to</option>
+                    </>
+                  ) : (
+                    <>
+                      <option value="equals">equals</option>
+                      <option value="notEquals">does not equal</option>
+                      <option value="contains">contains</option>
+                      <option value="notContains">does not contain</option>
+                      <option value="isEmpty">is empty</option>
+                      <option value="isNotEmpty">is not empty</option>
+                    </>
+                  )}
+                </select>
+
+                {needsValue && (
+                  <input
+                    type="text"
+                    value={c.value}
+                    onChange={(e) => setCond(i, { value: e.target.value })}
+                    placeholder="e.g. 10"
+                    style={{ ...inputStyle, fontSize: '12px' }}
+                  />
+                )}
+              </div>
+            )
+          })}
+
+          <button
+            onClick={() => setConds(prev => [...prev, { fieldId: canvasBlocks[0]?.id || '', operator: 'equals', value: '' }])}
+            style={{ alignSelf: 'flex-start', border: '1px dashed #cbd5e1', background: '#fff', color: '#475569', borderRadius: '6px', padding: '5px 10px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
+          >
+            + Add condition
+          </button>
         </div>
       )}
 

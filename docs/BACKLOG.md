@@ -207,6 +207,50 @@ un-cheatable. **Three hats, one problem: there is nowhere private to run code.**
 | TODO | **Versions**, and a Draft / Activate distinction. |
 | TODO | **Per-node permissions** — the ownership model arriving at node level. |
 
+### What the logic engine can and cannot express *(11 Aug 2026)*
+
+Written down because "the skeleton is not ready for many situations" is the right
+diagnosis and deserves a real list rather than a feeling.
+
+**Can, as of today:**
+
+| | |
+| :--- | :--- |
+| actions | increment, decrement, set, toggle, reset, show, hide, add row, update row, delete row |
+| events | onClick, onChange, onTick, onComplete |
+| conditions | **many per step**, combined with all (AND) or any (OR) |
+| operators | is ON/OFF, equals, does not equal, >, >=, <, <=, contains, **does not contain**, is empty, **is not empty** |
+| chaining | formulas resolve one level deep in the same frame |
+| shared state | every visitor sees the same rows and numbers |
+
+Until today a step held **one** condition, so "do this, but not if X, and only if
+Y" was literally inexpressible. That is fixed: conditions are a list, every
+positive operator has a negative, and the run log names which condition failed.
+
+**Cannot yet — the honest gaps, hardest last:**
+
+1. `TODO` **Else.** A step either runs or is skipped; there is no "otherwise do
+   this instead". Today it takes two steps with opposite conditions. Needs the
+   port model change — spec directly below.
+2. `TODO` **Memory of what happened earlier.** "Only if Y happened *before*" can
+   only be faked with a Toggle used as a flag. A real `remember this` primitive
+   (a value that persists per visitor) would make a whole class of behaviour
+   possible, and it is also the first thing that genuinely needs a server.
+3. `TODO` **For each row.** No way to act on every row in a collection. Blocked
+   behind collections, section 9.
+4. `TODO` **On page load** and **every N seconds** as page-level triggers. A
+   Timer covers the second case if a block is placed; there is no page-level
+   trigger at all, because a workflow's `sourceId` is always a block.
+5. `TODO` **Live external data.** Nothing can call an API. Public endpoints could
+   work from the browser; anything with a key needs the Edge Function layer,
+   section 6.
+6. `TODO` **Numbers and text derived from each other** — formulas are numeric
+   only, so "greet the person by name" needs a text-join primitive.
+
+The pattern in that list: items 2, 5 and most of what a builder means by "handle
+the backend for me" all land on the same missing thing — **one small private
+place to run code**. That is section 6, and it is the foundation, not a feature.
+
 ### If / Else — the design, so it is not rediscovered
 
 This is the **next real build**, and it is bigger than it looks. Sized honestly

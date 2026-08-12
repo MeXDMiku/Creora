@@ -5,6 +5,58 @@ import { blockRuntimeAtom, workflowsAtom, formulasAtom, allBlockIdsAtom, getBloc
 import { supabase } from './supabase';
 
 
+/**
+ * One condition, evaluated. Pulled out of executeWorkflow so a step can hold a
+ * list of them rather than exactly one.
+ *
+ * Operators come in pairs on purpose: every positive has a negative, because
+ * "only run this if X has NOT happened" is as common as the other way round and
+ * used to be impossible to say.
+ */
+export function evaluateCondition(actual: any, operator: string, expected: any): boolean {
+  const asNumber = (v: any) => Number(v);
+  const bothNumeric =
+    (typeof actual === 'number' || (actual !== null && actual !== '' && !isNaN(Number(actual)))) &&
+    expected !== undefined && expected !== null && expected !== '' && !isNaN(Number(expected));
+
+  switch (operator) {
+    case 'is ON':
+    case 'is_ON':
+      return actual === true;
+    case 'is OFF':
+    case 'is_OFF':
+      return actual === false;
+    case 'equals':
+      return bothNumeric ? asNumber(actual) === asNumber(expected) : actual === expected;
+    case 'notEquals':
+      return bothNumeric ? asNumber(actual) !== asNumber(expected) : actual !== expected;
+    case 'greaterThan':
+    case 'greater than':
+      return asNumber(actual) > asNumber(expected);
+    case 'lessThan':
+    case 'less than':
+      return asNumber(actual) < asNumber(expected);
+    case 'greaterOrEqual':
+      return asNumber(actual) >= asNumber(expected);
+    case 'lessOrEqual':
+      return asNumber(actual) <= asNumber(expected);
+    case 'contains':
+      return (typeof actual === 'string' || Array.isArray(actual)) ? actual.includes(expected) : false;
+    case 'notContains':
+      return (typeof actual === 'string' || Array.isArray(actual)) ? !actual.includes(expected) : true;
+    case 'isEmpty':
+      if (actual === null || actual === undefined) return true;
+      if (typeof actual === 'string' || Array.isArray(actual)) return actual.length === 0;
+      return false;
+    case 'isNotEmpty':
+      if (actual === null || actual === undefined) return false;
+      if (typeof actual === 'string' || Array.isArray(actual)) return actual.length > 0;
+      return true;
+    default:
+      return false;
+  }
+}
+
 export function executeWorkflow(
   sourceId: string,
   event: TriggerEvent,
@@ -31,62 +83,37 @@ export function executeWorkflow(
       const targetAtom = blockRuntimeAtom(step.targetId);
       const currentTargetState = store.get(targetAtom);
 
-      if (step.condition && step.condition.fieldId) {
-        const conditionBlockState = store.get(blockRuntimeAtom(step.condition.fieldId));
-        const valToCompare = conditionBlockState?.value;
+      // A step can carry many conditions now. `conditions` wins when present;
+      // `condition` (singular) is still read so every page saved before this
+      // keeps behaving identically.
+      const stepConditions =
+        step.conditions && step.conditions.length
+          ? step.conditions
+          : step.condition && step.condition.fieldId
+            ? [step.condition]
+            : [];
 
-        let conditionPassed = false;
-        const condValue = step.condition.value;
-
-        switch (step.condition.operator) {
-          case 'is ON':
-          case 'is_ON':
-            conditionPassed = valToCompare === true;
-            break;
-          case 'is OFF':
-          case 'is_OFF':
-            conditionPassed = valToCompare === false;
-            break;
-          case 'equals':
-            if (typeof valToCompare === 'number' || (valToCompare !== null && !isNaN(Number(valToCompare)))) {
-              conditionPassed = Number(valToCompare) === Number(condValue);
-            } else {
-              conditionPassed = valToCompare === condValue;
-            }
-            break;
-          case 'notEquals':
-            conditionPassed = valToCompare !== condValue;
-            break;
-          case 'greaterThan':
-          case 'greater than':
-            conditionPassed = Number(valToCompare) > Number(condValue);
-            break;
-          case 'lessThan':
-          case 'less than':
-            conditionPassed = Number(valToCompare) < Number(condValue);
-            break;
-          case 'contains':
-            if (typeof valToCompare === 'string' || Array.isArray(valToCompare)) {
-              conditionPassed = valToCompare.includes(condValue);
-            }
-            break;
-          case 'isEmpty':
-            if (valToCompare === null || valToCompare === undefined) {
-              conditionPassed = true;
-            } else if (typeof valToCompare === 'string' || Array.isArray(valToCompare)) {
-              conditionPassed = valToCompare.length === 0;
-            }
-            break;
-          default:
-            conditionPassed = false;
-        }
+      if (stepConditions.length) {
+        const results = stepConditions.map((c) => {
+          const state = store.get(blockRuntimeAtom(c.fieldId));
+          return evaluateCondition(state?.value, c.operator, c.value);
+        });
+        const matchMode = step.match === 'any' ? 'any' : 'all';
+        const conditionPassed =
+          matchMode === 'any' ? results.some(Boolean) : results.every(Boolean);
 
         if (!conditionPassed) {
+          const detail = stepConditions
+            .map((c, i) => {
+              const actual = store.get(blockRuntimeAtom(c.fieldId))?.value;
+              return `${c.fieldId} ${c.operator} ${JSON.stringify(c.value)} -> ${results[i] ? 'pass' : 'FAIL'} (actual ${JSON.stringify(actual)})`;
+            })
+            .join('; ');
           runSteps.push({
             targetId: step.targetId,
             action: step.action,
             status: 'skipped',
-            reason: `condition not met — ${step.condition.fieldId} ${step.condition.operator} ${JSON.stringify(condValue)}, actual ${JSON.stringify(valToCompare)}`,
+            reason: `${matchMode === 'any' ? 'none of' : 'not all'} the conditions met — ${detail}`,
           });
           continue; // Skip this step, but continue to the next step
         }
