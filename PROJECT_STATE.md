@@ -334,6 +334,40 @@ a live demo of the model and is safe to delete.
 Note Link needed no code in the published renderer: `runTrigger` already
 navigates when `targetPageId` is set.
 
+### Full regression sweep — 11 Aug 2026, end of session
+
+A lot shipped in one day, and each piece had only been verified alone. Swept
+everything together against the live domain.
+
+**All 6 pages, loaded at a real 390px viewport:**
+
+```
+rendered            6 / 6      no error cards
+"Made with Creora"  6 / 6
+tab title correct   6 / 6      no more "a", no more "Published Page"
+horizontal scroll   none       on any page
+stacking            fires only on the pages that have blocks
+```
+
+**Ownership re-attacked with a session-less client** (anon key, no JWT), because
+the published renderer was heavily edited today:
+
+```
+read a published page      ALLOWED   (correct)
+read rows on it            ALLOWED   (correct)
+list the owner's pages     nothing   (correct)
+overwrite a page           DENIED — not your page
+unpublish a page           DENIED — not your page
+delete a row               DENIED — not allowed
+page name afterwards       "Feedback", not "DEFACED"
+```
+
+Nothing built today weakened the model.
+
+**Note:** the Feedback table holds 3 rows, not 2 — the third is `dsadw213 /
+3213213` at 14:42, the owner testing his own published form. Worth recording so a
+future session does not treat it as a stray write.
+
 ### The next thing to build
 
 The Feedback page exists, is published, and now shows a correct count to a
