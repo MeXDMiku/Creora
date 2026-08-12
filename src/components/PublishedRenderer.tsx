@@ -5,6 +5,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useStore, useAtomValue } from 'jotai';
 import { supabase } from '../lib/supabase';
 import { blockToCSS } from '../lib/renderBlockStyles';
+import { valueAtPath } from '../lib/jsonPaths';
+import { fetchDataSource } from '../lib/dataSource';
 import { executeWorkflow, recalculateAllFormulas } from '../lib/bindingEngine';
 import {
   blockPositionAtom,
@@ -38,6 +40,7 @@ const supportedBlockTypes = [
   'databaseBlock',
   'listBlock',
   'shapeBlock',
+  'dataSourceBlock',
 ];
 
 const extractDocItems = (node: any): { docItems: DocItem[]; blocks: ExtractedBlock[] } => {
@@ -274,6 +277,45 @@ function PublishedTimerBlock({ block }: { block: ExtractedBlock }) {
           {isRunning ? '⏸️ Stop' : '▶️ Start'}
         </button>
       </div>
+    </div>
+  );
+}
+
+function PublishedDataSourceBlock({ block }: { block: ExtractedBlock }) {
+  const position = useAtomValue(blockPositionAtom(block.id));
+  const runtimeState = useAtomValue(blockRuntimeAtom(block.id));
+  const store = useStore();
+  const { outer: outerStyle, inner: innerStyle } = blockToCSS(block.type, position, runtimeState);
+
+  const mode = runtimeState?.refreshMode || 'load';
+  const secs = Math.max(5, runtimeState?.refreshSeconds ?? 60);
+  const url = runtimeState?.url;
+
+  // The visitor's browser does the fetching. That is the whole reason this works
+  // without a server -- and the reason it only works for APIs that allow it.
+  useEffect(() => {
+    if (!url) return;
+    let cancelled = false;
+    const run = () => { if (!cancelled) fetchDataSource(block.id, store); };
+    if (mode === 'load' || mode === 'interval') run();
+    if (mode === 'interval') {
+      const id = setInterval(run, secs * 1000);
+      return () => { cancelled = true; clearInterval(id); };
+    }
+    return () => { cancelled = true; };
+  }, [block.id, url, mode, secs, store]);
+
+  const shown = runtimeState?.fetchError
+    ? '—'
+    : runtimeState?.loading && runtimeState?.lastFetchedAt === undefined
+      ? '…'
+      : runtimeState?.outputPath
+        ? String(valueAtPath(runtimeState?.lastResponse, runtimeState.outputPath) ?? '—')
+        : String(runtimeState?.value ?? '—');
+
+  return (
+    <div style={outerStyle}>
+      <div style={innerStyle}>{shown}</div>
     </div>
   );
 }
@@ -630,6 +672,10 @@ function RenderedBlock({ block }: { block: ExtractedBlock }) {
         </div>
       </div>
     );
+  }
+
+  if (block.type === 'dataSourceBlock') {
+    return <PublishedDataSourceBlock block={block} />;
   }
 
   if (block.type === 'shapeBlock') {

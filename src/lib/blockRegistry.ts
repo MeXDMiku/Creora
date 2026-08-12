@@ -27,6 +27,7 @@ export const BLOCK_NODE_TYPES = [
   'databaseBlock',
   'listBlock',
   'shapeBlock',
+  'dataSourceBlock',
 ] as const;
 
 export type BlockNodeType = (typeof BLOCK_NODE_TYPES)[number];
@@ -106,6 +107,22 @@ export function defaultRuntimeForNodeType(nodeType: BlockNodeType | null): Block
   };
 
   switch (nodeType) {
+    case 'dataSourceBlock':
+      return {
+        ...base,
+        blockName: 'Live data',
+        url: '',
+        refreshMode: 'load',
+        refreshSeconds: 60,
+        outputPath: '',
+        lastResponse: null,
+        fetchError: null,
+        backgroundColor: '#0f172a',
+        textColor: '#ffffff',
+        borderRadius: 8,
+        width: 240,
+        fontSize: 24,
+      };
     case 'timerBlock':
       return {
         ...base,

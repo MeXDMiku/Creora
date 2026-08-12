@@ -186,6 +186,19 @@ export interface BlockRuntimeState {
   textAlign?: string;
   /** Animation preset played when this block's value changes. See src/lib/animations.ts */
   animateOnChange?: string;
+  // --- Data Source: live data pulled from an API ---
+  /** The address to call. */
+  url?: string;
+  /** 'load' once when the page opens · 'interval' every N seconds · 'trigger' only when wired */
+  refreshMode?: 'load' | 'interval' | 'trigger';
+  refreshSeconds?: number;
+  /** Path into the response that this block emits, chosen from a real fetch. */
+  outputPath?: string;
+  /** The last response, kept so the picker can show real values. */
+  lastResponse?: any;
+  lastFetchedAt?: number;
+  /** Set when a fetch fails, so a live page never silently shows stale data. */
+  fetchError?: string | null;
 }
 
 export interface DatabaseField {

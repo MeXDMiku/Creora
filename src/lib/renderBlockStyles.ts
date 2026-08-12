@@ -17,7 +17,21 @@ export function blockToCSS(
 
   const inner: CSSProperties = {};
 
-  if (type === 'buttonBlock') {
+  if (type === 'dataSourceBlock') {
+    Object.assign(inner, {
+      padding: '10px 14px',
+      background: runtimeState?.backgroundColor || '#0f172a',
+      color: runtimeState?.textColor || '#ffffff',
+      borderRadius: runtimeState?.borderRadius !== undefined ? `${runtimeState.borderRadius}px` : '8px',
+      fontSize: runtimeState?.fontSize !== undefined ? `${runtimeState.fontSize}px` : '24px',
+      fontWeight: 600,
+      display: 'inline-block',
+      textAlign: 'center',
+      minWidth: '120px',
+      width: runtimeState?.width !== undefined ? `${runtimeState.width}px` : 'auto',
+      boxSizing: 'border-box',
+    });
+  } else if (type === 'buttonBlock') {
     Object.assign(inner, {
       padding: '8px 16px',
       background: runtimeState?.backgroundColor || '#6366f1',

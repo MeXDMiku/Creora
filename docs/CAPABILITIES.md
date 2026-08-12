@@ -233,7 +233,7 @@ feature, and it is the argument for doing this properly rather than bolting on a
 
 Ranked by **how many blocked things each unblocks**, not by size.
 
-1. **A Data Source block — live data in.** Revised up from Part 3b: a public,
+1. `DONE (11 Aug)` **A Data Source block — live data in.** Built. Revised up from Part 3b: a public,
    CORS-friendly API needs **no server**, so this is buildable now, and it
    delivers named typed outputs, `on page load` and `every N seconds` in the same
    piece of work. Three known gaps closed by one build, and it is what makes a
