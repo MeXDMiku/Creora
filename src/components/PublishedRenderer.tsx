@@ -8,6 +8,7 @@ import { blockToCSS } from '../lib/renderBlockStyles';
 import { valueAtPath } from '../lib/jsonPaths';
 import { fetchDataSource } from '../lib/dataSource';
 import { computeDatabaseOutput } from '../lib/databaseOutput';
+import { CustomHtmlView } from '../blocks/CustomHtmlBlock';
 import { executeWorkflow, recalculateAllFormulas } from '../lib/bindingEngine';
 import {
   blockPositionAtom,
@@ -42,6 +43,7 @@ const supportedBlockTypes = [
   'listBlock',
   'shapeBlock',
   'dataSourceBlock',
+  'customHtmlBlock',
 ];
 
 const extractDocItems = (node: any): { docItems: DocItem[]; blocks: ExtractedBlock[] } => {
@@ -666,6 +668,16 @@ function RenderedBlock({ block }: { block: ExtractedBlock }) {
         <div style={innerStyle}>
           {String(runtimeState?.value ?? '')}
         </div>
+      </div>
+    );
+  }
+
+  if (block.type === 'customHtmlBlock') {
+    // The builder's own markup, with live values in it. Creora imposes no
+    // styling of its own here on purpose -- the design is entirely theirs.
+    return (
+      <div style={outerStyle}>
+        <CustomHtmlView blockId={block.id} />
       </div>
     );
   }

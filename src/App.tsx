@@ -16,6 +16,7 @@ import { DatabaseBlock } from './blocks/DatabaseBlock'
 import { ListBlock } from './blocks/ListBlock'
 import { ShapeBlock } from './blocks/ShapeBlock'
 import { DataSourceBlock } from './blocks/DataSourceBlock'
+import { CustomHtmlBlock } from './blocks/CustomHtmlBlock'
 import { WireOverlay } from './components/WireOverlay'
 import { supabase } from './lib/supabase'
 import { ensureSession } from './lib/session'
@@ -1358,6 +1359,7 @@ function App() {
       ListBlock,
       ShapeBlock,
       DataSourceBlock,
+      CustomHtmlBlock,
     ],
     content: '',
     onUpdate: ({ editor }) => {
@@ -2045,6 +2047,18 @@ function App() {
         </svg>
       ),
       action: () => insertBlock('listBlock')
+    },
+    {
+      id: 'customHtml',
+      title: 'My Design',
+      description: 'Paste your own HTML and CSS, and put live values inside it',
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="16 18 22 12 16 6" />
+          <polyline points="8 6 2 12 8 18" />
+        </svg>
+      ),
+      action: () => insertBlock('customHtmlBlock')
     },
     {
       id: 'dataSource',

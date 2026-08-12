@@ -28,6 +28,7 @@ export const BLOCK_NODE_TYPES = [
   'listBlock',
   'shapeBlock',
   'dataSourceBlock',
+  'customHtmlBlock',
 ] as const;
 
 export type BlockNodeType = (typeof BLOCK_NODE_TYPES)[number];
@@ -107,6 +108,13 @@ export function defaultRuntimeForNodeType(nodeType: BlockNodeType | null): Block
   };
 
   switch (nodeType) {
+    case 'customHtmlBlock':
+      return {
+        ...base,
+        blockName: 'My design',
+        html: "<div style=\"padding:16px;border:2px solid #4f46e5;border-radius:12px;font-family:sans-serif\"><span style=\"font-size:32px;font-weight:700\">{{Count}}</span></div>",
+        width: 260,
+      };
     case 'dataSourceBlock':
       return {
         ...base,

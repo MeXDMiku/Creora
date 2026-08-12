@@ -204,6 +204,8 @@ export interface BlockRuntimeState {
   animateOnChange?: string;
   /** Raw CSS declarations the builder wrote, merged last so they win. */
   customCss?: string;
+  /** The builder's own markup. Values go in {{Block Name}} slots. */
+  html?: string;
   // --- Data Source: live data pulled from an API ---
   /** The address to call. */
   url?: string;
