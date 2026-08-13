@@ -289,7 +289,10 @@ export function defaultRuntimeForNodeType(nodeType: BlockNodeType | null): Block
  * Applied on save AND on load. On save so it is never written; on load so pages
  * that were already saved with it come back clean.
  */
-export function withoutVisitorState<T extends Record<string, any>>(state: T): T {
+export function withoutVisitorState<T extends Record<string, any>>(
+  state: T,
+  nodeType?: BlockNodeType | null
+): T {
   if (!state || typeof state !== 'object') return state;
   const next: Record<string, any> = { ...state };
   delete next.touched;
@@ -297,8 +300,33 @@ export function withoutVisitorState<T extends Record<string, any>>(state: T): T 
   delete next.fetchError;
   delete next.uploadError;
   next.loading = false;
+
+  /**
+   * The value, for the blocks whose value is "whatever the last person typed".
+   *
+   * This was missed for ten cycles and it was visible on the live site the
+   * whole time: a Feedback page served `dsad` and `321dsa` in its two fields,
+   * because the builder had typed them while building and the value was saved
+   * into the page and restored for every visitor. If they had typed a real
+   * email or a private note, it would have been published.
+   *
+   * It cannot be stripped for everything -- a Number Display's value is the
+   * shared count, which is the entire product. Only the blocks a person types
+   * or clicks into.
+   */
+  if (nodeType && VALUE_IS_THE_VISITORS.has(nodeType)) {
+    next.value = defaultValueForNodeType(nodeType);
+  }
   return next as T;
 }
+
+/**
+ * Blocks whose value belongs to whoever is looking, not to the page.
+ *
+ * A repeater's value is the row last clicked -- publishing it means every
+ * visitor arrives with somebody else's selection already made.
+ */
+const VALUE_IS_THE_VISITORS: ReadonlySet<string> = new Set(['inputBlock', 'repeatBlock']);
 
 /** Extra TipTap node attrs a freshly inserted block needs beyond blockId. */
 export function defaultAttrsForNodeType(nodeType: BlockNodeType): Record<string, any> {

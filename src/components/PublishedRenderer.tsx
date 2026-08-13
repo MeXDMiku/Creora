@@ -1243,7 +1243,7 @@ export default function PublishedRenderer() {
           Object.entries(blocksData.runtimeStates).forEach(([id, rState]: [string, any]) => {
             // A visitor arrives with a clean form: no red, no button stuck busy,
             // no error left over from whatever the builder was doing at save time.
-            store.set(blockRuntimeAtom(id), withoutVisitorState(rState));
+            store.set(blockRuntimeAtom(id), withoutVisitorState(rState, nodeTypeFromBlockId(id)));
           });
         }
 

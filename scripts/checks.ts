@@ -408,6 +408,55 @@ group('what gets saved, and what must never be');
   check('the error is dropped', 'validationError' in clean, false);
   check('a stale fetch error is dropped', 'fetchError' in clean, false);
   check('an upload failure is dropped', 'uploadError' in clean, false);
+
+  /**
+   * Found by opening the live site, not by any of these. The Feedback page was
+   * serving `dsad` and `321dsa` in its fields to every visitor, because the
+   * builder typed them while building.
+   */
+  const typedIn = { ...defaultRuntimeForNodeType('inputBlock'), blockName: 'Email', value: 'dsad' };
+  check(
+    'WHAT SOMEBODY TYPED INTO A FIELD IS NOT PUBLISHED',
+    withoutVisitorState(typedIn, 'inputBlock').value,
+    ''
+  );
+  const clicked = { ...defaultRuntimeForNodeType('repeatBlock'), value: 'row_7' };
+  check(
+    'nor is the row the builder last clicked',
+    withoutVisitorState(clicked, 'repeatBlock').value,
+    ''
+  );
+  const counter = { ...defaultRuntimeForNodeType('numberDisplayBlock'), value: 42 };
+  check(
+    'BUT A SHARED COUNT IS THE WHOLE PRODUCT AND MUST SURVIVE',
+    withoutVisitorState(counter, 'numberDisplayBlock').value,
+    42
+  );
+  check(
+    'a toggle keeps its shared state too',
+    withoutVisitorState({ ...defaultRuntimeForNodeType('toggleBlock'), value: true }, 'toggleBlock').value,
+    true
+  );
+  check(
+    'an image keeps its picture -- the value is the address, not something typed',
+    withoutVisitorState({ ...defaultRuntimeForNodeType('imageBlock'), value: 'https://x/a.png' }, 'imageBlock').value,
+    'https://x/a.png'
+  );
+  check(
+    'a text label keeps its words',
+    withoutVisitorState({ ...defaultRuntimeForNodeType('textLabelBlock'), value: 'Hello' }, 'textLabelBlock').value,
+    'Hello'
+  );
+  check(
+    'called without a type, nothing is cleared -- old call sites keep working',
+    withoutVisitorState(typedIn).value,
+    'dsad'
+  );
+  check(
+    'a field keeps its rules, name and placeholder',
+    withoutVisitorState({ ...typedIn, placeholder: 'you@example.com' }, 'inputBlock').placeholder,
+    'you@example.com'
+  );
   check('busy is forced off', clean.loading, false);
   check('the rules survive, because they are the page', clean.rules!.length, 1);
   check('the name survives', clean.blockName, 'Email');

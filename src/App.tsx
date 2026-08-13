@@ -1417,6 +1417,13 @@ function App() {
   // Pages state
   const [activePageId, setActivePageId] = useAtom(currentPageIdAtom)
   const [pagesList, setPagesList] = useAtom(pagesListAtom)
+  /**
+   * The list, readable from inside the debounced save without making the save
+   * depend on it. A stale closure here is how the name went missing in the
+   * first place, so it is a ref rather than a captured value.
+   */
+  const pagesListRef = useRef(pagesList)
+  pagesListRef.current = pagesList
   const [isCrossfading, setIsCrossfading] = useState(false)
   const setSwitchPageFn = useSetAtom(switchPageFnAtom)
   const [isPreviewMode, setIsPreviewMode] = useAtom(isPreviewModeAtom)
@@ -1620,7 +1627,7 @@ function App() {
           }
 
           positionsRecord[blockId] = pos
-          runtimeStatesRecord[blockId] = withoutVisitorState(runtime)
+          runtimeStatesRecord[blockId] = withoutVisitorState(runtime, nodeTypeFromBlockId(blockId))
 
           let type: BlockType = 'text'
           if (typeName === 'buttonBlock') type = 'button'
@@ -2297,12 +2304,22 @@ function App() {
 
         blockIds.forEach(id => {
           positions[id] = store.get(blockPositionAtom(id))
-          runtimeStates[id] = withoutVisitorState(store.get(blockRuntimeAtom(id)))
+          runtimeStates[id] = withoutVisitorState(store.get(blockRuntimeAtom(id)), nodeTypeFromBlockId(id))
         })
 
         const workflows = store.get(workflowsAtom)
         const connections = store.get(connectionsAtom)
         const formulas = store.get(formulasAtom)
+
+        /**
+         * pageName is in here because save_page REPLACES the whole blocks blob.
+         * It was missing, and this save runs on every edit, so every keystroke
+         * quietly renamed the page to nothing -- five of six pages were called
+         * "Untitled" and the published tab title with them. Found by opening
+         * the site, never by reading the code.
+         */
+        const currentName =
+          pagesListRef.current.find(p => p.id === activePageIdRef.current)?.name
 
         const blocksPayload = {
           documentContent: docJson,
@@ -2310,6 +2327,9 @@ function App() {
           runtimeStates,
           connections,
           formulas,
+          // Only written when it is actually known. Writing undefined would
+          // repeat the bug with extra steps.
+          ...(currentName ? { pageName: currentName } : {}),
         }
 
         const { error } = await supabase
@@ -2665,7 +2685,7 @@ function App() {
 
       blockIds.forEach(id => {
         positions[id] = store.get(blockPositionAtom(id))
-        runtimeStates[id] = withoutVisitorState(store.get(blockRuntimeAtom(id)))
+        runtimeStates[id] = withoutVisitorState(store.get(blockRuntimeAtom(id)), nodeTypeFromBlockId(id))
       })
 
       const workflows = store.get(workflowsAtom)
@@ -2760,7 +2780,7 @@ function App() {
         // Populate block runtime states
         if (blocksData.runtimeStates) {
           Object.entries(blocksData.runtimeStates).forEach(([id, rState]: [string, any]) => {
-            store.set(blockRuntimeAtom(id), withoutVisitorState(rState))
+            store.set(blockRuntimeAtom(id), withoutVisitorState(rState, nodeTypeFromBlockId(id)))
           })
         }
 
@@ -2965,7 +2985,7 @@ function App() {
           // Populate block runtime states
           if (blocksData.runtimeStates) {
             Object.entries(blocksData.runtimeStates).forEach(([id, rState]: [string, any]) => {
-              store.set(blockRuntimeAtom(id), withoutVisitorState(rState))
+              store.set(blockRuntimeAtom(id), withoutVisitorState(rState, nodeTypeFromBlockId(id)))
             })
           }
 

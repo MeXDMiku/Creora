@@ -1176,6 +1176,70 @@ costs the most**, and it is worth saying plainly rather than at the end.
 
 ---
 
+### The browser finally connected — and found two shipped bugs in ninety seconds *(13 Aug 2026)*
+
+Six cycles of verification debt, paid. **498 checks and ten cycles of careful
+reading had missed both of these, and both were visible on the live site the
+entire time.**
+
+**1. The autosave was destroying page names.**
+
+The page tabs read `Untitled · Untitled · Untitled · Untitled · Shape Roles ·
+Untitled`. Five of six. "Shape Roles" survived only because it had not been
+edited since being named.
+
+`save_page` replaces the whole `blocks` blob. There are two save paths:
+`savePageData` includes `pageName`, and the debounced `saveToSupabase` that runs
+on **every edit** did not. So every keystroke renamed the page to nothing. It is
+also why the published tab said "Untitled" — `document.title = pageName` was
+working perfectly and being handed nothing.
+
+Fixed by reading the name from a ref inside the debounced save, and writing it
+only when it is actually known: writing `undefined` would have repeated the bug
+with extra steps.
+
+**2. Whatever the builder last typed into a field was being served to the public.**
+
+The live Feedback page showed `dsad` and `321dsa` sitting in its two inputs.
+Confirmed with a hard reload, so not autofill: an Input block's `value` was saved
+into the page and restored for every visitor.
+
+`withoutVisitorState` was written in cycle 1 and reasoned about carefully —
+`touched`, `validationError`, `loading`, `fetchError`, later `uploadError`. **The
+question "does `value` belong in this list?" was never asked.**
+
+And the answer is not simply yes. A Number Display's value is the shared count,
+which is the entire product; a Text label's value is its words; an Image's value
+is its address. Only the blocks whose value is *whatever the last person typed or
+clicked* — Input and For-each-row. Six checks now hold both halves, and the
+negative control puts the shared count in the strip list and watches two of them
+go red.
+
+**Had a real email or a private note ever been typed into a form while building,
+it would have been published.**
+
+**What was healthy.** The editor works: wires draw, blocks drag, the Database
+shows its rows, the count reads 2, the Total reads 2, no console errors. That was
+the largest unknown — nothing had touched it since 11 Aug — and it is fine.
+
+**Still visible and not yet fixed:** blocks overlap on the desktop canvas (an
+input sits on top of the heading), and the page is wider than the viewport. The
+layout model built this cycle addresses phones; overlap on a laptop is the
+builder's own arrangement and wants alignment guides, which is arrangement-phase
+work.
+
+**The lesson, written where it will be read again.** Ten cycles of checks caught
+real bugs, and every one of them was a bug in something being *built*. Neither of
+these was: they were in something already working, quietly, in a way only a
+person looking at the screen could see. `npm run check` cannot see a page. The
+process doc already said VERIFY means opening the site; this is what it costs to
+skip it, and the cost was not felt for six cycles because nothing looked wrong
+from here.
+
+`npm run check` is **506**.
+
+---
+
 ## File Structure Summary
 
 ```
