@@ -540,6 +540,10 @@ function ConnectionPopup({ editor }: { editor: any }) {
       } else if (action === 'set') {
         const parsedNum = Number(value)
         stepStep.value = isNaN(parsedNum) || value.trim() === '' ? value : parsedNum
+      } else if (action === 'setText') {
+        // Kept as written. Turning "12 items" into a number here would be the
+        // one thing a text action must never do.
+        stepStep.value = value
       } else if (action === 'toggle') {
         stepStep.action = 'toggle'
       }
@@ -656,6 +660,7 @@ function ConnectionPopup({ editor }: { editor: any }) {
               <option value="toggle">Toggle</option>
               <option value="reset">Reset</option>
               <option value="sendWebhook">Send to another app</option>
+              <option value="setText">Set to words built from other blocks</option>
               <optgroup label="Form">
                 <option value="validate">Check its rules and show any problem</option>
                 <option value="setDisabled">Switch it off</option>
@@ -714,6 +719,25 @@ function ConnectionPopup({ editor }: { editor: any }) {
             onChange={(e) => setAmount(Number(e.target.value))}
             style={inputStyle}
           />
+        </label>
+      )}
+
+      {!isToggleBlock && !isDatabaseBlock && action === 'setText' && (
+        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontWeight: 500, color: '#475569', fontSize: '13px' }}>
+          The words
+          <input
+            type="text"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder="Hello {{Name}}, that is {{Total | money: $}}"
+            style={inputStyle}
+          />
+          <span style={{ fontSize: '11px', color: '#6b7280', lineHeight: 1.4 }}>
+            Put a block's name in double braces. Filters work here too:
+            {' '}<code>{'{{Created | date: D MMM YYYY}}'}</code>,
+            {' '}<code>{'{{Price | money: $}}'}</code>,
+            {' '}<code>{'{{now | plus: 7 days | date}}'}</code>.
+          </span>
         </label>
       )}
 

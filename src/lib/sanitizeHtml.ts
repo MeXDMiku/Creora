@@ -14,6 +14,7 @@
  */
 
 import { isSafeUrlValue, safeUrl } from './urls';
+import { parseSlot, applyFilters, builtInSlotValue, type FilterOptions } from './format';
 
 const ALLOWED_TAGS = new Set([
   'div','span','p','a','br','hr','strong','b','em','i','u','s','small','mark','sub','sup',
@@ -64,7 +65,10 @@ const LEADING_SLOT = /^\s*\{\{\s*([^}]+?)\s*\}\}/;
 export function leadingSlotName(attributeValue: string | null | undefined): string | null {
   if (!attributeValue) return null;
   const match = LEADING_SLOT.exec(attributeValue);
-  return match ? match[1].trim() : null;
+  if (!match) return null;
+  // The name without its filters, because that is the key the guard is
+  // checked against when the slot is filled.
+  return parseSlot(match[1]).name || null;
 }
 
 export interface SanitizeResult {
@@ -154,13 +158,24 @@ export function escapeHtmlText(value: any): string {
     .replace(/'/g, '&#39;');
 }
 
-/** Slot names a builder wrote, e.g. "{{Total}}" -> ["Total"]. */
+/**
+ * Slot names a builder wrote, without their filters.
+ *
+ *   "{{Total}}"                  -> ["Total"]
+ *   "{{Created | date: D MMM}}"  -> ["Created"]
+ *
+ * The name is what gets looked up, so everything that resolves values -- block
+ * names, database columns -- keeps working without knowing filters exist.
+ */
 export function findSlots(html: string | undefined | null): string[] {
   if (!html) return [];
   const names = new Set<string>();
   const re = /\{\{\s*([^}]+?)\s*\}\}/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(html)) !== null) names.add(m[1].trim());
+  while ((m = re.exec(html)) !== null) {
+    const name = parseSlot(m[1]).name;
+    if (name) names.add(name);
+  }
   return Array.from(names);
 }
 
@@ -176,13 +191,27 @@ export function findSlots(html: string | undefined | null): string[] {
 export function fillSlots(
   safeHtml: string,
   values: Record<string, any>,
-  urlSlots?: string[]
+  urlSlots?: string[],
+  options: FilterOptions = {}
 ): string {
   const guarded = new Set(urlSlots || []);
   return safeHtml.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_, raw) => {
-    const key = String(raw).trim();
-    if (!(key in values)) return '';
-    const value = values[key];
+    const { name: key, filters } = parseSlot(String(raw));
+
+    // A real value first. `now` and `today` only answer when nothing on the
+    // page has that name, so a column called "now" beats ours.
+    let value: any;
+    if (key in values) {
+      value = values[key];
+    } else {
+      value = builtInSlotValue(key, options);
+      if (value === undefined) return '';
+    }
+
+    // Filters run BEFORE the URL check, deliberately: a `default:` could
+    // otherwise put an address into an href that nothing had looked at.
+    if (filters.length) value = applyFilters(value, filters, options);
+
     if (guarded.has(key)) {
       // Inline images are allowed here: a data:image in a link is a link to a
       // picture, which is odd but not dangerous. Everything without a safe

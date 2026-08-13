@@ -3,6 +3,7 @@ import { useMemo } from 'react'
 import { blockRuntimeAtom, triggerSaveAtom, getBlockTypeDisplayName } from '../state/atoms'
 import { sanitizeHtml, findSlots } from '../lib/sanitizeHtml'
 import { useSlotValues } from '../lib/useSlotValues'
+import { FilterHelp } from '../components/FilterHelp'
 
 const field: React.CSSProperties = {
   display: 'block', marginTop: '4px', width: '100%', padding: '6px', borderRadius: '4px',
@@ -52,6 +53,8 @@ export default function CustomHtmlBlockInspector({ blockId }: { blockId: string;
         stopwatch. Then write a block&rsquo;s name in double braces where you want
         its live value, and Creora fills it in.
       </div>
+
+      <FilterHelp />
 
       {slots.length > 0 && (
         <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: '10px', marginBottom: '10px' }}>

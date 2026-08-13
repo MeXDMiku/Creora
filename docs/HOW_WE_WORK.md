@@ -43,6 +43,13 @@ The top item of the queue below. Not the most interesting one, not the one
 mentioned most recently -- the top one. If it turns out to be bigger than a
 session, it gets split and re-queued, not half-built.
 
+**While live verification is blocked, build what can be proved and queue what
+cannot.** Server work -- migrations, RPCs, policies -- cannot be applied from
+here and cannot be checked afterwards without a browser, so building it means
+shipping it unproven. That is the one reason allowed for taking the second item
+instead of the first, and taking it must be written down at step 5 with the
+reason, exactly as cycle 4 did.
+
 **4. PROVE it, by running it**
 Not a type-check. Not a build. Run the thing: click it, submit to it, attack it,
 measure it, open it at 390px. Every real problem this project has ever had was
@@ -112,7 +119,7 @@ Ordered by how much each unblocks, not by size or appeal. Cycle takes the top.
                                       row" rather than built twice. Uploads need
                                       docs/SETUP_STORAGE.md run once.
 
-    !! LIVE VERIFICATION              THREE cycles owed. Nothing has been clicked
+    !! LIVE VERIFICATION              FOUR cycles owed. Nothing has been clicked
                                       on the real domain since 11 Aug. Cycle 3
                                       fixed an XSS that was live, so confirming
                                       that fix on the real domain is now the
@@ -120,16 +127,23 @@ Ordered by how much each unblocks, not by size or appeal. Cycle takes the top.
 
     -- For each row                   DONE, cycle 3, 13 Aug. Gallery falls out of
                                       it, as predicted, via grid layout.
+    -- Text and date primitives       DONE, cycle 4, 13 Aug. Taken ahead of
+                                      collections because collections cannot be
+                                      proved while the browser is down. Filters
+                                      inside {{ }}, everywhere slots work.
+
     1  Collections + per-visitor data rows stop belonging to a block, gain an
                                       owner. Opens carts and "my things".
-    2  Text and date primitives       join, format, now, add days. Small, needed
-                                      by nearly every site.
-    3  Search, filter, sort, paginate a table of 500 rows is unusable today.
-    4  Real sign-in for visitors      the multi-tenant one. Visitor already
+                                      BLOCKED-ISH: needs a migration this
+                                      session cannot apply or verify. Write the
+                                      SQL first, apply it, then build against it.
+    2  Search, filter, sort, paginate a table of 500 rows is unusable today, and
+                                      the repeater caps at 200 with a note.
+    3  Real sign-in for visitors      the multi-tenant one. Visitor already
                                       exists; this makes it mean something.
-    5  Status dashboard (Layer 3)     what is running, what failed, usage.
-    6  Team permissions               independent of 4, cheaper than it looks.
-    7  Payments and entitlements      then perks and commission become settings.
+    4  Status dashboard (Layer 3)     what is running, what failed, usage.
+    5  Team permissions               independent of 3, cheaper than it looks.
+    6  Payments and entitlements      then perks and commission become settings.
 
 Everything else lives in BACKLOG.md and does not jump this queue without a reason
 written down at step 6.

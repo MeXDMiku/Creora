@@ -1,7 +1,6 @@
 import { atom, useAtomValue } from 'jotai';
 import { useMemo } from 'react';
-import { blockRuntimeAtom, allBlockIdsAtom, isGarbageName, getBlockTypeDisplayName } from '../state/atoms';
-import { nodeTypeFromBlockId } from './blockRegistry';
+import { blockValuesByName } from '../state/atoms';
 
 /**
  * Resolve slot names to the live values of the blocks with those names.
@@ -15,22 +14,20 @@ import { nodeTypeFromBlockId } from './blockRegistry';
  * hook no matter how many slots the markup has.
  */
 export function useSlotValues(slots: string[]): Record<string, any> {
-  const key = slots.join(' ');
+  // Joined on a character a name cannot contain. It used to be a space,
+  // which quietly broke every slot whose name had one in it -- {{Row number}},
+  // or any block called "Total price".
+  const key = slots.join('\u0000');
 
   const valuesAtom = useMemo(
     () =>
       atom((get) => {
-        const byName: Record<string, any> = {};
-        for (const id of get(allBlockIdsAtom)) {
-          const state = get(blockRuntimeAtom(id));
-          const name = isGarbageName(state?.blockName)
-            ? getBlockTypeDisplayName(nodeTypeFromBlockId(id) ?? '')
-            : (state!.blockName as string);
-          // First one wins, so a later duplicate name cannot silently steal a slot.
-          if (!(name in byName)) byName[name] = state?.value;
-        }
+        // Same resolution the binding engine uses, via one function, so a
+        // template and a workflow can never disagree about which block a name
+        // refers to.
+        const byName = blockValuesByName({ get });
         const out: Record<string, any> = {};
-        for (const slot of key ? key.split(' ') : []) out[slot] = byName[slot];
+        for (const slot of key ? key.split('\u0000') : []) out[slot] = byName[slot];
         return out;
       }),
     [key]

@@ -725,6 +725,84 @@ with a browser is confirming the fix on the real domain.
 
 ---
 
+### Cycle 4 — text and dates, wherever a value is shown *(13 Aug 2026)*
+
+**The queue was reordered, on purpose, with a reason.** Top of the queue was
+Collections + per-visitor data. That is a schema migration and new RPCs — server
+work — and from here a migration cannot be applied (no network to Supabase) and
+cannot be verified afterwards (no browser, four cycles running). Building it now
+meant shipping several hundred lines of client code against RPCs that do not
+exist, entirely unproven, one cycle after finding a live XSS in code that looked
+right.
+
+**Standing rule added to HOW_WE_WORK: while live verification is blocked, build
+what can be proved and queue what cannot.**
+
+Text and dates was promoted, and it is not a detour — it finishes cycle 3. "For
+each row" shipped a blog list that renders `{{Created}}` as
+`2026-08-13T11:25:09.390Z`, with no way to turn that into "13 Aug 2026". Anyone
+picking up the repeater hits it in ten minutes.
+
+**A pipeline inside the slot**
+
+    {{Created | date: D MMM YYYY}}      13 Aug 2026
+    {{Created | ago}}                   3 hours ago
+    {{Price   | money: $}}              $1,234.50
+    {{Views   | number}}                1,204,000
+    {{Body    | truncate: 120}}         cut at a word, with an ellipsis
+    {{Photo   | default: none yet}}     what "empty" should look like
+    {{now     | plus: 7 days | date: dddd}}
+
+Fifteen filters — date, time, ago, plus, minus, money, number, round, percent,
+upper, lower, title, trim, truncate, default. They chain left to right and they
+work **everywhere slots already work**: My Design, For each row, and anything
+added later, because they live inside `fillSlots` rather than inside a block.
+`{{now}}` and `{{today}}` are available to every template, and lose to a real
+column of that name — the builder's data beats ours.
+
+**Two rules the whole file is built on**
+
+- **Every filter is total.** Nothing ever puts `NaN`, `Invalid Date` or
+  `undefined` on a page a stranger is reading. A filter that cannot do its job
+  returns the value untouched, so an unreadable date shows the raw text — a
+  nuisance — rather than "Invalid Date", which is a bug report.
+- **The clock is an argument.** Anything time-dependent takes `now` rather than
+  calling `Date.now()` inside itself, so checks can pin it. A test that passes in
+  August and fails in September is not a test.
+
+**Also: `setText`**, a workflow action that sets a value from a sentence —
+`Hello {{First}}, that is {{Total | money: $}}`. It resolves names through the
+same function templates use, so a workflow and a piece of markup can never
+disagree about what `{{First}}` means. Not escaped, because it produces a value
+rather than markup: a name with an ampersand should stay a name.
+
+**Three bugs the checks found while being written**
+
+1. **`a` is the am/pm token**, so `D MMM YYYY [at] HH:mm` rendered as
+   `3 Aug 2026 amt 09:05`. Square-bracket escaping added, plus the friendly
+   reading of an unclosed bracket — everything after it was obviously meant to be
+   their own words, so formatting the rest anyway helps nobody.
+2. **`default:` filled a zero.** `!value` is not the same as "blank", and 0 is an
+   answer. There is now a check named after that sentence.
+3. **`useSlotValues` joined slot names with a space and split on it**, which
+   quietly broke every slot whose name contained one — `{{Row number}}`, shipped
+   last cycle, or any block called "Total price". Pre-existing; found while
+   extracting the shared resolver.
+
+**One resolver.** `blockValuesByName` now lives in atoms.ts and is used by both
+`useSlotValues` and the binding engine, so there is one answer to "which block
+does this name mean".
+
+`npm run check` is now **299**, up from 202. Negative-controlled three ways:
+shortest-token-first (the `AugAug` bug) turned two red, `default:` filling a zero
+turned one red, and moving the URL guard *before* the filters turned red the
+check that proves `{{Link | default: javascript:alert(1)}}` cannot smuggle a
+scheme past it.
+
+**Live verification: four cycles owed.** Unchanged and not improving.
+
+---
+
 ## File Structure Summary
 
 ```

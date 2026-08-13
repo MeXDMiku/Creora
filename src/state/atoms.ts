@@ -170,6 +170,26 @@ export function getPortBadge(dataType: BlockDataType): string {
   }
 }
 
+/**
+ * Every block on the page, by the name a builder gave it.
+ *
+ * Extracted from useSlotValues so the binding engine can use it too: a workflow
+ * that says "Hello {{First}}" has to resolve names exactly the way a template
+ * does, and two resolvers would eventually disagree about which block wins.
+ * First one wins on a duplicate name, so a later block cannot steal a slot.
+ */
+export function blockValuesByName(store: any): Record<string, any> {
+  const byName: Record<string, any> = {};
+  for (const id of (store.get(allBlockIdsAtom) || []) as string[]) {
+    const state = store.get(blockRuntimeAtom(id));
+    const name = isGarbageName(state?.blockName)
+      ? getBlockTypeDisplayName(nodeTypeFromBlockId(id) ?? '')
+      : (state!.blockName as string);
+    if (!(name in byName)) byName[name] = state?.value;
+  }
+  return byName;
+}
+
 export function getCanvasBlocks(editor: any, store: any, excludeBlockId?: string): { id: string; type: string; label: string; dataType: BlockDataType }[] {
   if (!editor) return [];
   const list: { id: string; type: string; label: string; dataType: BlockDataType }[] = [];

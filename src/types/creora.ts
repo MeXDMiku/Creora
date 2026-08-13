@@ -41,6 +41,8 @@ export interface WorkflowStep {
     // `validate` shows the errors that were already true but hidden: a field is
     // only marked touched once, so a page does not shout at someone the moment
     // it loads. Pressing submit is what makes every field touched at once.
+    // Text out of other values: "Hello {{First}}", with filters.
+    | 'setText'
     | 'validate'
     | 'setLoading' | 'clearLoading'
     | 'setDisabled' | 'setEnabled';

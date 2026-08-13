@@ -527,3 +527,19 @@ file or opening the actual page.
   use that path — it has its own hook — but the List one is still there.
 - **A repeater cannot read a Database on another page.** The picker lists
   databases on the current page only, same limitation ListBlock has.
+
+## Added during cycle 4 (text and dates) — 13 Aug 2026
+
+- **`setText` is not available in the Otherwise branch.** `runElseAction` has its
+  own smaller switch, on purpose, so the interface cannot offer a branch the
+  engine cannot run. Adding it means adding it to both.
+- **No `month` duration.** `plus: 1 month` returns the value untouched, because a
+  month is not a fixed number of milliseconds and a "month" that is quietly 30
+  days is a bug someone finds in February. Real calendar arithmetic is a small
+  amount of work and should be done properly when it is done.
+- **Filters are not available in a Formula.** Formulas are numeric only; the
+  filter pipeline lives in slots and in `setText`. Probably fine forever, but
+  worth knowing when someone asks why.
+- **No timezone control.** Dates format in the viewer's local timezone. For a
+  page whose readers are in one place and whose author is in another, "posted
+  today" can be wrong by a day. Needs a per-block or per-page timezone setting.

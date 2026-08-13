@@ -16,8 +16,18 @@ import { blockRuntimeAtom, workflowsAtom, allBlockIdsAtom } from '../src/state/a
 import { executeWorkflow, validationErrorFor, markValidated } from '../src/lib/bindingEngine';
 import { withoutVisitorState, isBlockNodeType, BLOCK_NODE_TYPES } from '../src/lib/blockRegistry';
 import { safeUrl, isSafeUrlValue, schemeOf, stripIgnorable } from '../src/lib/urls';
-import { fillSlots, leadingSlotName } from '../src/lib/sanitizeHtml';
+import { fillSlots, leadingSlotName, findSlots as findSlotsForCheck } from '../src/lib/sanitizeHtml';
 import { visibleRows, rowSlots, compareCells, slotNamesFor, MAX_RENDERED_ROWS } from '../src/lib/rows';
+import {
+  parseSlot,
+  applyFilters,
+  renderTemplate,
+  formatDate,
+  relativeTime,
+  parseDuration,
+  toDate,
+  builtInSlotValue,
+} from '../src/lib/format';
 import {
   checkImageFile,
   normalizeImageUrl,
@@ -773,6 +783,233 @@ group('a template filled from a row');
     'a slot with no column becomes nothing rather than showing the braces',
     fillSlots('<p>{{Nope}}</p>', rowSlots(row, 0)),
     '<p></p>'
+  );
+}
+
+// ------------------------------------------------------- text and date filters
+/**
+ * Every date here is built from local parts on purpose. Asserting on a
+ * formatted UTC string would pass in London and fail in Sydney, and a check
+ * that depends on where it runs is worse than no check.
+ */
+const NOW = new Date(2026, 7, 13, 12, 0, 0); // 13 Aug 2026, midday, local
+const f = (name: string, arg = '') => [{ name, arg }];
+
+group('reading a slot and its filters');
+{
+  check('a plain name', parseSlot('Total'), { name: 'Total', filters: [] });
+  check('a name with a space stays whole', parseSlot('Row number'), { name: 'Row number', filters: [] });
+  check('one filter', parseSlot('Created | ago'), { name: 'Created', filters: [{ name: 'ago', arg: '' }] });
+  check(
+    'an argument containing colons survives',
+    parseSlot('Created | date: HH:mm:ss'),
+    { name: 'Created', filters: [{ name: 'date', arg: 'HH:mm:ss' }] }
+  );
+  check(
+    'a pipeline in order',
+    parseSlot('now | plus: 7 days | date: D MMM'),
+    { name: 'now', filters: [{ name: 'plus', arg: '7 days' }, { name: 'date', arg: 'D MMM' }] }
+  );
+  check('filter names are case-insensitive', parseSlot('X | UPPER').filters[0].name, 'upper');
+  check('nothing is nothing', parseSlot(''), { name: '', filters: [] });
+}
+
+group('writing a date the way a person would');
+{
+  const d = new Date(2026, 7, 3, 9, 5, 7); // 3 Aug 2026, 09:05:07
+  check('the readable default', formatDate(d, 'D MMM YYYY'), '3 Aug 2026');
+  check('padded numbers', formatDate(d, 'DD/MM/YYYY'), '03/08/2026');
+  check('the long month is not the short one repeated', formatDate(d, 'MMMM'), 'August');
+  check('longest token wins, so MMMM is not MMM plus M', formatDate(d, 'MMMM YYYY'), 'August 2026');
+  check('weekday, long and short', formatDate(d, 'dddd, ddd'), 'Monday, Mon');
+  check('24 hour clock', formatDate(d, 'HH:mm:ss'), '09:05:07');
+  check('12 hour clock with a suffix', formatDate(d, 'h:mm a'), '9:05 am');
+  check('afternoon', formatDate(new Date(2026, 7, 3, 17, 30), 'h:mm A'), '5:30 PM');
+  check('midnight is 12, not 0', formatDate(new Date(2026, 7, 3, 0, 30), 'h:mm a'), '12:30 am');
+  check('two digit year', formatDate(d, 'YY'), '26');
+  check(
+    'square brackets protect your own words, which matters because a is a token',
+    formatDate(d, 'D MMM YYYY [at] HH:mm'),
+    '3 Aug 2026 at 09:05'
+  );
+  check('without brackets, a really does mean am', formatDate(d, '[x]a[y]'), 'xamy');
+  check('an unclosed bracket is left as it was typed', formatDate(d, 'D [Aug'), '3 [Aug');
+}
+
+group('reading a date out of whatever a column holds');
+{
+  check('an ISO string', toDate('2026-08-13T11:25:09.390Z')?.getTime(), Date.parse('2026-08-13T11:25:09.390Z'));
+  check('milliseconds', toDate(1786000000000)?.getTime(), 1786000000000);
+  check('seconds, which is what most APIs send', toDate(1786000000)?.getTime(), 1786000000000);
+  check('a numeric string', toDate('1786000000000')?.getTime(), 1786000000000);
+  check('a Date passes through', toDate(NOW)?.getTime(), NOW.getTime());
+  check('nonsense is null, not an Invalid Date', toDate('not a date'), null);
+  check('empty is null', toDate(''), null);
+  check('null is null', toDate(null), null);
+}
+
+group('durations');
+{
+  check('a plural', parseDuration('7 days'), 7 * 86400000);
+  check('a singular', parseDuration('1 week'), 604800000);
+  check('a bare unit means one', parseDuration('day'), 86400000);
+  check('negative', parseDuration('-2 hours'), -7200000);
+  check('MONTHS ARE REFUSED, because a month is not a fixed length', parseDuration('1 month'), null);
+  check('nonsense', parseDuration('soon'), null);
+  check('empty', parseDuration(''), null);
+}
+
+group('how long ago');
+{
+  const ago = (ms: number) => relativeTime(new Date(NOW.getTime() - ms), NOW);
+  check('seconds are just now', ago(10 * 1000), 'just now');
+  check('one minute is singular', ago(60 * 1000), '1 minute ago');
+  check('several minutes', ago(5 * 60 * 1000), '5 minutes ago');
+  check('hours', ago(3 * 3600 * 1000), '3 hours ago');
+  check('a day', ago(86400000), '1 day ago');
+  check('days', ago(3 * 86400000), '3 days ago');
+  check('weeks', ago(3 * 604800000), '3 weeks ago');
+  check('four weeks still counts weeks', ago(4 * 604800000), '4 weeks ago');
+  check(
+    'past a month a real date is more use than counting weeks',
+    ago(60 * 86400000),
+    formatDate(new Date(NOW.getTime() - 60 * 86400000), 'D MMM YYYY')
+  );
+  check('the future reads forwards', relativeTime(new Date(NOW.getTime() + 2 * 86400000), NOW), 'in 2 days');
+}
+
+group('the filters themselves');
+{
+  const run = (v: any, name: string, arg = '') => applyFilters(v, f(name, arg), { now: NOW });
+
+  check('upper', run('ada', 'upper'), 'ADA');
+  check('lower', run('ADA', 'lower'), 'ada');
+  check('title', run('ada LOVELACE', 'title'), 'Ada Lovelace');
+  check('trim', run('  hi  ', 'trim'), 'hi');
+
+  check('truncate leaves short text alone', run('short', 'truncate', '20'), 'short');
+  check('truncate cuts at a word and never exceeds the limit', run('the quick brown fox jumps', 'truncate', '15').length <= 15, true);
+  check('truncate ends with an ellipsis', run('the quick brown fox jumps', 'truncate', '15').endsWith('…'), true);
+
+  check('default fills a blank', run('', 'default', 'none yet'), 'none yet');
+  check('default fills a null', run(null, 'default', 'none yet'), 'none yet');
+  check('DEFAULT DOES NOT FILL A ZERO, because 0 is an answer', run(0, 'default', 'none yet'), 0);
+  check('default leaves a value alone', run('here', 'default', 'none yet'), 'here');
+
+  check('round to whole', run(4.567, 'round'), '5');
+  check('round to places', run(4.567, 'round', '2'), '4.57');
+  check('round pads to the places asked for', run(4.5, 'round', '2'), '4.50');
+  check('number groups thousands', run(1204000, 'number'), '1,204,000');
+  check('number with decimals', run(1204000.5, 'number', '2'), '1,204,000.50');
+
+  check('money takes the symbol the builder wants', run(4.5, 'money', '$'), '$4.50');
+  check('money groups thousands', run(1234.5, 'money', '$'), '$1,234.50');
+  check('money puts the sign before the symbol', run(-9.5, 'money', '$'), '-$9.50');
+  check('money with no symbol is still money', run(4.5, 'money'), '4.50');
+  check('money reads a numeric string', run('12', 'money', '$'), '$12.00');
+
+  check('percent', run(0.125, 'percent', '1'), '12.5%');
+  check('percent whole', run(0.5, 'percent'), '50%');
+
+  check('date', run(new Date(2026, 0, 9), 'date', 'D MMM YYYY'), '9 Jan 2026');
+  check('date has a readable default pattern', run(new Date(2026, 0, 9), 'date'), '9 Jan 2026');
+  check('time', run(new Date(2026, 0, 9, 14, 30), 'time'), '14:30');
+  check('ago', run(new Date(NOW.getTime() - 3600000), 'ago'), '1 hour ago');
+}
+
+group('a filter never puts rubbish on a page');
+{
+  const run = (v: any, name: string, arg = '') => applyFilters(v, f(name, arg), { now: NOW });
+  check('date of nonsense is the nonsense, not Invalid Date', run('hello', 'date'), 'hello');
+  check('ago of nonsense is the nonsense', run('hello', 'ago'), 'hello');
+  check('money of nonsense is the nonsense, not NaN', run('hello', 'money', '$'), 'hello');
+  check('round of nonsense is the nonsense', run('hello', 'round'), 'hello');
+  check('percent of nothing is nothing', run('', 'percent'), '');
+  check('an unknown filter is a typo, not a blank page', run('kept', 'nosuchfilter'), 'kept');
+  check('date of an empty cell stays empty', run('', 'date'), '');
+}
+
+group('chaining, and the clock');
+{
+  const opts = { now: NOW };
+  check(
+    'move a date and then format it',
+    applyFilters(new Date(2026, 7, 13), [{ name: 'plus', arg: '7 days' }, { name: 'date', arg: 'D MMM YYYY' }], opts),
+    '20 Aug 2026'
+  );
+  check(
+    'minus goes the other way',
+    applyFilters(new Date(2026, 7, 13), [{ name: 'minus', arg: '1 week' }, { name: 'date', arg: 'D MMM' }], opts),
+    '6 Aug'
+  );
+  check(
+    'a Date left at the end of a pipe still becomes words',
+    applyFilters(new Date(2026, 7, 13), [{ name: 'plus', arg: '1 day' }], opts),
+    '14 Aug 2026'
+  );
+  check('now is the clock we were given', (builtInSlotValue('now', opts) as Date).getTime(), NOW.getTime());
+  check('today is midnight of it', (builtInSlotValue('today', opts) as Date).getHours(), 0);
+  check('anything else is not a built-in', builtInSlotValue('Price', opts), undefined);
+}
+
+group('filling a plain string, where nothing is markup');
+{
+  const values = { Name: 'Ada & Co', Total: 1234.5, Created: new Date(2026, 7, 13) };
+  check(
+    'values go in as themselves, ampersand and all',
+    renderTemplate('Hello {{Name}}', values),
+    'Hello Ada & Co'
+  );
+  check(
+    'filters work here too',
+    renderTemplate('That is {{Total | money: $}}', values),
+    'That is $1,234.50'
+  );
+  check(
+    'so do dates',
+    renderTemplate('Posted {{Created | date: D MMM YYYY}}', values),
+    'Posted 13 Aug 2026'
+  );
+  check(
+    'and the clock',
+    renderTemplate('Due {{now | plus: 7 days | date: D MMM YYYY}}', values, { now: NOW }),
+    'Due 20 Aug 2026'
+  );
+  check('an unknown name is nothing, not braces on the page', renderTemplate('[{{Nope}}]', values), '[]');
+  check('a real column called now beats the built-in', renderTemplate('{{now}}', { now: 'mine' }), 'mine');
+}
+
+group('filters in markup: escaped, and still URL-checked');
+{
+  check(
+    'a value is still escaped after a filter runs',
+    fillSlots('<p>{{Name | upper}}</p>', { Name: '<b>ada</b>' }),
+    '<p>&lt;B&gt;ADA&lt;/B&gt;</p>'
+  );
+  check(
+    'findSlots reports the name without its filters, so lookups still work',
+    findSlotsForCheck('<p>{{Created | date: D MMM}}</p>'),
+    ['Created']
+  );
+  check(
+    'the URL guard keys on the name, not the whole slot',
+    leadingSlotName('{{Link | default: /home}}'),
+    'Link'
+  );
+  check(
+    'A FILTER CANNOT SMUGGLE A SCHEME PAST THE GUARD: filters run first, the check runs after',
+    fillSlots('<a href="{{Link | default: javascript:alert(1)}}">x</a>', { Link: '' }, ['Link']),
+    '<a href="">x</a>'
+  );
+  check(
+    'a harmless default still works',
+    fillSlots('<a href="{{Link | default: /home}}">x</a>', { Link: '' }, ['Link']),
+    '<a href="/home">x</a>'
+  );
+  check(
+    'a date in markup',
+    fillSlots('<p>{{Created | date: D MMM YYYY}}</p>', { Created: new Date(2026, 7, 13) }),
+    '<p>13 Aug 2026</p>'
   );
 }
 

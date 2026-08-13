@@ -1,10 +1,11 @@
 import { getDefaultStore } from 'jotai';
 import jsep from 'jsep';
 import type { TriggerEvent } from '../types/creora';
-import { blockRuntimeAtom, workflowsAtom, formulasAtom, allBlockIdsAtom, getBlockDefaultValue , recordRun, type RunStep } from '../state/atoms';
+import { blockRuntimeAtom, workflowsAtom, formulasAtom, allBlockIdsAtom, getBlockDefaultValue , recordRun, blockValuesByName, type RunStep } from '../state/atoms';
 import { sendWebhook } from './webhook';
 import { computeDatabaseOutput } from './databaseOutput';
 import { validateValue } from './validation';
+import { renderTemplate } from './format';
 import { supabase } from './supabase';
 
 
@@ -825,6 +826,23 @@ export function executeWorkflow(
             document.body.removeChild(a);
             setTimeout(() => URL.revokeObjectURL(url), 1000);
           }
+          break;
+        }
+        case 'setText': {
+          /**
+           * Set a value from a sentence rather than a single number.
+           *
+           * "Hello {{First}}, you have {{Cart | number}} items" is the shape of
+           * every confirmation message, every label, every row a form writes.
+           * It resolves names through the same function templates use, so a
+           * workflow and a piece of markup can never disagree about what
+           * {{First}} means.
+           *
+           * Not escaped, because this produces a value rather than markup. A
+           * name with an ampersand in it should stay a name.
+           */
+          const text = renderTemplate(String(step.value ?? ''), blockValuesByName(store));
+          store.set(targetAtom, { ...currentTargetState, value: text });
           break;
         }
         case 'validate': {

@@ -4,6 +4,7 @@ import { blockRuntimeAtom, triggerSaveAtom, getBlockTypeDisplayName, getCanvasBl
 import { useStore } from 'jotai'
 import { sanitizeHtml } from '../lib/sanitizeHtml'
 import { MAX_RENDERED_ROWS } from '../lib/rows'
+import { FilterHelp } from '../components/FilterHelp'
 
 const fieldStyle: React.CSSProperties = {
   display: 'block',
@@ -134,6 +135,8 @@ export default function RepeatBlockInspector({ blockId, editor }: { blockId: str
           </span>
         </div>
       )}
+
+      <FilterHelp />
 
       {cleaned.removed.length > 0 && (
         <div style={{ marginBottom: '12px', padding: '8px', borderRadius: '6px', background: '#fef2f2', border: '1px solid #fecaca' }}>
