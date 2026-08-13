@@ -140,33 +140,31 @@ disagree, the audit is right and the queue is stale.
                                       new blocks. Menu grouped into the three
                                       layers at the same time.
 
-    1  Layout model                   Containers, stacking, reflow. Blocks sit at
-                                      fixed x/y and do not move on a phone. This
-                                      is a rewrite, not a feature, and it is the
-                                      whole of Phase C -- everything visual sits
-                                      on top of it, so the redesign after it is
-                                      the redesign done once.
+    -- Layout model                   DONE, cycle 10, 13 Aug. Per screen size,
+                                      inherited field by field, automatic until
+                                      touched. NOT SEEN ON A SCREEN -- the rules
+                                      are checked, the feel is not.
 
-    2  Visitor accounts               Email sign-in for the users of a BUILT
+    1  Visitor accounts               Email sign-in for the users of a BUILT
                                       site. Per-visitor rows exist; this is what
                                       makes them survive a second browser.
 
-    3  A private server layer         Edge Functions. Nowhere to keep a secret
+    2  A private server layer         Edge Functions. Nowhere to keep a secret
                                       today, which is why email, payments, API
                                       keys, spam guards and AI are all one
                                       missing foundation rather than five.
 
-    4  Email                          Tell the owner, tell the visitor. Small
+    3  Email                          Tell the owner, tell the visitor. Small
                                       once 5 exists, and half the ten site types
                                       are unfinished without it.
 
-    5  Roles and permissions          The Discord-style layer. Needs 2.
+    4  Roles and permissions          The Discord-style layer. Needs 1.
 
-    6  Payments and entitlements      Needs 2 and 3. Then perks, subscriptions
+    5  Payments and entitlements      Needs 1 and 2. Then perks, subscriptions
                                       and commission become settings rather than
                                       projects.
 
-    7  Rich text per row              Blogs and posts need more than one line.
+    6  Rich text per row              Blogs and posts need more than one line.
 
 Everything else lives in BACKLOG.md and does not jump this queue without a
 reason written down at step 6.

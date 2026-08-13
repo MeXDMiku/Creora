@@ -15,6 +15,7 @@ import { FieldView, FieldError } from '../blocks/FieldView';
 import { refreshPageValue, buildParamsFromTemplate } from '../lib/pageValue';
 import { parseParams } from '../lib/pageParams';
 import { nodeTypeFromBlockId } from '../lib/blockRegistry';
+import { layoutPage, PHONE_MAX_WIDTH, type StackItem, type BlockPlacement } from '../lib/layout';
 import { refreshVisitor } from '../lib/visitor';
 import { executeWorkflow, recalculateAllFormulas } from '../lib/bindingEngine';
 import { normalizeImageUrl, IMAGE_MIME_TYPES } from '../lib/images';
@@ -1128,35 +1129,20 @@ const FALLBACK_WIDTH: Record<string, number> = {
  * right — the way a person reads a two-column layout on a narrow screen.
  * A single-column page has one group and this degrades to a plain sort by y.
  */
-function orderForNarrow(blocks: ExtractedBlock[], store: any): ExtractedBlock[] {
-  const measured = blocks.map((b) => {
-    const pos = store.get(blockPositionAtom(b.id)) || { x: 0, y: 0 };
+/**
+ * The page's blocks, described the way src/lib/layout.ts wants them.
+ *
+ * Heights are not measured and not guessed: layoutPage returns automatic blocks
+ * as an ORDER and lets CSS decide the pixels, precisely because nothing here
+ * knows how tall a Text label ended up.
+ */
+function toStackItems(blocks: ExtractedBlock[], store: any): StackItem[] {
+  return blocks.map((b) => {
+    const placement = (store.get(blockPositionAtom(b.id)) || { x: 0, y: 0 }) as BlockPlacement;
     const rs = store.get(blockRuntimeAtom(b.id));
     const width = typeof rs?.width === 'number' ? rs.width : (FALLBACK_WIDTH[b.type] ?? 200);
-    const x = pos.x ?? 0;
-    return { b, x, y: pos.y ?? 0, right: x + width };
+    return { id: b.id, placement, width, height: 0 };
   });
-
-  measured.sort((a, z) => a.x - z.x);
-
-  const columns: (typeof measured)[] = [];
-  let current: typeof measured = [];
-  let currentRight = -Infinity;
-  for (const m of measured) {
-    if (current.length === 0 || m.x < currentRight) {
-      current.push(m);
-      currentRight = Math.max(currentRight, m.right);
-    } else {
-      columns.push(current);
-      current = [m];
-      currentRight = m.right;
-    }
-  }
-  if (current.length) columns.push(current);
-
-  return columns.flatMap((col) =>
-    col.sort((a, z) => a.y - z.y || a.x - z.x).map((m) => m.b)
-  );
 }
 
 export default function PublishedRenderer() {
@@ -1167,13 +1153,31 @@ export default function PublishedRenderer() {
   const [error, setError] = useState<string | null>(null);
   const [pageName, setPageName] = useState('Untitled');
   const [docItemsList, setDocItemsList] = useState<DocItem[]>([]);
-  const isNarrow = useIsNarrow();
-  const narrowBlocks = useMemo(
-    () => orderForNarrow(
-      docItemsList.flatMap((i) => (i.kind === 'block' ? [i.block] : [])),
-      store
-    ),
-    [docItemsList, store]
+  const isNarrow = useIsNarrow(PHONE_MAX_WIDTH);
+  const blocksOnPage = useMemo(
+    () => docItemsList.flatMap((i) => (i.kind === 'block' ? [i.block] : [])),
+    [docItemsList]
+  );
+  const pageLayout = useMemo(
+    () => layoutPage(toStackItems(blocksOnPage, store), isNarrow ? 'phone' : 'base'),
+    [blocksOnPage, store, isNarrow]
+  );
+  const autoBlocks = useMemo(
+    () => pageLayout.auto.map((id) => blocksOnPage.find((b) => b.id === id)).filter(Boolean) as ExtractedBlock[],
+    [pageLayout, blocksOnPage]
+  );
+  /**
+   * How much room the placed blocks need. Their own heights are unknown, so the
+   * lowest authored y plus a generous allowance is the honest answer -- and a
+   * builder who places blocks on a phone is choosing to own the arrangement.
+   */
+  const phoneAreaHeight = useMemo(() => {
+    const ys = Object.values(pageLayout.placed).map((p) => p.y + (p.height ?? 80));
+    return ys.length ? Math.max(...ys) + 'px' : undefined;
+  }, [pageLayout]);
+  const placedBlocks = useMemo(
+    () => blocksOnPage.filter((b) => pageLayout.placed[b.id] !== undefined),
+    [pageLayout, blocksOnPage]
   );
 
   /**
@@ -1328,19 +1332,53 @@ export default function PublishedRenderer() {
             <style>{`
               .creora-stacked > div { position: static !important; max-width: 100% !important; box-sizing: border-box; }
               .creora-stacked > div > * { max-width: 100%; box-sizing: border-box; }
-              .creora-stacked input, .creora-stacked table { max-width: 100%; box-sizing: border-box; }
+              .creora-stacked input, .creora-stacked textarea, .creora-stacked select, .creora-stacked table { max-width: 100%; box-sizing: border-box; }
             `}</style>
             {docItemsList.map((item, idx) =>
               item.kind === 'block' ? null : <RenderDocNode key={`n${idx}`} node={item.node} />
             )}
-            {narrowBlocks.map((block) => (
-              <AnimatedBlock
-                key={block.id}
-                block={block}
-                className="creora-stacked"
-                style={{ marginBottom: '18px' }}
-              />
-            ))}
+
+            {/*
+              Blocks the builder placed on a phone keep the exact coordinates
+              they were given, inside their own positioned area. Everything else
+              stacks below in reading order. Two paths in one renderer, not two
+              renderers -- the editor calls the same layoutPage.
+            */}
+            {placedBlocks.length > 0 && (
+              <div style={{ position: 'relative', height: phoneAreaHeight }}>
+                {placedBlocks.map((block) => {
+                  const at = pageLayout.placed[block.id];
+                  if (pageLayout.hidden[block.id]) return null;
+                  return (
+                    <AnimatedBlock
+                      key={block.id}
+                      block={block}
+                      style={{
+                        position: 'absolute',
+                        left: at.x + 'px',
+                        top: at.y + 'px',
+                        width: at.width !== undefined ? at.width + 'px' : undefined,
+                        height: 0,
+                        overflow: 'visible',
+                        margin: 0,
+                        padding: 0,
+                      }}
+                    />
+                  );
+                })}
+              </div>
+            )}
+
+            {autoBlocks.map((block) =>
+              pageLayout.hidden[block.id] ? null : (
+                <AnimatedBlock
+                  key={block.id}
+                  block={block}
+                  className="creora-stacked"
+                  style={{ marginBottom: '18px' }}
+                />
+              )
+            )}
           </>
         ) : (
           docItemsList.map((item, idx) => {

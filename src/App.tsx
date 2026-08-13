@@ -2,7 +2,7 @@ import { useEffect, useRef, useCallback, useState, useMemo } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { useSetAtom, useAtom, useAtomValue, useStore } from 'jotai'
-import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, getCanvasBlocks, shapeRoleDataType, currentPageIdAtom, currentPageIsPublishedAtom, pagesListAtom, switchPageFnAtom, isPreviewModeAtom, canvasModeAtom } from './state/atoms'
+import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, getCanvasBlocks, shapeRoleDataType, currentPageIdAtom, currentPageIsPublishedAtom, pagesListAtom, switchPageFnAtom, isPreviewModeAtom, canvasModeAtom, editingBreakpointAtom } from './state/atoms'
 import { newBlockId, defaultRuntimeForNodeType, defaultAttrsForNodeType, BLOCK_FOOTPRINT, nodeTypeFromBlockId, shortBlockId, isBlockNodeType, withoutVisitorState, type BlockNodeType } from './lib/blockRegistry'
 import { ButtonBlock } from './blocks/ButtonBlock'
 import { NumberDisplayBlock } from './blocks/NumberDisplayBlock'
@@ -21,6 +21,8 @@ import { VisitorBlock } from './blocks/VisitorBlock'
 import { ImageBlock } from './blocks/ImageBlock'
 import { RepeatBlock } from './blocks/RepeatBlock'
 import { PageValueBlock } from './blocks/PageValueBlock'
+import { PHONE_MAX_WIDTH } from './lib/layout'
+import { PlacementControls } from './components/PlacementControls'
 import { WireOverlay } from './components/WireOverlay'
 import { supabase } from './lib/supabase'
 import { ensureSession } from './lib/session'
@@ -58,7 +60,12 @@ function InspectorControls({ blockId, editor }: { blockId: string; editor: any }
     return <div style={{ fontSize: '12px', color: '#ef4444' }}>No inspector found for {blockType}</div>
   }
 
-  return <InspectorComponent blockId={blockId} editor={editor} />
+  return (
+    <>
+      <PlacementControls blockId={blockId} />
+      <InspectorComponent blockId={blockId} editor={editor} />
+    </>
+  )
 }
 
 /** The header said `Inspector (buttonBlock__jdzm71nxbk)`. Nobody knows which block that is. */
@@ -1416,6 +1423,7 @@ function App() {
   const [showRuns, setShowRuns] = useState(false)
   const runCount = useAtomValue(workflowRunsAtom).length
   const [canvasMode, setCanvasMode] = useAtom(canvasModeAtom)
+  const [editingBreakpoint, setEditingBreakpoint] = useAtom(editingBreakpointAtom)
 
   const activePageIdRef = useRef(PAGE_ID)
   useEffect(() => {
@@ -3176,6 +3184,33 @@ function App() {
             {isPreviewMode ? '👁 Edit Mode' : '👁 Preview'}
           </button>
 
+          {/*
+            Which screen size is being arranged. Not a preview -- the canvas
+            really is narrower, and dragging really does write somewhere else.
+          */}
+          <div style={{ display: 'flex', marginLeft: '8px', border: '1px solid #cbd5e1', borderRadius: '6px', overflow: 'hidden' }}>
+            {(['base', 'phone'] as const).map((bp) => (
+              <button
+                key={bp}
+                onClick={() => setEditingBreakpoint(bp)}
+                title={bp === 'base'
+                  ? 'Arrange the page as it is on a laptop'
+                  : 'Arrange the page as it is on a phone. Anything you have not placed here stacks automatically.'}
+                style={{
+                  padding: '6px 10px',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  background: editingBreakpoint === bp ? '#475569' : '#ffffff',
+                  color: editingBreakpoint === bp ? '#ffffff' : '#475569',
+                }}
+              >
+                {bp === 'base' ? '🖥 Laptop' : '📱 Phone'}
+              </button>
+            ))}
+          </div>
+
           <button
             onClick={() => setShowRuns((v: boolean) => !v)}
             title="See what fired, and what did not"
@@ -3315,8 +3350,30 @@ function App() {
             opacity: isCrossfading ? 0 : 1,
             transition: 'opacity 150ms ease-in-out',
             pointerEvents: isCrossfading ? 'none' : 'auto',
+            // Arranging the phone layout narrows the canvas for real, so the
+            // coordinates being dragged are the coordinates a visitor gets.
+            // A preview that is the right shape but the wrong size teaches the
+            // wrong thing.
+            ...(editingBreakpoint === 'phone'
+              ? {
+                  maxWidth: PHONE_MAX_WIDTH + 'px',
+                  borderLeft: '1px dashed #cbd5e1',
+                  borderRight: '1px dashed #cbd5e1',
+                  background:
+                    'repeating-linear-gradient(90deg, transparent, transparent 39px, rgba(148,163,184,0.08) 39px, rgba(148,163,184,0.08) 40px)',
+                }
+              : null),
           }}
         >
+          {editingBreakpoint === 'phone' && (
+            <div style={{
+              position: 'sticky', top: 0, zIndex: 5,
+              padding: '4px 8px', fontSize: '11px', color: '#64748b',
+              background: '#f8fafc', borderBottom: '1px dashed #cbd5e1',
+            }}>
+              Phone layout · anything you have not moved here stacks automatically, in reading order
+            </div>
+          )}
           <EditorContent editor={editor} style={{ flex: 1, position: 'relative', pointerEvents: activeWire ? 'none' : 'auto' }} />
           {!isPreviewMode && canvasMode === 'action' && <WireOverlay />}
           {!isPreviewMode && <ConnectionPopup editor={editor} />}

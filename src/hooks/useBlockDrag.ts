@@ -1,10 +1,34 @@
 import { useRef, useCallback } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
-import { blockPositionAtom, selectedBlockIdAtom, triggerSaveAtom, isPreviewModeAtom } from '../state/atoms';
+import { blockPositionAtom, selectedBlockIdAtom, triggerSaveAtom, isPreviewModeAtom, editingBreakpointAtom } from '../state/atoms';
+import { resolveLayout } from '../lib/layout';
 
 export function useBlockDrag(blockId: string, containerRef: React.RefObject<HTMLElement>) {
-  const position = useAtomValue(blockPositionAtom(blockId));
-  const setPosition = useSetAtom(blockPositionAtom(blockId));
+  /**
+   * The one place breakpoints touch dragging.
+   *
+   * The drag maths is unchanged. What changed is which key it reads and writes:
+   * arranging the phone layout writes into `phone`, and a block that had never
+   * been placed there becomes placed the moment it is moved -- which is exactly
+   * how "automatic until you touch it" is implemented.
+   */
+  const placement = useAtomValue(blockPositionAtom(blockId));
+  const setPlacement = useSetAtom(blockPositionAtom(blockId));
+  const breakpoint = useAtomValue(editingBreakpointAtom);
+
+  const resolved = resolveLayout(placement, breakpoint);
+  const position = { x: resolved.x, y: resolved.y };
+
+  const setPosition = useCallback(
+    (next: { x: number; y: number }) => {
+      setPlacement((prev) =>
+        breakpoint === 'phone'
+          ? { ...prev, phone: { ...(prev.phone || {}), x: next.x, y: next.y } }
+          : { ...prev, x: next.x, y: next.y }
+      );
+    },
+    [setPlacement, breakpoint]
+  );
   const setSelected = useSetAtom(selectedBlockIdAtom);
   const triggerSave = useSetAtom(triggerSaveAtom);
   const isPreviewMode = useAtomValue(isPreviewModeAtom);

@@ -19,6 +19,14 @@ import { describeCollectionError, MIGRATION_DOC } from '../src/lib/collections';
 import { parseParams, readParam, buildQuery, parseParamTemplate } from '../src/lib/pageParams';
 import { resolvePageValue, buildParamsFromTemplate } from '../src/lib/pageValue';
 import {
+  resolveLayout,
+  layoutPage,
+  stackOrder,
+  isPlacedOnPhone,
+  breakpointForWidth,
+  PHONE_MAX_WIDTH,
+} from '../src/lib/layout';
+import {
   parseOptions,
   parseChosen,
   toggleChosen,
@@ -1437,6 +1445,167 @@ group('validation still applies whatever kind of field it is');
   );
   check('and when it was not', evaluateCondition('Small', 'contains', 'Large'), false);
   check('a number field still gets number rules', validateValue('abc', [{ type: 'number' }], { fieldName: 'Age' }), 'Age must be a number');
+}
+
+// ------------------------------------------------------------ the layout model
+group('which screen size is this');
+{
+  check('a phone', breakpointForWidth(390), 'phone');
+  check('exactly the boundary is still a phone', breakpointForWidth(PHONE_MAX_WIDTH), 'phone');
+  check('one pixel over is not', breakpointForWidth(PHONE_MAX_WIDTH + 1), 'base');
+  check('a laptop', breakpointForWidth(1440), 'base');
+}
+
+group('a phone placement inherits the desktop one, field by field');
+{
+  const placement = { x: 400, y: 100, width: 300, height: 80 };
+
+  check('with nothing overridden, the desktop layout is used', resolveLayout(placement, 'phone'), {
+    x: 400, y: 100, width: 300, height: 80, hidden: undefined,
+  });
+  check(
+    'OVERRIDING ONE FIELD DOES NOT RESET THE OTHERS',
+    resolveLayout({ ...placement, phone: { x: 16 } }, 'phone'),
+    { x: 16, y: 100, width: 300, height: 80, hidden: undefined }
+  );
+  check(
+    'width alone',
+    resolveLayout({ ...placement, phone: { width: 340 } }, 'phone').width,
+    340
+  );
+  check(
+    'hidden on a phone, present everywhere else',
+    [resolveLayout({ ...placement, phone: { hidden: true } }, 'phone').hidden,
+     resolveLayout({ ...placement, phone: { hidden: true } }, 'base').hidden],
+    [true, undefined]
+  );
+  check('the desktop layout ignores phone overrides entirely', resolveLayout({ ...placement, phone: { x: 16 } }, 'base').x, 400);
+  check('a missing placement does not throw', resolveLayout(undefined, 'phone'), {
+    x: 0, y: 0, width: undefined, height: undefined, hidden: undefined,
+  });
+}
+
+group('placed, or automatic');
+{
+  check('never touched on a phone', isPlacedOnPhone({ x: 0, y: 0 }), false);
+  check('an empty phone object is still not placed', isPlacedOnPhone({ x: 0, y: 0, phone: {} }), false);
+  check('a width alone is not a position', isPlacedOnPhone({ x: 0, y: 0, phone: { width: 300 } }), false);
+  check('HALF a position is not a position', isPlacedOnPhone({ x: 0, y: 0, phone: { x: 16 } }), false);
+  check('both is', isPlacedOnPhone({ x: 0, y: 0, phone: { x: 16, y: 20 } }), true);
+  check('the origin counts, because 0 is a real coordinate', isPlacedOnPhone({ x: 0, y: 0, phone: { x: 0, y: 0 } }), true);
+}
+
+group('the order automatic blocks stack in');
+{
+  // Two columns: labels on the left, values on the right.
+  const twoColumns = [
+    { id: 'labelA', placement: { x: 0, y: 0 }, width: 100, height: 30 },
+    { id: 'valueA', placement: { x: 200, y: 0 }, width: 100, height: 30 },
+    { id: 'labelB', placement: { x: 0, y: 60 }, width: 100, height: 30 },
+    { id: 'valueB', placement: { x: 200, y: 60 }, width: 100, height: 30 },
+  ];
+  check(
+    'COLUMN BY COLUMN, not top to bottom -- otherwise a two-column form reads label, label, value, value',
+    stackOrder(twoColumns),
+    ['labelA', 'labelB', 'valueA', 'valueB']
+  );
+
+  const oneColumn = [
+    { id: 'c', placement: { x: 10, y: 200 }, width: 300, height: 30 },
+    { id: 'a', placement: { x: 0, y: 0 }, width: 300, height: 30 },
+    { id: 'b', placement: { x: 20, y: 100 }, width: 300, height: 30 },
+  ];
+  check('overlapping blocks are one column, read downwards', stackOrder(oneColumn), ['a', 'b', 'c']);
+  check('nothing to stack', stackOrder([]), []);
+  check('one block', stackOrder([{ id: 'only', placement: { x: 5, y: 5 }, width: 10, height: 10 }]), ['only']);
+}
+
+group('the whole page, at one screen size');
+{
+  const items = [
+    { id: 'a', placement: { x: 0, y: 0 }, width: 300, height: 40 },
+    { id: 'b', placement: { x: 0, y: 100 }, width: 300, height: 40 },
+  ];
+
+  const desktop = layoutPage(items, 'base');
+  check('on a desktop nothing moves', [desktop.placed.a.x, desktop.placed.a.y, desktop.placed.b.y], [0, 0, 100]);
+  check('and nothing is automatic', desktop.auto, []);
+
+  const phone = layoutPage(items, 'phone');
+  check('on a phone, untouched blocks are automatic rather than positioned', phone.auto, ['a', 'b']);
+  check(
+    'AND THEY COME BACK AS AN ORDER, NOT AS COORDINATES -- nothing here knows how tall a Text label is',
+    Object.keys(phone.placed),
+    []
+  );
+
+  const withPlaced = [
+    { id: 'header', placement: { x: 0, y: 0, phone: { x: 0, y: 0, width: 390 } }, width: 800, height: 60 },
+    ...items,
+  ];
+  const mixed = layoutPage(withPlaced, 'phone');
+  check('a placed block keeps exactly what it was given', [mixed.placed.header.x, mixed.placed.header.y, mixed.placed.header.width], [0, 0, 390]);
+  check('the rest stay automatic, in order', mixed.auto, ['a', 'b']);
+  check('a placed block is not also in the automatic list', mixed.auto.includes('header'), false);
+
+  const hiddenOnPhone = layoutPage(
+    [{ id: 'x', placement: { x: 0, y: 0, phone: { hidden: true } }, width: 100, height: 20 }],
+    'phone'
+  );
+  check(
+    'an automatic block can still be hidden on a phone, though it was never placed there',
+    hiddenOnPhone.hidden.x,
+    true
+  );
+  check('and it is visible on a desktop', layoutPage(
+    [{ id: 'x', placement: { x: 0, y: 0, phone: { hidden: true } }, width: 100, height: 20 }],
+    'base'
+  ).hidden.x, false);
+}
+
+group('pages saved before any of this are untouched');
+{
+  // Every page in existence has {x, y} and no phone key at all.
+  const old = [
+    { id: 'a', placement: { x: 40, y: 80 }, width: 200, height: 40 },
+    { id: 'b', placement: { x: 300, y: 80 }, width: 200, height: 40 },
+  ];
+  const desktop = layoutPage(old, 'base');
+  check('the desktop layout is exactly what was saved', [desktop.placed.a.x, desktop.placed.a.y, desktop.placed.b.x], [40, 80, 300]);
+  check('no width is invented', desktop.placed.a.width, undefined);
+  check('nothing is hidden that was not', desktop.hidden.a, false);
+  check('and on a phone they are all automatic, which is what they get today', layoutPage(old, 'phone').auto, ['a', 'b']);
+}
+
+group('a block can be given back to automatic');
+{
+  // The other half of "automatic until you touch it". Without a way back, one
+  // accidental nudge means hand-placing that block forever.
+  const backToAutomatic = (placement: any) => {
+    const phone = { ...(placement.phone || {}) };
+    delete phone.x;
+    delete phone.y;
+    const next: any = { ...placement };
+    if (Object.keys(phone).length === 0) delete next.phone;
+    else next.phone = phone;
+    return next;
+  };
+
+  const placed = { x: 0, y: 0, phone: { x: 16, y: 40 } };
+  check('it was placed', isPlacedOnPhone(placed), true);
+  check('and afterwards it is automatic again', isPlacedOnPhone(backToAutomatic(placed)), false);
+  check(
+    'THE PHONE KEY IS REMOVED, NOT EMPTIED -- an empty object still reads as "there is a phone placement"',
+    backToAutomatic(placed).phone,
+    undefined
+  );
+  check(
+    'but a phone-only setting that is not a position survives',
+    backToAutomatic({ x: 0, y: 0, phone: { x: 16, y: 40, hidden: true } }).phone,
+    { hidden: true }
+  );
+  check('and it is still hidden afterwards', resolveLayout(backToAutomatic({ x: 0, y: 0, phone: { x: 16, y: 40, hidden: true } }), 'phone').hidden, true);
+  check('doing it to a block that was never placed changes nothing', backToAutomatic({ x: 5, y: 5 }), { x: 5, y: 5 });
 }
 
 group('nobody has hand-written the block list again');

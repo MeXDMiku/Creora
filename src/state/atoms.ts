@@ -2,6 +2,7 @@ import { atom } from 'jotai';
 import { atomFamily } from 'jotai/utils';
 import type { Workflow, FormulaBinding, PageSummary, BlockRuntimeState } from '../types/creora';
 import { nodeTypeFromBlockId, defaultValueForNodeType, defaultRuntimeForNodeType, shortBlockId, isBlockNodeType } from '../lib/blockRegistry';
+import type { BlockPlacement } from '../lib/layout';
 
 /**
  * Block type is resolved from the ID via the registry, which is exact for
@@ -46,8 +47,14 @@ export const blockRuntimeAtom = atomFamily((blockId: string) => {
   return atom<BlockRuntimeState>(defaultRuntimeForNodeType(nodeTypeFromBlockId(blockId)));
 });
 
+/**
+ * Where a block sits. `{x, y}` is the desktop placement, and an optional
+ * `phone` holds only what differs -- see src/lib/layout.ts. Every page saved
+ * before breakpoints existed is exactly `{x, y}`, and still means the same
+ * thing.
+ */
 export const blockPositionAtom = atomFamily((_blockId: string) => {
-  return atom<{ x: number; y: number }>({ x: 100, y: 100 });
+  return atom<BlockPlacement>({ x: 100, y: 100 });
 });
 
 export const workflowsAtom = atom<Workflow[]>([]);
@@ -87,6 +94,15 @@ export const pendingConnectionAtom = atom<{
  * while designing it is a detail page nobody designs well.
  */
 export const pageParamsAtom = atom<Record<string, string> | null>(null);
+
+/**
+ * Which screen size the builder is arranging.
+ *
+ * Changing this does not change the drag system -- it changes which key a drag
+ * writes to. That single sentence is the difference between a layout model and
+ * a rewrite of dragging and selection.
+ */
+export const editingBreakpointAtom = atom<'base' | 'phone'>('base');
 
 export const triggerSaveAtom = atom<number>(0);
 

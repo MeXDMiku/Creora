@@ -1110,6 +1110,72 @@ as separators, click order, and keeping a removed choice — five went red.
 
 ---
 
+### Cycle 10 — the layout model *(13 Aug 2026)*
+
+The item everyone calls a rewrite. **It was not one, because the rewrite people
+mean is a rewrite of dragging and selection, and none of that was touched.**
+
+**What was deliberately not built.** Containers, stacking contexts, flex rules —
+Webflow. Two reasons. It imposes a paradigm, and Creora's premise is the
+opposite: somebody brings a design and Creora attaches behaviour behind it, so a
+system that reflows their design into stacks is fighting the product. And it is
+in practice a rewrite of the drag system, which is the browser-dependent half
+that has been unverifiable for six cycles.
+
+**The model: absolute positioning stays, and becomes per screen size.**
+
+1. A phone placement **inherits** the desktop one, *field by field*. Override the
+   x and keep the width. Overriding one thing and silently resetting four others
+   is a design people stop trusting.
+2. A block never placed on a phone is **automatic** — it stacks with everything
+   else that was never placed, in reading order.
+3. The moment a builder drags it on the phone layout, it stops being automatic.
+
+**Auto by default, authored the instant you touch it.** A default is never a
+ceiling, applied to position.
+
+**The whole breakpoint change to dragging is which key it writes to.** That
+sentence is the difference between one cycle and five. `useBlockDrag` resolves
+the placement for the breakpoint being edited and writes back into `phone` or
+into the base — the drag maths is untouched, and every block got this without a
+line changed in any of them.
+
+**A correction made mid-cycle, and the reason it matters.** The first version of
+`layoutPage` returned fabricated coordinates for automatic blocks, computed from
+assumed heights. **Heights are the one thing nothing here knows** — a Text label
+is however tall its text made it. Stacking on invented arithmetic produces a page
+whose blocks overlap by an unpredictable amount, and it would have looked
+completely reasonable in a test that supplied the heights. It now returns
+automatic blocks as an **order**, and CSS — which does know how tall things are —
+decides the pixels. Placed blocks keep exact coordinates.
+
+**The trap caught before shipping: there was no way back.** Once a block was
+dragged on the phone layout it could never return to automatic, the builder could
+not tell it had happened, and one accidental nudge meant hand-placing that block
+forever. `PlacementControls` adds *Back to automatic*, and it **removes** the
+phone key rather than emptying it — an empty object still reads as "there is a
+phone placement here". A phone-only setting that is not a position, like hidden,
+survives.
+
+Also: hide-per-screen-size, for both directions.
+
+**Old pages are untouched.** Every page in existence is `{x, y}` with no phone
+key, which resolves to exactly what it does today, and on a phone they are all
+automatic — which is also what they get today. There is a check group named after
+that sentence.
+
+`npm run check` is **498**, up from 459. Negative-controlled three ways —
+all-or-nothing inheritance, top-to-bottom stacking, and automatic blocks
+ignoring the placed ones — three named checks went red.
+
+**What is NOT proved: any of it, on a screen.** The resolution rules are held by
+checks. Whether dragging in a 640px canvas feels right, whether the sticky note
+is in the way, whether a stacked phone page looks like anything — none of that
+can be known from here. **This is the cycle where the six-cycle verification debt
+costs the most**, and it is worth saying plainly rather than at the end.
+
+---
+
 ## File Structure Summary
 
 ```
