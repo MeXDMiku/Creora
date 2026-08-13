@@ -12,6 +12,8 @@ import { computeDatabaseOutput } from '../lib/databaseOutput';
 import { CustomHtmlView } from '../blocks/CustomHtmlBlock';
 import { refreshVisitor } from '../lib/visitor';
 import { executeWorkflow, recalculateAllFormulas, markValidated } from '../lib/bindingEngine';
+import { normalizeImageUrl, IMAGE_MIME_TYPES } from '../lib/images';
+import { uploadImage } from '../lib/imageUpload';
 import {
   blockPositionAtom,
   blockRuntimeAtom,
@@ -582,6 +584,11 @@ function RenderedBlock({ block }: { block: ExtractedBlock }) {
   const runtimeState = useAtomValue(blockRuntimeAtom(block.id));
   const store = useStore();
   const navigate = useNavigate();
+  // Declared for every block rather than inside the image branch, because a
+  // hook behind an `if` is a hook that fires in a different order on the next
+  // render. Two unused refs cost nothing; a conditional hook costs the page.
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [brokenUrl, setBrokenUrl] = useState<string | null>(null);
 
   /**
    * A published page is a real route, so navigation is a router push, not the
@@ -728,6 +735,117 @@ function RenderedBlock({ block }: { block: ExtractedBlock }) {
             {runtimeState?.validationError}
           </div>
         )}
+      </div>
+    );
+  }
+
+  if (block.type === 'imageBlock') {
+    /**
+     * The picture, and optionally the way a visitor replaces it.
+     *
+     * The upload writes the new address into this block's value, which is all
+     * it does. A form that wants to keep that address maps this block into a
+     * Database column exactly as it would map a text field -- there is no
+     * special "file column" concept, because the file is already just a value.
+     */
+    const url = normalizeImageUrl(runtimeState?.value);
+    const isBusy = !!runtimeState?.loading;
+    const uploadError = runtimeState?.uploadError || null;
+    const isBroken = !!url && brokenUrl === url;
+    const canUpload = !!runtimeState?.allowVisitorUpload;
+    const clickable = !!runtimeState?.targetPageId || canUpload;
+
+    const boxWidth = runtimeState?.width !== undefined ? runtimeState.width : 240;
+    const boxHeight = runtimeState?.height !== undefined ? runtimeState.height : 160;
+    const radius = (runtimeState?.borderRadius ?? 8) + 'px';
+
+    return (
+      <div style={outerStyle}>
+        <div style={{ position: 'relative', width: boxWidth + 'px' }}>
+          {canUpload && (
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={IMAGE_MIME_TYPES.join(',')}
+              style={{ display: 'none' }}
+              onChange={async (e) => {
+                const file = e.target.files && e.target.files[0];
+                e.target.value = '';
+                if (file) await uploadImage(file, block.id, store);
+              }}
+            />
+          )}
+
+          {url && !isBroken ? (
+            <img
+              src={url}
+              alt={runtimeState?.alt || ''}
+              style={{ ...innerStyle, cursor: clickable ? 'pointer' : 'default' }}
+              onError={() => setBrokenUrl(url)}
+              onClick={() => {
+                if (isBusy) return;
+                if (canUpload) fileInputRef.current?.click();
+                runTrigger();
+              }}
+            />
+          ) : (
+            <div
+              onClick={() => {
+                if (isBusy) return;
+                if (canUpload) fileInputRef.current?.click();
+                runTrigger();
+              }}
+              style={{
+                width: boxWidth + 'px',
+                height: boxHeight + 'px',
+                borderRadius: radius,
+                border: '2px dashed #cbd5e1',
+                background: '#f8fafc',
+                color: '#64748b',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                textAlign: 'center',
+                fontSize: '13px',
+                padding: '8px',
+                boxSizing: 'border-box',
+                cursor: canUpload ? 'pointer' : 'default',
+                userSelect: 'none',
+              }}
+            >
+              {canUpload
+                ? runtimeState?.uploadHint || 'Choose a picture'
+                : isBroken
+                  ? runtimeState?.alt || 'This picture could not be loaded'
+                  : runtimeState?.alt || ''}
+            </div>
+          )}
+
+          {isBusy && (
+            <div
+              style={{
+                position: 'absolute',
+                inset: 0,
+                borderRadius: radius,
+                background: 'rgba(15,23,42,0.55)',
+                color: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '13px',
+                fontWeight: 600,
+              }}
+            >
+              Uploading...
+            </div>
+          )}
+
+          {uploadError && (
+            <div role="alert" style={{ marginTop: '4px', fontSize: '12px', lineHeight: 1.35, color: '#dc2626' }}>
+              {uploadError}
+            </div>
+          )}
+        </div>
       </div>
     );
   }

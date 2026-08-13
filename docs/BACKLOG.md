@@ -492,3 +492,19 @@ different AIs, and all of them died within minutes of someone reading the actual
 file or opening the actual page.
 
 **And the discipline: no new planning until the current step ships.**
+
+## Added during cycle 2 (images) — 13 Aug 2026
+
+- **Unused images accumulate.** No `update` or `delete` policy exists on the
+  bucket, deliberately: it means an upload can never destroy a picture already
+  on a live page. The cost is that replaced images stay forever. Not urgent
+  until storage actually fills; the fix is a sweep that deletes objects under a
+  page prefix no block still points at.
+- **No image resizing.** A 5MB upload is served at 5MB to every visitor. Egress
+  is the free-tier limit that runs out first. Supabase image transformations are
+  a paid feature; a client-side downscale before upload is the free version and
+  is the better first move.
+- **Gallery** — falls out of "for each row", which is queue item 1. Listed here
+  only so it is not mistaken for something forgotten.
+- **Drag and drop onto an Image block.** The file picker works; dropping a file
+  on the block does not. Small, obvious, not blocking anything.

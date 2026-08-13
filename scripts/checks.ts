@@ -15,6 +15,15 @@ import type { ValidationRule } from '../src/lib/validation';
 import { blockRuntimeAtom, workflowsAtom, allBlockIdsAtom } from '../src/state/atoms';
 import { executeWorkflow, validationErrorFor, markValidated } from '../src/lib/bindingEngine';
 import { withoutVisitorState, isBlockNodeType, BLOCK_NODE_TYPES } from '../src/lib/blockRegistry';
+import {
+  checkImageFile,
+  normalizeImageUrl,
+  isProbablyImageUrl,
+  storagePathFor,
+  describeUploadError,
+  MAX_IMAGE_BYTES,
+  IMAGE_BUCKET,
+} from '../src/lib/images';
 import { defaultRuntimeForNodeType } from '../src/lib/blockRegistry';
 
 /**
@@ -358,11 +367,13 @@ group('what gets saved, and what must never be');
     validationError: 'Email is required',
     loading: true,
     fetchError: 'network down',
+    uploadError: 'the bucket is missing',
   };
   const clean = withoutVisitorState(dirty);
   check('touched is dropped', 'touched' in clean, false);
   check('the error is dropped', 'validationError' in clean, false);
   check('a stale fetch error is dropped', 'fetchError' in clean, false);
+  check('an upload failure is dropped', 'uploadError' in clean, false);
   check('busy is forced off', clean.loading, false);
   check('the rules survive, because they are the page', clean.rules!.length, 1);
   check('the name survives', clean.blockName, 'Email');
@@ -373,9 +384,12 @@ group('what gets saved, and what must never be');
 group('every block type is a block type');
 {
   const missed = BLOCK_NODE_TYPES.filter((t) => !isBlockNodeType(t));
-  check('all 14 recognised', missed, []);
-  check('count is 14', BLOCK_NODE_TYPES.length, 14);
-  check('the newest three are included', ['dataSourceBlock', 'customHtmlBlock', 'visitorBlock'].every(isBlockNodeType), true);
+  check('every declared type is recognised', missed, []);
+  // Deliberately not a hardcoded count. A number here goes stale the first time
+  // a block is added, and a check that has to be edited to keep passing trains
+  // you to edit checks.
+  check('no duplicates in the list', BLOCK_NODE_TYPES.length, new Set(BLOCK_NODE_TYPES).size);
+  check('the ones added most recently are included', ['dataSourceBlock', 'customHtmlBlock', 'visitorBlock', 'imageBlock'].every(isBlockNodeType), true);
   check('a paragraph is not a block', isBlockNodeType('paragraph'), false);
   check('undefined is not a block', isBlockNodeType(undefined), false);
 }
@@ -412,6 +426,115 @@ group('every block type is registered everywhere it has to be');
   check('every type can be inserted', missingInsert, []);
   check('every type is a TipTap extension', missingExtension, []);
   check('every type renders when published', missingPublished, []);
+}
+
+// -------------------------------------------------------------------- images
+group('which files may be uploaded');
+{
+  const png = { name: 'photo.png', type: 'image/png', size: 200_000 };
+  check('a normal png is fine', checkImageFile(png), null);
+  check('a jpeg is fine', checkImageFile({ name: 'a.jpg', type: 'image/jpeg', size: 10 }), null);
+  check('an svg is fine', checkImageFile({ name: 'logo.svg', type: 'image/svg+xml', size: 900 }), null);
+  check('nothing chosen', checkImageFile(null), 'No file was chosen');
+  check('an empty file', checkImageFile({ name: 'a.png', type: 'image/png', size: 0 }), 'That file is empty');
+  check(
+    'too big says how big, and what the limit is',
+    checkImageFile({ name: 'a.png', type: 'image/png', size: 9 * 1024 * 1024 }),
+    'That image is 9.0MB. The limit is 5.0MB - try exporting it smaller.'
+  );
+  check('exactly at the limit is allowed', checkImageFile({ name: 'a.png', type: 'image/png', size: MAX_IMAGE_BYTES }), null);
+  check(
+    'HEIC is named, not just refused',
+    checkImageFile({ name: 'IMG_4021.HEIC', type: 'image/heic', size: 1000 }),
+    'iPhone photos are saved as HEIC, which browsers cannot show. Export or convert it to JPEG first.'
+  );
+  check(
+    'HEIC caught by extension when the browser gives no type',
+    checkImageFile({ name: 'IMG_4021.heic', type: '', size: 1000 }),
+    'iPhone photos are saved as HEIC, which browsers cannot show. Export or convert it to JPEG first.'
+  );
+  check(
+    'a pdf is refused by name',
+    checkImageFile({ name: 'a.pdf', type: 'application/pdf', size: 1000 }),
+    'application/pdf is not an image format a browser can show. Use PNG, JPEG, GIF, WebP, AVIF or SVG.'
+  );
+}
+
+group('addresses that may become a picture');
+{
+  check('https survives untouched', normalizeImageUrl('https://x.com/a.png'), 'https://x.com/a.png');
+  check('http survives', normalizeImageUrl('http://x.com/a.png'), 'http://x.com/a.png');
+  check('surrounding space is trimmed', normalizeImageUrl('  https://x.com/a.png  '), 'https://x.com/a.png');
+  check('a bare domain gets https', normalizeImageUrl('example.com/logo.png'), 'https://example.com/logo.png');
+  check('a site-relative path is left alone', normalizeImageUrl('/logo.png'), '/logo.png');
+  check('an inline image is allowed', normalizeImageUrl('data:image/png;base64,iVBORw0KGgo='), 'data:image/png;base64,iVBORw0KGgo=');
+  check('nothing in, nothing out', normalizeImageUrl(''), '');
+  check('undefined in, nothing out', normalizeImageUrl(undefined), '');
+}
+
+group('addresses that must never become a picture');
+{
+  check('javascript is refused', normalizeImageUrl('javascript:alert(1)'), '');
+  check('mixed case javascript is refused', normalizeImageUrl('JaVaScRiPt:alert(1)'), '');
+  check('javascript split by a newline is refused', normalizeImageUrl('java\nscript:alert(1)'), '');
+  check('javascript split by a tab is refused', normalizeImageUrl('java\tscript:alert(1)'), '');
+  check('leading whitespace before the scheme is refused', normalizeImageUrl('  javascript:alert(1)'), '');
+  check('a data url holding markup is refused', normalizeImageUrl('data:text/html,<script>alert(1)</script>'), '');
+  check('vbscript is refused', normalizeImageUrl('vbscript:msgbox(1)'), '');
+  check('a file url is refused', normalizeImageUrl('file:///etc/passwd'), '');
+}
+
+group('does this look like a picture');
+{
+  check('a png does', isProbablyImageUrl('https://x.com/a.png'), true);
+  check('a jpeg with a query string does', isProbablyImageUrl('https://x.com/a.jpg?w=400'), true);
+  check('an inline image does', isProbablyImageUrl('data:image/webp;base64,AA'), true);
+  check('a bare page does not', isProbablyImageUrl('https://x.com/gallery'), false);
+  check('a refused address does not', isProbablyImageUrl('javascript:alert(1)'), false);
+}
+
+group('where an uploaded file lands');
+{
+  check(
+    'page, block, random, then the original name',
+    storagePathFor('page_1', 'imageBlock__abc', 'My Photo.PNG', 'r4nd0m'),
+    'page_1/imageBlock__abc/r4nd0m-my-photo.png'
+  );
+  check(
+    'a nameless file still gets a path',
+    storagePathFor('page_1', 'imageBlock__abc', '', 'r4nd0m'),
+    'page_1/imageBlock__abc/r4nd0m-image'
+  );
+  check(
+    'no page means unfiled, not a path starting with a slash',
+    storagePathFor(null, 'imageBlock__abc', 'a.png', 'r4nd0m'),
+    'unfiled/imageBlock__abc/r4nd0m-a.png'
+  );
+  check(
+    'a hostile name cannot climb out of the folder',
+    storagePathFor('p', 'b', '../../secret.png', 'r4nd0m'),
+    'p/b/r4nd0m-secret.png'
+  );
+}
+
+group('upload failures say what to do');
+{
+  const missing = describeUploadError({ message: 'Bucket not found' });
+  check('a missing bucket names the bucket', missing.includes(IMAGE_BUCKET), true);
+  check('a missing bucket points at the setup doc', missing.includes('SETUP_STORAGE.md'), true);
+  const denied = describeUploadError({ message: 'new row violates row-level security policy' });
+  check('a policy refusal does not repeat the jargon', denied.includes('row-level'), false);
+  check('a policy refusal points at the setup doc', denied.includes('SETUP_STORAGE.md'), true);
+  check(
+    'an unknown failure is passed through rather than swallowed',
+    describeUploadError({ message: 'teapot' }),
+    'The upload failed: teapot'
+  );
+  check(
+    'a silent failure still says something',
+    describeUploadError(null),
+    'The upload failed, and the server did not say why.'
+  );
 }
 
 group('nobody has hand-written the block list again');

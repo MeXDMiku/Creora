@@ -30,6 +30,7 @@ export const BLOCK_NODE_TYPES = [
   'dataSourceBlock',
   'customHtmlBlock',
   'visitorBlock',
+  'imageBlock',
 ] as const;
 
 export type BlockNodeType = (typeof BLOCK_NODE_TYPES)[number];
@@ -105,6 +106,10 @@ export function defaultValueForNodeType(nodeType: BlockNodeType | null): any {
     case 'textLabelBlock':
     case 'shapeBlock':
     case 'listBlock':
+    // An Image block's value IS its address. That is the whole design: every
+    // action, condition and wire that already works on text works on a picture
+    // without a single line written for it.
+    case 'imageBlock':
       return '';
     default:
       return 0;
@@ -126,6 +131,19 @@ export function defaultRuntimeForNodeType(nodeType: BlockNodeType | null): Block
   };
 
   switch (nodeType) {
+    case 'imageBlock':
+      return {
+        ...base,
+        blockName: 'Image',
+        value: '',
+        alt: '',
+        objectFit: 'cover',
+        allowVisitorUpload: false,
+        width: 240,
+        height: 160,
+        borderRadius: 8,
+        uploadError: null,
+      };
     case 'visitorBlock':
       return {
         ...base,
@@ -220,7 +238,8 @@ export function defaultRuntimeForNodeType(nodeType: BlockNodeType | null): Block
  * `touched` and `validationError` are the reason this exists: the builder types
  * into their own form while designing it, the field goes red, and without this
  * that red is saved and shown to every visitor before they have typed anything.
- * `loading` is worse -- a page saved mid-send would come back with a button
+ * `loading` is worse -- a page saved mid-send or mid-upload would come back
+ * with a button
  * permanently stuck as busy and no way to press it. `fetchError` is the same
  * shape of mistake: last week's failed API call is not a fact about the page.
  *
@@ -233,6 +252,7 @@ export function withoutVisitorState<T extends Record<string, any>>(state: T): T 
   delete next.touched;
   delete next.validationError;
   delete next.fetchError;
+  delete next.uploadError;
   next.loading = false;
   return next as T;
 }

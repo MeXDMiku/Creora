@@ -266,6 +266,17 @@ export interface BlockRuntimeState {
   errorColor?: string;
   /** What a button says while it is busy. Blank keeps the normal label. */
   busyText?: string;
+  // --- Image ---
+  /** What the picture is, for someone who cannot see it. */
+  alt?: string;
+  /** How the picture fills its box. 'cover' crops, 'contain' letterboxes. */
+  objectFit?: 'cover' | 'contain' | 'fill' | 'none' | 'scale-down';
+  /** Can a visitor to the published page replace this picture? */
+  allowVisitorUpload?: boolean;
+  /** The words on the upload area. Blank uses ours. */
+  uploadHint?: string;
+  /** Why the last upload did not work, in words. Never saved. */
+  uploadError?: string | null;
 }
 
 export interface DatabaseField {

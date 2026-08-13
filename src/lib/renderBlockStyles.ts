@@ -185,6 +185,20 @@ export function blockToCSS(
       boxSizing: 'border-box',
       userSelect: 'none',
     });
+  } else if (type === 'imageBlock') {
+    // Sized in the outer box; the picture fills it according to objectFit.
+    // 'cover' by default because a photo letterboxed inside grey bars is the
+    // thing people notice and dislike immediately.
+    Object.assign(inner, {
+      width: runtimeState?.width !== undefined ? `${runtimeState.width}px` : '240px',
+      height: runtimeState?.height !== undefined ? `${runtimeState.height}px` : '160px',
+      objectFit: runtimeState?.objectFit || 'cover',
+      borderRadius: runtimeState?.borderRadius !== undefined ? `${runtimeState.borderRadius}px` : '8px',
+      display: 'block',
+      boxSizing: 'border-box',
+      background: runtimeState?.backgroundColor || 'transparent',
+      userSelect: 'none',
+    });
   }
 
   // The builder's own CSS goes on last, so it beats anything computed above.

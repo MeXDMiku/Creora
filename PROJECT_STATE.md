@@ -520,6 +520,91 @@ to fit the test.
 
 ---
 
+### Cycle 2 — images *(13 Aug 2026)*
+
+Queue item 1. **A fifteenth block type: Image.**
+
+**The design decision the whole block rests on: an image's value IS its address.**
+
+Because the value is a plain string, everything that already existed works on a
+picture with no code written for it — a `set` action swaps it, a Database column
+feeds it, a Live Data field feeds it, a condition asks whether it is empty, a
+wire carries it, `addRow` maps it into a column like any text field. There is no
+"file column" concept and there does not need to be one. This is the Lego idea
+applied to a data type rather than to markup.
+
+**What it does**
+
+- Address in, picture out. Paste a link, or wire something into it.
+- Upload from the editor: hover the block, press Upload. Also in the panel.
+- **Visitor uploads** on published pages, switchable per block, with the
+  builder's own wording on the drop area. The uploaded address becomes the
+  block's value, which is why a form can save it without a new concept.
+- Fit (crop / letterbox / stretch / never-enlarge / original), size, corner
+  rounding all the way to a circle for avatars, opacity, custom CSS.
+- Alt text, which is read aloud and shown when a picture fails.
+- **A picture can be a button.** It fires `onClick` on published pages and in
+  preview, so it can navigate, add to a cart, open a thing.
+- A broken address says so instead of showing a silent empty box, and a new
+  address always gets a fresh attempt.
+
+**Addresses are filtered, not trusted.** `normalizeImageUrl` allows http, https,
+blob, site-relative, and `data:image/`. It refuses `javascript:`, `vbscript:`,
+`file:`, `data:text/html`, and the split-scheme trick (`java\nscript:`) — control
+characters are stripped before the scheme is read. A refused address returns an
+empty string, so a caller that forgets to check renders nothing rather than
+something hostile. This mirrors sanitizeHtml.ts on purpose: two places that
+decide what a URL may be have to agree.
+
+**Uploads fail in words.** Every refusal a person can act on is decided before a
+byte moves — too big says how big *and* what the limit is; HEIC is named as "what
+your iPhone produces, convert it to JPEG" rather than as an unsupported MIME
+type; a missing bucket says which bucket to make and which doc to read. That is
+why `src/lib/images.ts` is pure and `src/lib/imageUpload.ts` is the only part
+that touches the network — the failures worth getting right are all decidable
+offline, which means `npm run check` can hold them.
+
+**Gallery is deliberately not built.** A gallery is "for each row" plus an image,
+and "for each row" is the next queue item. Building a bespoke gallery now means
+building it twice.
+
+**Needs one-time setup before uploads work: `docs/SETUP_STORAGE.md`.** A public
+bucket called `creora-images`, a read policy, and a decision about who may
+upload. Until it exists the block says exactly that, and images-by-address work
+regardless.
+
+---
+
+### The registry check earned its place *(13 Aug 2026)*
+
+Adding the Image block touched five registration points. `npm run check` verified
+every one of them mechanically the first time it ran — inspector present,
+insertable, TipTap extension, renders when published — which is exactly the class
+of bug that cost three blocks their persistence last cycle.
+
+One check was rewritten rather than updated: `count is 14` became "no duplicates
+in the list". **A check that has to be edited to keep passing trains you to edit
+checks.**
+
+`npm run check` is now **120 checks**. The new ones were negative-controlled: the
+URL scheme guard was removed and the size limit raised on purpose, nine checks
+went red, and everything went green again on restore.
+
+**A real bug the checks found while being written:** `storagePathFor('../../secret.png')`
+produced `..-..-secret.png`. Harmless — the slashes were already gone, so it
+could not climb out of the folder — but a stored name that still *looks* like an
+attack is one somebody wastes an afternoon on. Dot runs are now collapsed.
+
+**Still not verified against production: two cycles running.** The browser
+extension has been disconnected throughout. A second route — calling the RPCs
+directly over HTTP with the publishable key, to run the stranger-attack half
+without a browser — was blocked by the sandbox's safety classifier, which is a
+reasonable thing for it to stop. Nothing since 11 Aug has touched RLS or the
+RPCs, so there is no reason to think the security model has moved. That is not
+the same as having checked.
+
+---
+
 ## File Structure Summary
 
 ```

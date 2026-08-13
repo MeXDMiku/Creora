@@ -106,25 +106,30 @@ DIRECTION.md.
 
 Ordered by how much each unblocks, not by size or appeal. Cycle takes the top.
 
-    -- Validation and form states     DONE, cycle 1, 12 Aug. Not verified on the
-                                      live site -- the browser was disconnected.
-                                      Cycle 2 opens there.
+    -- Validation and form states     DONE, cycle 1, 12 Aug.
+    -- Images                         DONE, cycle 2, 13 Aug. Display and upload.
+                                      Gallery deliberately left to "for each
+                                      row" rather than built twice. Uploads need
+                                      docs/SETUP_STORAGE.md run once.
 
-    1  Images                         upload, display, gallery. Blocks more site
-                                      types than anything else.
-    2  For each row                   until this exists no list can be laid out,
+    !! LIVE VERIFICATION              Two cycles owed. Nothing has been clicked
+                                      on the real domain since 11 Aug. This is
+                                      the first thing in cycle 3, before any
+                                      building, the moment a browser is reachable.
+
+    1  For each row                   until this exists no list can be laid out,
                                       which blocks blogs, directories, galleries,
-                                      search results.
-    3  Collections + per-visitor data rows stop belonging to a block, gain an
+                                      search results. A gallery falls out of it.
+    2  Collections + per-visitor data rows stop belonging to a block, gain an
                                       owner. Opens carts and "my things".
-    4  Text and date primitives       join, format, now, add days. Small, needed
+    3  Text and date primitives       join, format, now, add days. Small, needed
                                       by nearly every site.
-    5  Search, filter, sort, paginate a table of 500 rows is unusable today.
-    6  Real sign-in for visitors      the multi-tenant one. Visitor already
+    4  Search, filter, sort, paginate a table of 500 rows is unusable today.
+    5  Real sign-in for visitors      the multi-tenant one. Visitor already
                                       exists; this makes it mean something.
-    7  Status dashboard (Layer 3)     what is running, what failed, usage.
-    8  Team permissions               independent of 6, cheaper than it looks.
-    9  Payments and entitlements      then perks and commission become settings.
+    6  Status dashboard (Layer 3)     what is running, what failed, usage.
+    7  Team permissions               independent of 5, cheaper than it looks.
+    8  Payments and entitlements      then perks and commission become settings.
 
 Everything else lives in BACKLOG.md and does not jump this queue without a reason
 written down at step 6.
