@@ -927,6 +927,57 @@ There is unproven SQL in the repo.
 
 ---
 
+### Cycle 7 — the audit, re-run *(13 Aug 2026)*
+
+No feature. **The map was two days and six cycles out of date**, which is the
+condition under which a plan quietly starts pointing at finished work.
+
+`docs/CAPABILITIES.md` (11 Aug) listed images, validation, for-each-row, dates,
+search and per-visitor data as the blockers. All six now exist. Anyone reading it
+to decide what to build next would have built something already built.
+
+**Method, so it can be re-run rather than re-felt:**
+
+1. Inventory taken **from the code**, not from memory — block types from
+   `BLOCK_NODE_TYPES`, actions from the `WorkflowStep` union, operators from
+   `conditions.ts`, filters from `format.ts`, RPCs from the migrations. Four
+   grep commands, written into the doc so the next person does not have to
+   invent them.
+2. Walk ten real site types from the first click to the last, and write down
+   where each one stops.
+3. Order what is left by **blast radius** — how many site types it unblocks —
+   which is a question with an answer, unlike "what should we do next".
+
+**Where it stands: four of ten site types moved.** Waitlist and portfolio are
+possible today. Landing page is blocked on layout alone. Shop is blocked on
+payments alone.
+
+**The finding that no previous plan contained: there is no way to open one row.**
+
+A blog lists posts and cannot show a post. A directory lists businesses and
+cannot show a business. Clicking a row already puts its value somewhere, and
+buttons already navigate — **what is missing is that a page cannot receive a
+value.** There is no `?id=`, and nothing on the destination page can ask which
+row it was opened with.
+
+It blocks three of the ten site types on its own, it is the smallest remaining
+item, and six cycles of planning never surfaced it — because every plan so far
+asked "what feature is missing" instead of walking a site click by click. It is
+now queue item 1.
+
+**The queue was rewritten from the audit rather than maintained by hand**, and
+`HOW_WE_WORK.md` now says that if the queue and the audit disagree, the audit is
+right and the queue is stale.
+
+**Two things the audit refuses to pretend**, both written into it: every `HAVE`
+is a claim about code held up by 370 checks and by nothing on the real domain,
+and the least-checked part is not the logic but the **editor** — dragging,
+selecting, the panel, the slash menu, untouched by a human since 11 Aug. And
+migration 0004 is marked `UNPROVED`, so "a shop needs only payments" is currently
+a statement about a file.
+
+---
+
 ## File Structure Summary
 
 ```

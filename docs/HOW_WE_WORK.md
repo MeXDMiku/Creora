@@ -111,51 +111,69 @@ DIRECTION.md.
 
 ## The queue
 
-Ordered by how much each unblocks, not by size or appeal. Cycle takes the top.
+**Rewritten 13 Aug 2026 from docs/CAPABILITIES.md, and derived rather than felt.**
 
-    -- Validation and form states     DONE, cycle 1, 12 Aug.
-    -- Images                         DONE, cycle 2, 13 Aug. Display and upload.
-                                      Gallery deliberately left to "for each
-                                      row" rather than built twice. Uploads need
-                                      docs/SETUP_STORAGE.md run once.
+The old queue was a list of things that had come up. This one is ordered by
+**blast radius** -- how many real site types each missing piece unblocks -- which
+is a question with an answer, unlike "what should we do next".
 
-    !! LIVE VERIFICATION              SIX cycles owed, and there is now unproven
-                                      SQL in the repo. This is no longer a
-                                      hygiene debt, it is a correctness one. Nothing has been clicked
-                                      on the real domain since 11 Aug. Cycle 3
-                                      fixed an XSS that was live, so confirming
-                                      that fix on the real domain is now the
-                                      first thing worth a browser.
+Re-derive it whenever the audit is re-run. If the queue and the audit ever
+disagree, the audit is right and the queue is stale.
 
-    -- For each row                   DONE, cycle 3, 13 Aug. Gallery falls out of
-                                      it, as predicted, via grid layout.
-    -- Text and date primitives       DONE, cycle 4, 13 Aug. Taken ahead of
-                                      collections because collections cannot be
-                                      proved while the browser is down. Filters
-                                      inside {{ }}, everywhere slots work.
+    !! PROVE MIGRATION 0004           Written, never run. Five steps in
+                                      docs/MIGRATION_0004.md. Until this is done
+                                      "a shop needs only payments" is a statement
+                                      about a file, not about a database.
 
-    -- Per-visitor rows                WRITTEN, cycle 6, 13 Aug. Migration 0004
-                                      plus one switch. NOT RUN, NOT PROVED.
-                                      docs/MIGRATION_0004.md has the five steps
-                                      that would prove it. Do that before
-                                      anything else builds on top.
+    !! LIVE VERIFICATION              Six cycles owed. The logic is held by 370
+                                      checks; the EDITOR is held by nothing --
+                                      dragging, selecting, the panel and the
+                                      slash menu have not been touched by a
+                                      human since 11 Aug.
 
-    1  Cross-page collections         rows keyed by a name rather than a block,
-                                      so two pages share one list. Half of it
-                                      already works: point two blocks at one
-                                      tracked id.
-    -- Search, filter, sort, paginate DONE, cycle 5, 13 Aug. Controls come from
-                                      blocks, so a visitor operates the list.
-    2  Real sign-in for visitors      the multi-tenant one. Visitor already
-                                      exists; this makes it mean something.
-    3  Status dashboard (Layer 3)     what is running, what failed, usage.
-    4  Team permissions               independent of 2, cheaper than it looks.
-    5  Payments and entitlements      then perks and commission become settings.
+    1  Page parameters                A page can be opened WITH a row, and can
+                                      ask which row it was opened with. Blocks
+                                      blog, directory and shop detail pages all
+                                      by itself. The smallest item here and the
+                                      largest blast radius -- found by walking a
+                                      site click by click, not by listing
+                                      features.
 
-Everything else lives in BACKLOG.md and does not jump this queue without a reason
-written down at step 6.
+    2  More input types               Dropdown, checkbox, radio, number field,
+                                      long text, date picker. Every real form
+                                      needs at least one of these and Creora has
+                                      text and toggle.
 
----
+    3  Layout model                   Containers, stacking, reflow. Blocks sit at
+                                      fixed x/y and do not move on a phone. This
+                                      is a rewrite, not a feature, and it is the
+                                      whole of Phase C -- everything visual sits
+                                      on top of it, so the redesign after it is
+                                      the redesign done once.
+
+    4  Visitor accounts               Email sign-in for the users of a BUILT
+                                      site. Per-visitor rows exist; this is what
+                                      makes them survive a second browser.
+
+    5  A private server layer         Edge Functions. Nowhere to keep a secret
+                                      today, which is why email, payments, API
+                                      keys, spam guards and AI are all one
+                                      missing foundation rather than five.
+
+    6  Email                          Tell the owner, tell the visitor. Small
+                                      once 5 exists, and half the ten site types
+                                      are unfinished without it.
+
+    7  Roles and permissions          The Discord-style layer. Needs 4.
+
+    8  Payments and entitlements      Needs 4 and 5. Then perks, subscriptions
+                                      and commission become settings rather than
+                                      projects.
+
+    9  Rich text per row              Blogs and posts need more than one line.
+
+Everything else lives in BACKLOG.md and does not jump this queue without a
+reason written down at step 6.
 
 ## The one rule that protects all of this
 
