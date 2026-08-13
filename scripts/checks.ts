@@ -18,6 +18,7 @@ import { evaluateCondition } from '../src/lib/conditions';
 import { describeCollectionError, MIGRATION_DOC } from '../src/lib/collections';
 import { parseParams, readParam, buildQuery, parseParamTemplate } from '../src/lib/pageParams';
 import { resolvePageValue, buildParamsFromTemplate } from '../src/lib/pageValue';
+import { diagnosePage, sortProblems, referencedIds } from '../src/lib/diagnose';
 import {
   resolveLayout,
   layoutPage,
@@ -1748,6 +1749,145 @@ group('a step that changes nothing does not start a chain');
   );
 }
 
+// ------------------------------------------------------- what is broken here
+/**
+ * The button carries a page target so it is never ALSO reported as idle. A
+ * fixture that trips a second, unrelated finding makes every count in this
+ * group a puzzle -- which is exactly what happened when these were first run.
+ */
+const facts = (over: any = {}) => ({
+  blockIds: ['buttonBlock__a', 'numberDisplayBlock__b', 'databaseBlock__c'],
+  states: {
+    'buttonBlock__a': { blockName: 'Submit', targetPageId: 'page-2' },
+    'numberDisplayBlock__b': { blockName: 'Total' },
+    'databaseBlock__c': { blockName: 'Orders' },
+  },
+  workflows: [],
+  formulas: [],
+  connections: [],
+  ...over,
+} as any);
+
+group('a healthy page reports nothing');
+{
+  const wired = facts({
+    workflows: [{ id: 'w', sourceId: 'buttonBlock__a', sourceEvent: 'onClick', steps: [{ targetId: 'numberDisplayBlock__b', action: 'increment' }] }],
+  });
+  check('nothing wrong', diagnosePage(wired), []);
+  check('an empty page is not broken', diagnosePage(facts({ blockIds: [], states: {} })), []);
+}
+
+group('wires that lead nowhere');
+{
+  const deletedTarget = facts({
+    workflows: [{ id: 'w', sourceId: 'buttonBlock__a', sourceEvent: 'onClick', steps: [{ targetId: 'numberDisplayBlock__GONE', action: 'increment' }] }],
+  });
+  const found = diagnosePage(deletedTarget);
+  check('a deleted target is found', found.length, 1);
+  check('and it is called broken', found[0].severity, 'broken');
+  check('and it names the block by NAME, not by id', found[0].title.includes('Submit'), true);
+  check('and it points at something selectable', found[0].blockId, 'buttonBlock__a');
+
+  const deletedSource = facts({
+    workflows: [{ id: 'w', sourceId: 'buttonBlock__GONE', sourceEvent: 'onClick', steps: [{ targetId: 'numberDisplayBlock__b', action: 'increment' }] }],
+  });
+  check('a deleted source is found once, not once per step', diagnosePage(deletedSource).length, 1);
+
+  const deletedCondition = facts({
+    workflows: [{
+      id: 'w', sourceId: 'buttonBlock__a', sourceEvent: 'onClick',
+      steps: [{ targetId: 'numberDisplayBlock__b', action: 'increment', condition: { fieldId: 'toggleBlock__GONE', operator: 'is ON' } }],
+    }],
+  });
+  const cond = diagnosePage(deletedCondition);
+  check('A CONDITION CHECKING A DELETED BLOCK IS FOUND -- it silently skips the step forever', cond.length, 1);
+  check('and says so', cond[0].detail.includes('skipped'), true);
+}
+
+group('formulas pointing at nothing');
+{
+  check('a plain reference', referencedIds('numberDisplayBlock__b + 1'), ['numberDisplayBlock__b']);
+  check('two of them, deduplicated', referencedIds('a__1 + a__1 + b__2'), ['a__1', 'b__2']);
+  check('numbers are not references', referencedIds('2 + 2'), []);
+  check('nothing', referencedIds(''), []);
+
+  const gone = facts({ formulas: [{ targetBlockId: 'numberDisplayBlock__b', formula: 'databaseBlock__GONE * 2' }] });
+  const out = diagnosePage(gone);
+  check('a formula using a deleted block is found', out.length, 1);
+  check('and named after the block it writes into', out[0].title.includes('Total'), true);
+
+  check(
+    'a formula of plain numbers is not accused of anything',
+    diagnosePage(facts({ formulas: [{ targetBlockId: 'numberDisplayBlock__b', formula: '2 + 2' }] })),
+    []
+  );
+  check(
+    'a formula writing into a deleted block is found too',
+    diagnosePage(facts({ formulas: [{ targetBlockId: 'numberDisplayBlock__GONE', formula: '1' }] })).length,
+    1
+  );
+}
+
+group('controls that were deleted out from under a list');
+{
+  const withSearch = facts({
+    blockIds: ['repeatBlock__r', 'databaseBlock__c'],
+    states: {
+      'repeatBlock__r': { blockName: 'Posts', trackedBlockId: 'databaseBlock__c', searchBlockId: 'inputBlock__GONE' },
+      'databaseBlock__c': { blockName: 'Orders' },
+    },
+  });
+  const out = diagnosePage(withSearch);
+  check('a deleted search box is found', out.length, 1);
+  check('and says which control it was', out[0].title.includes('search box'), true);
+
+  const noDatabase = facts({
+    blockIds: ['repeatBlock__r'],
+    states: { 'repeatBlock__r': { blockName: 'Posts', trackedBlockId: 'databaseBlock__ELSEWHERE' } },
+  });
+  const warn = diagnosePage(noDatabase);
+  check(
+    'a Database on another page is a WARNING, not broken -- it may be perfectly deliberate',
+    warn[0].severity,
+    'warning'
+  );
+}
+
+group('things that exist but do nothing');
+{
+  const lonely = facts({ blockIds: ['buttonBlock__a'], states: { 'buttonBlock__a': { blockName: 'Submit' } } });
+  const out = diagnosePage(lonely);
+  check('a button wired to nothing is reported', out.length, 1);
+  check('as idle rather than broken, because it may be half-built', out[0].severity, 'idle');
+
+  const navigates = facts({
+    blockIds: ['buttonBlock__a'],
+    states: { 'buttonBlock__a': { blockName: 'Submit', targetPageId: 'page-2' } },
+  });
+  check('a button that only navigates is doing its job', diagnosePage(navigates), []);
+
+  const unfinishedRule = facts({
+    blockIds: ['inputBlock__i'],
+    states: { 'inputBlock__i': { blockName: 'Email', rules: [{ type: 'matchesBlock' }] } },
+  });
+  check('a rule with nothing to compare against always passes, and is reported', diagnosePage(unfinishedRule).length, 1);
+  check('a finished rule is not', diagnosePage(facts({
+    blockIds: ['inputBlock__i'],
+    states: { 'inputBlock__i': { blockName: 'Email', rules: [{ type: 'required' }] } },
+  })), []);
+}
+
+group('worst first');
+{
+  const mixed = [
+    { severity: 'idle', title: 'c', detail: '' },
+    { severity: 'broken', title: 'a', detail: '' },
+    { severity: 'warning', title: 'b', detail: '' },
+  ] as any;
+  check('read in the order anybody wants them', sortProblems(mixed).map((p: any) => p.title), ['a', 'b', 'c']);
+  check('sorting does not mutate the original', mixed[0].title, 'c');
+}
+
 group('nobody has hand-written the block list again');
 {
   const files: string[] = [];
@@ -1762,7 +1902,10 @@ group('nobody has hand-written the block list again');
 
   const chained: string[] = [];
   const listed: string[] = [];
-  const CHAIN = /===\s*'[A-Za-z]+Block'\s*\|\|/;
+  // Two or more in a row, not one. A single `x === 'matchesBlock' || ...` is a
+  // rule type being compared, not a hand-written block list -- the first
+  // version of this guard flagged exactly that and was wrong.
+  const CHAIN = /===\s*'[A-Za-z]+Block'\s*\|\|[\s\S]{0,120}?===\s*'[A-Za-z]+Block'/;
   const LIST_LINE = /^\s*'[A-Za-z]+Block',?\s*$/;
 
   for (const file of files) {

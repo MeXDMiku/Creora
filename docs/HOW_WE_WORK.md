@@ -125,11 +125,10 @@ disagree, the audit is right and the queue is stale.
                                       "a shop needs only payments" is a statement
                                       about a file, not about a database.
 
-    !! LIVE VERIFICATION              Six cycles owed. The logic is held by 370
-                                      checks; the EDITOR is held by nothing --
-                                      dragging, selecting, the panel and the
-                                      slash menu have not been touched by a
-                                      human since 11 Aug.
+    -- LIVE VERIFICATION              PAID, 13 Aug. Six cycles owed, then a
+                                      browser connected and found two shipped
+                                      bugs in ninety seconds. It is now part of
+                                      every cycle again, not a debt.
 
     -- Page parameters                DONE, cycle 8, 13 Aug. The chain closes:
                                       list, click, open with a value, read it,
@@ -145,26 +144,33 @@ disagree, the audit is right and the queue is stale.
                                       touched. NOT SEEN ON A SCREEN -- the rules
                                       are checked, the feel is not.
 
-    1  Visitor accounts               Email sign-in for the users of a BUILT
+    1  Status dashboard (Layer 3)     The Operations layer: what exists, what is
+                                      published, what is BROKEN and nobody has
+                                      noticed. Fell out of this queue during a
+                                      renumber between cycles 8 and 10 and was
+                                      not noticed for three cycles -- a plan is
+                                      prose, and nothing checks prose.
+
+    2  Visitor accounts               Email sign-in for the users of a BUILT
                                       site. Per-visitor rows exist; this is what
                                       makes them survive a second browser.
 
-    2  A private server layer         Edge Functions. Nowhere to keep a secret
+    3  A private server layer         Edge Functions. Nowhere to keep a secret
                                       today, which is why email, payments, API
                                       keys, spam guards and AI are all one
                                       missing foundation rather than five.
 
-    3  Email                          Tell the owner, tell the visitor. Small
+    4  Email                          Tell the owner, tell the visitor. Small
                                       once 5 exists, and half the ten site types
                                       are unfinished without it.
 
-    4  Roles and permissions          The Discord-style layer. Needs 1.
+    5  Roles and permissions          The Discord-style layer. Needs 2.
 
-    5  Payments and entitlements      Needs 1 and 2. Then perks, subscriptions
+    6  Payments and entitlements      Needs 2 and 3. Then perks, subscriptions
                                       and commission become settings rather than
                                       projects.
 
-    6  Rich text per row              Blogs and posts need more than one line.
+    7  Rich text per row              Blogs and posts need more than one line.
 
 Everything else lives in BACKLOG.md and does not jump this queue without a
 reason written down at step 6.

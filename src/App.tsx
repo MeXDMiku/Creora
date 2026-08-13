@@ -23,6 +23,7 @@ import { RepeatBlock } from './blocks/RepeatBlock'
 import { PageValueBlock } from './blocks/PageValueBlock'
 import { PHONE_MAX_WIDTH } from './lib/layout'
 import { PlacementControls } from './components/PlacementControls'
+import { HealthPanel } from './components/HealthPanel'
 import { WireOverlay } from './components/WireOverlay'
 import { supabase } from './lib/supabase'
 import { ensureSession } from './lib/session'
@@ -1431,6 +1432,7 @@ function App() {
   const runCount = useAtomValue(workflowRunsAtom).length
   const [canvasMode, setCanvasMode] = useAtom(canvasModeAtom)
   const [editingBreakpoint, setEditingBreakpoint] = useAtom(editingBreakpointAtom)
+  const [showHealth, setShowHealth] = useState(false)
 
   const activePageIdRef = useRef(PAGE_ID)
   useEffect(() => {
@@ -3255,6 +3257,24 @@ function App() {
           </div>
 
           <button
+            onClick={() => setShowHealth((v: boolean) => !v)}
+            title="What this page is, and what on it cannot work"
+            style={{
+              padding: '6px 12px',
+              marginLeft: '8px',
+              border: '1px solid #cbd5e1',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '13px',
+              fontWeight: 600,
+              background: showHealth ? '#475569' : '#ffffff',
+              color: showHealth ? '#ffffff' : '#475569',
+            }}
+          >
+            ⚙ Health
+          </button>
+
+          <button
             onClick={() => setShowRuns((v: boolean) => !v)}
             title="See what fired, and what did not"
             style={{
@@ -3527,6 +3547,7 @@ function App() {
       </div>
       {!isPreviewMode && <Inspector editor={editor} />}
       {showRuns && <RunsPanel onClose={() => setShowRuns(false)} />}
+      {showHealth && <HealthPanel onClose={() => setShowHealth(false)} />}
     </div>
   )
 }

@@ -1287,6 +1287,66 @@ a person pressing his own button.**
 
 ---
 
+### Cycle 11 — the Operations layer, and a bug in the plan itself *(13 Aug 2026)*
+
+**First: the queue had lost an item and nothing noticed for three cycles.**
+
+`Status dashboard (Layer 3)` was item 4. Renumbering the list with a script
+across cycles 8, 9 and 10 silently dropped it. **A plan is prose, and nothing
+checks prose** — the same failure as the audit going stale, in a smaller costume.
+Restored, and it is what this cycle built.
+
+**Why this and not the next server item.** Everything else left needs work that
+cannot be deployed or verified from here, and **migration 0004 is still unrun**.
+Stacking a second unproven server artifact on the first is how debt compounds.
+This one is the owner's own third layer, it is buildable, and it is now
+verifiable in a browser.
+
+**What it actually answers: what on this page is broken that nobody has noticed.**
+
+A block gets deleted. The wire into it stays in `workflows`. The formula naming
+it stays in `formulas`. The repeater still points at it. **Nothing throws,
+nothing logs, nothing appears in the run log** — the page simply does slightly
+less than it used to, and the builder finds out weeks later when a total is
+wrong. Every check in `diagnose.ts` is about a name or an id that points at
+nothing:
+
+- a wire whose source or target was deleted
+- **a condition checking a deleted block** — which silently skips its step every
+  single time, forever
+- a formula referencing, or writing into, a block that is gone
+- a repeater whose search box, filter or sort control was removed
+- a repeater reading a Database that is not on this page — a **warning**, not
+  broken, because it may be entirely deliberate
+- a rule that was never finished, so it always passes
+- a button wired to nothing, marked *idle* rather than broken, because half-built
+  is not the same as wrong
+
+Three severities and worst-first, because that is the order anyone reads them in.
+Clicking a finding selects the block.
+
+**Two bugs found in the checks themselves while writing them**
+
+1. The guard that forbids hand-written block lists **fired on `diagnose.ts`
+   itself** — `r.type === 'matchesBlock' || ...` matched a regex looking for
+   `=== 'somethingBlock' ||`. `matchesBlock` is a *rule* type. The guard now
+   requires two such comparisons in a row, because one is a comparison and eleven
+   were the bug it was written for.
+2. The fixture's button was wired to nothing, so **every case in the group also
+   reported "does nothing"** and every count was off by one. A fixture that trips
+   an unrelated finding makes every number in a group a puzzle.
+
+**And a negative control that silently did nothing.** The first attempt at
+sabotaging the severity used a `str.replace` with no assertion, matched nothing,
+and the checks passed — which looks exactly like a control that worked. Redone
+with the anchor asserted, it went red properly. **A sabotage that fails to apply
+is a green light with no reason behind it**, which is the same trap as a check
+that cannot fail.
+
+`npm run check` is **542**.
+
+---
+
 ## File Structure Summary
 
 ```
