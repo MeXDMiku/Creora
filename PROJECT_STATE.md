@@ -1240,6 +1240,53 @@ from here.
 
 ---
 
+### The chain was one link long *(13 Aug 2026)*
+
+Reported by the owner as "the counter doesn't work unless I add another and
+remove one". **Reproduced live in ninety seconds, and it was not a counter bug.**
+
+Clicking Submit in the editor: the Database went to **Count: 3**. The Total wired
+to it stayed at **2**, and was still 2 seven seconds later. (The row added during
+the test was deleted afterwards; the page is exactly as it was found.)
+
+**A workflow step changed a block's value and never fired that block's own
+`onChange`.** So a chain could only ever be one link long:
+
+    Button -> Database          worked
+    Database -> Total           never ran
+
+Which means it was never about counters. **No two-step chain worked anywhere in
+the product.** Some of it looked fine because `recalculateAllFormulas` runs after
+every workflow, so anything expressed as a formula kept up — which is exactly why
+the Total was correct on load and only went stale afterwards, and why this
+survived ten cycles of building on top of it.
+
+The owner's workaround explains itself: deleting a row goes through the Database
+block component's own change detection, which *does* fire `onChange`. The
+engine's path never did.
+
+**The fix is four lines and three guards.** After a step changes a target's
+value, that target's `onChange` fires — but only when the value actually changed,
+never when the step points back at its own source, and never more than
+`MAX_CHAIN_DEPTH` (8) links deep. A wire that leads back to where it started now
+stops and **says so in the run log**, because a chain that quietly gives up looks
+exactly like a broken wire.
+
+Nine checks, including a three-link chain (Button → Database → Total → label), a
+deliberate A→B→A loop that has to terminate, and the case that must NOT fire:
+setting a value to what it already was is not a change.
+
+**Why no check caught this.** Every existing engine check asserted the state of
+the block a step *targets*. Not one of them wired a second workflow to that block
+and asked whether it ran. The checks were written by whoever wrote the feature,
+which means they test what the author was already thinking about — and a missing
+link is precisely what the author is not thinking about. **This one was found by
+a person pressing his own button.**
+
+`npm run check` is **515**.
+
+---
+
 ## File Structure Summary
 
 ```

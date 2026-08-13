@@ -181,6 +181,17 @@ function runElseAction(
   return { before, after: store.get(atom)?.value };
 }
 
+/**
+ * How many links a chain of workflows may have.
+ *
+ * A step that changes a block fires that block's own onChange, which is what
+ * makes Button -> Database -> Total work. It also makes a wire that points back
+ * at itself a loop, so it is bounded rather than trusted. Eight is far past any
+ * chain a person builds on purpose and far short of freezing a tab.
+ */
+const MAX_CHAIN_DEPTH = 8;
+let chainDepth = 0;
+
 export function executeWorkflow(
   sourceId: string,
   event: TriggerEvent,
@@ -859,6 +870,48 @@ export function executeWorkflow(
       // reveals a complaint the visitor has not had the chance to cause.
       if (currentTargetState.rules && currentTargetState.rules.length && step.action !== 'validate') {
         markValidated(step.targetId, store, false);
+      }
+
+      /**
+       * THE LINK THAT WAS MISSING.
+       *
+       * A step changed this block's value; anything wired out of THIS block
+       * has to hear about it, exactly as it would if a person had typed the
+       * value in. Without this the chain is one link long: pressing a button
+       * added a row and the Database's own count updated, and the Number
+       * Display wired to that Database never moved. It looked like a counter
+       * bug. It was every two-step chain in the product.
+       *
+       * Guarded three ways: only when the value actually changed, never for a
+       * step pointing at its own source, and never deeper than MAX_CHAIN_DEPTH.
+       */
+      const valueAfter = store.get(targetAtom)?.value;
+      const valueChanged = JSON.stringify(valueBefore) !== JSON.stringify(valueAfter);
+
+      if (valueChanged && step.targetId !== sourceId) {
+        if (chainDepth < MAX_CHAIN_DEPTH) {
+          chainDepth += 1;
+          try {
+            executeWorkflow(step.targetId, 'onChange', store);
+          } finally {
+            chainDepth -= 1;
+          }
+        } else {
+          // Said out loud rather than silently stopping. A chain that quietly
+          // gives up looks exactly like a broken wire.
+          recordRun(store, {
+            sourceId: step.targetId,
+            event: 'onChange',
+            workflowId: null,
+            matched: 0,
+            steps: [{
+              targetId: step.targetId,
+              action: '(chain stopped)',
+              status: 'skipped',
+              reason: `more than ${MAX_CHAIN_DEPTH} blocks changed one after another — check for a wire that leads back to where it started`,
+            }],
+          });
+        }
       }
 
       runSteps.push({

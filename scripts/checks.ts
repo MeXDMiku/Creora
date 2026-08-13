@@ -12,7 +12,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { createStore } from 'jotai';
 import { validateValue, isValidPattern } from '../src/lib/validation';
 import type { ValidationRule } from '../src/lib/validation';
-import { blockRuntimeAtom, workflowsAtom, allBlockIdsAtom } from '../src/state/atoms';
+import { blockRuntimeAtom, workflowsAtom, allBlockIdsAtom, workflowRunsAtom } from '../src/state/atoms';
 import { executeWorkflow, validationErrorFor, markValidated } from '../src/lib/bindingEngine';
 import { evaluateCondition } from '../src/lib/conditions';
 import { describeCollectionError, MIGRATION_DOC } from '../src/lib/collections';
@@ -1655,6 +1655,97 @@ group('a block can be given back to automatic');
   );
   check('and it is still hidden afterwards', resolveLayout(backToAutomatic({ x: 0, y: 0, phone: { x: 16, y: 40, hidden: true } }), 'phone').hidden, true);
   check('doing it to a block that was never placed changes nothing', backToAutomatic({ x: 5, y: 5 }), { x: 5, y: 5 });
+}
+
+// ------------------------------------------------------------ chains of wires
+group('a change travels down the whole chain, not one link');
+{
+  /**
+   * The bug the owner found by clicking his own Submit button: the Database
+   * went to Count: 3 and the Total wired to it stayed at 2. It was never a
+   * counter bug -- no two-step chain worked anywhere.
+   */
+  const store = createStore();
+  const btn = 'buttonBlock__c1';
+  const table = 'databaseBlock__c2';
+  const total = 'numberDisplayBlock__c3';
+  const badge = 'textLabelBlock__c4';
+  store.set(allBlockIdsAtom, [btn, table, total, badge]);
+  store.set(blockRuntimeAtom(btn), defaultRuntimeForNodeType('buttonBlock'));
+  store.set(blockRuntimeAtom(total), defaultRuntimeForNodeType('numberDisplayBlock'));
+  store.set(blockRuntimeAtom(badge), defaultRuntimeForNodeType('textLabelBlock'));
+  store.set(blockRuntimeAtom(table), {
+    ...defaultRuntimeForNodeType('databaseBlock'),
+    columns: [{ name: 'Name', type: 'text' }],
+    rows: [],
+    outputMode: 'row_count',
+  });
+  store.set(workflowsAtom, [
+    { id: 'w1', sourceId: btn, sourceEvent: 'onClick', steps: [{ targetId: table, action: 'addRow', requireValid: false, mappings: {} }] },
+    { id: 'w2', sourceId: table, sourceEvent: 'onChange', steps: [{ targetId: total, action: 'set', value: '__sourceValue__' }] },
+    { id: 'w3', sourceId: total, sourceEvent: 'onChange', steps: [{ targetId: badge, action: 'setText', value: 'There are {{Number Display}}' }] },
+  ] as any);
+
+  executeWorkflow(btn, 'onClick', store);
+  check('the row is added, as it always was', store.get(blockRuntimeAtom(table)).rows!.length, 1);
+  check('the table counts it, as it always did', store.get(blockRuntimeAtom(table)).value, 1);
+  check(
+    'THE SECOND LINK NOW RUNS -- this is the one that was broken',
+    store.get(blockRuntimeAtom(total)).value,
+    1
+  );
+  check('and so does the third', store.get(blockRuntimeAtom(badge)).value, 'There are 1');
+
+  executeWorkflow(btn, 'onClick', store);
+  check('and again on the next press', [store.get(blockRuntimeAtom(table)).value, store.get(blockRuntimeAtom(total)).value], [2, 2]);
+}
+
+group('a chain that leads back to itself stops instead of freezing');
+{
+  const store = createStore();
+  const btn = 'buttonBlock__l1';
+  const a = 'numberDisplayBlock__l2';
+  const b = 'numberDisplayBlock__l3';
+  store.set(allBlockIdsAtom, [btn, a, b]);
+  for (const id of [btn, a, b]) store.set(blockRuntimeAtom(id), defaultRuntimeForNodeType(id.startsWith('button') ? 'buttonBlock' : 'numberDisplayBlock'));
+  store.set(workflowsAtom, [
+    { id: 'w1', sourceId: btn, sourceEvent: 'onClick', steps: [{ targetId: a, action: 'increment', amount: 1, requireValid: false }] },
+    // A feeds B, B feeds A. Left unbounded this never returns.
+    { id: 'w2', sourceId: a, sourceEvent: 'onChange', steps: [{ targetId: b, action: 'increment', amount: 1, requireValid: false }] },
+    { id: 'w3', sourceId: b, sourceEvent: 'onChange', steps: [{ targetId: a, action: 'increment', amount: 1, requireValid: false }] },
+  ] as any);
+
+  executeWorkflow(btn, 'onClick', store);
+  check('IT TERMINATES, which is the only thing that matters here', true, true);
+  check('and it stopped somewhere sane rather than running away', store.get(blockRuntimeAtom(a)).value <= 10, true);
+  const runs = store.get(workflowRunsAtom) as any[];
+  check(
+    'and it says so in the run log rather than stopping silently',
+    runs.some(r => r.steps?.some((s: any) => s.action === '(chain stopped)')),
+    true
+  );
+}
+
+group('a step that changes nothing does not start a chain');
+{
+  const store = createStore();
+  const btn = 'buttonBlock__n1';
+  const num = 'numberDisplayBlock__n2';
+  const other = 'numberDisplayBlock__n3';
+  store.set(allBlockIdsAtom, [btn, num, other]);
+  store.set(blockRuntimeAtom(btn), defaultRuntimeForNodeType('buttonBlock'));
+  store.set(blockRuntimeAtom(num), { ...defaultRuntimeForNodeType('numberDisplayBlock'), value: 5 });
+  store.set(blockRuntimeAtom(other), defaultRuntimeForNodeType('numberDisplayBlock'));
+  store.set(workflowsAtom, [
+    { id: 'w1', sourceId: btn, sourceEvent: 'onClick', steps: [{ targetId: num, action: 'set', value: 5, requireValid: false }] },
+    { id: 'w2', sourceId: num, sourceEvent: 'onChange', steps: [{ targetId: other, action: 'increment', amount: 1, requireValid: false }] },
+  ] as any);
+  executeWorkflow(btn, 'onClick', store);
+  check(
+    'setting a value to what it already was is not a change, so nothing downstream fires',
+    store.get(blockRuntimeAtom(other)).value,
+    0
+  );
 }
 
 group('nobody has hand-written the block list again');
