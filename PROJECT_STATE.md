@@ -1034,6 +1034,82 @@ every one named after a trap.
 
 ---
 
+### Cycle 9 — every kind of field, and a menu with rooms *(13 Aug 2026)*
+
+Queue item 1. **Two critical calls, both of which made this faster.**
+
+**1. The queue said "six new input types". Six blocks were not built.**
+
+Dropdown, number, date, long text, radio and checkboxes are the same block
+wearing different clothes. They are now **one setting on the Input block** —
+`fieldType` — exactly as Shape has roles and as the Image block's value turned
+out to be an address.
+
+    text · several lines · number · email · password · date · time
+    dropdown · pick one · pick any number
+
+They inherit validation, error messages, required, disabled, busy, placeholder
+and the touched rule **because none of it was written again**. Six separate
+blocks would each have needed all of it, and would have drifted the first time
+one was fixed and the others were not. There is a check group named after that
+argument: `validation still applies whatever kind of field it is`.
+
+**The queue described the symptom** — "we only have text and toggle". Building
+the naive reading of a queue item is how a codebase ends up with six things that
+each rot separately.
+
+**2. The insert menu was a flat list of 17 tools, about to become worse.**
+
+Cloudflare's achievement is not its visuals, it is that everything is in a room
+you would expect. `docs/TOOL_CATEGORIES.md` has had the three layers written down
+since 11 Aug and nothing used them. The menu now groups by **Interface / Data /
+Operations**, each with a plain-language line under it.
+
+Taken now rather than in the arrangement phase, deliberately: this is not the
+visual redesign, it does not touch the layout model, and adding six more tools to
+a flat list when the organisation already existed on paper would have been
+knowingly making the mess bigger. Grouping is rendered inside the existing flat
+map, so **the index the arrow keys walk is unchanged** — a nested list would have
+been the obvious implementation and would have quietly broken keyboard selection.
+
+**Decisions inside the field work**
+
+- **The value is always a string**, even for checkboxes, where it is the ticked
+  options joined by a comma. `contains` already exists in the operator
+  vocabulary, so "did they tick Express delivery" needed no new concept, and a
+  Database column holding `a, b` reads correctly in a table and in a CSV. An
+  array would have needed its own operators, its own display rule and its own
+  column type.
+- **Choices are one per line, not comma-separated.** Somebody wants
+  "Bristol, Avon" as a single choice on their first afternoon.
+- **The ticked order is the builder's**, not the order they were clicked. A list
+  that reorders itself as you tick reads as a bug, and the stored value would
+  change without the answer changing.
+- **A choice removed from the list is not silently kept.** A half-filled form
+  holding "Medium" after Medium was deleted is a value nobody can re-pick and
+  nobody can explain.
+- **Changing the kind of field clears the value.** A date left behind in a
+  dropdown is data-shaped rubbish.
+- **A dropdown gets an empty first choice**, so "not answered yet" is a real
+  state and `required` means something.
+
+**`FieldView` is one component used by the editor and the published renderer**,
+for the reason everything else here is: ten field types drawn twice is twenty
+places for a date picker to behave differently once published.
+
+**A mistake worth recording.** Replacing the published input case, I sliced from
+`inputBlock` to `pageValueBlock` and deleted every case in between. The
+registration check caught it within seconds — `every type renders when published`
+went red naming `imageBlock` and `repeatBlock`. `git checkout` could not restore
+it, because this environment cannot unlink files; `git show HEAD:file > file`
+rewrites in place and can. **The check that caught it was written in cycle 2 for
+an entirely different bug.**
+
+`npm run check` is **459**, up from 418. Negative-controlled three ways — commas
+as separators, click order, and keeping a removed choice — five went red.
+
+---
+
 ## File Structure Summary
 
 ```

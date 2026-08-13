@@ -263,6 +263,16 @@ export interface BlockRuntimeState {
   validationError?: string | null;
   /** The grey hint inside an empty field. */
   placeholder?: string;
+  /** What kind of field this Input is. See src/lib/fields.ts. */
+  fieldType?: string;
+  /** The choices, one per line, for dropdown / radio / checkboxes. */
+  options?: string;
+  /**
+   * How tall a several-lines field is. Named `lines` and not `rows` because
+   * `rows` on this same interface is a Database's data, and one of them would
+   * have quietly won.
+   */
+  lines?: number;
   /** The builder can turn our error line off entirely and show it their own way. */
   showErrorText?: boolean;
   errorColor?: string;

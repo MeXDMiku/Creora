@@ -18,6 +18,15 @@ import { evaluateCondition } from '../src/lib/conditions';
 import { describeCollectionError, MIGRATION_DOC } from '../src/lib/collections';
 import { parseParams, readParam, buildQuery, parseParamTemplate } from '../src/lib/pageParams';
 import { resolvePageValue, buildParamsFromTemplate } from '../src/lib/pageValue';
+import {
+  parseOptions,
+  parseChosen,
+  toggleChosen,
+  pruneToOptions,
+  needsOptions,
+  fieldMeta,
+  FIELD_TYPES,
+} from '../src/lib/fields';
 import { withoutVisitorState, isBlockNodeType, BLOCK_NODE_TYPES } from '../src/lib/blockRegistry';
 import { safeUrl, isSafeUrlValue, schemeOf, stripIgnorable } from '../src/lib/urls';
 import { fillSlots, leadingSlotName, findSlots as findSlotsForCheck } from '../src/lib/sanitizeHtml';
@@ -1344,6 +1353,90 @@ group('a value out of the address is still untrusted');
     fillSlots('<a href="{{Link}}">x</a>', { Link: parseParams('?link=javascript%3Aalert(1)').link }, ['Link']),
     '<a href="">x</a>'
   );
+}
+
+// ------------------------------------------------------------- kinds of field
+group('one block, many kinds of field');
+{
+  check('text is the default when nothing is set', fieldMeta(undefined).type, 'text');
+  check('an unknown kind falls back rather than breaking the field', fieldMeta('nonsense' as any).type, 'text');
+  check('a number field asks the browser for a number', fieldMeta('number').inputType, 'number');
+  check('a date field asks for a date, so the browser draws its own calendar', fieldMeta('date').inputType, 'date');
+  check('several lines is not an input at all', fieldMeta('longText').inputType, undefined);
+
+  check('a dropdown needs choices', needsOptions('dropdown'), true);
+  check('radio needs choices', needsOptions('radio'), true);
+  check('checkboxes need choices', needsOptions('checkboxes'), true);
+  check('a text field does not', needsOptions('text'), false);
+  check('every kind has a label', FIELD_TYPES.every(f => !!f.label), true);
+}
+
+group('the choices a builder types');
+{
+  check('one per line', parseOptions('Small\nMedium\nLarge'), ['Small', 'Medium', 'Large']);
+  check('surrounding space is trimmed', parseOptions('  Small  \n Large '), ['Small', 'Large']);
+  check('blank lines are dropped, so a trailing newline is not a blank choice', parseOptions('Small\n\n\nLarge\n'), ['Small', 'Large']);
+  check('repeats are dropped, because two identical choices cannot be told apart', parseOptions('Small\nSmall'), ['Small']);
+  check('carriage returns from a paste are handled', parseOptions('Small\r\nLarge'), ['Small', 'Large']);
+  check('nothing typed', parseOptions(''), []);
+  check('null', parseOptions(null), []);
+  check(
+    'A COMMA IS NOT A SEPARATOR, so a place name can be one choice',
+    parseOptions('Bristol, Avon\nLeeds'),
+    ['Bristol, Avon', 'Leeds']
+  );
+}
+
+group('ticking several boxes');
+{
+  const options = ['Small', 'Medium', 'Large'];
+  check('nothing ticked', parseChosen(''), []);
+  check('one', parseChosen('Small'), ['Small']);
+  check('several', parseChosen('Small, Large'), ['Small', 'Large']);
+  check('space around the comma does not matter', parseChosen('Small ,Large'), ['Small', 'Large']);
+
+  check('tick one', toggleChosen('', 'Medium', true, options), 'Medium');
+  check('tick a second', toggleChosen('Medium', 'Small', true, options), 'Small, Medium');
+  check(
+    'THE ORDER IS THE BUILDER\'S, not the order they were clicked',
+    toggleChosen('Large', 'Small', true, options),
+    'Small, Large'
+  );
+  check('untick', toggleChosen('Small, Large', 'Small', false, options), 'Large');
+  check('unticking the last leaves nothing', toggleChosen('Small', 'Small', false, options), '');
+  check('ticking twice does not duplicate', toggleChosen('Small', 'Small', true, options), 'Small');
+}
+
+group('a value that is no longer a choice');
+{
+  const options = ['Small', 'Large'];
+  check('a value still on the list is kept', pruneToOptions('Small', 'dropdown', options), 'Small');
+  check(
+    'A REMOVED CHOICE IS NOT SILENTLY KEPT, because nobody could re-pick it',
+    pruneToOptions('Medium', 'dropdown', options),
+    ''
+  );
+  check('radio behaves the same', pruneToOptions('Medium', 'radio', options), '');
+  check('checkboxes keep what survives', pruneToOptions('Small, Medium, Large', 'checkboxes', options), 'Small, Large');
+  check('checkboxes with nothing left', pruneToOptions('Medium', 'checkboxes', options), '');
+  check('no choices at all means no value', pruneToOptions('Small', 'dropdown', []), '');
+  check('a text field is never pruned', pruneToOptions('anything at all', 'text', []), 'anything at all');
+  check('a number field is never pruned', pruneToOptions('42', 'number', []), '42');
+}
+
+group('validation still applies whatever kind of field it is');
+{
+  // The whole argument for one block rather than six: none of this was written
+  // again for dropdowns or dates, and none of it can drift.
+  check('required on an unanswered dropdown', validateValue('', [{ type: 'required' }], { fieldName: 'Size' }), 'Size is required');
+  check('required on ticked checkboxes passes', validateValue('Small, Large', [{ type: 'required' }]), null);
+  check(
+    'contains, which is how you ask whether one box was ticked',
+    evaluateCondition('Small, Large', 'contains', 'Large'),
+    true
+  );
+  check('and when it was not', evaluateCondition('Small', 'contains', 'Large'), false);
+  check('a number field still gets number rules', validateValue('abc', [{ type: 'number' }], { fieldName: 'Age' }), 'Age must be a number');
 }
 
 group('nobody has hand-written the block list again');

@@ -1965,6 +1965,7 @@ function App() {
   const commands = useMemo(() => [
     {
       id: 'button',
+      category: 'Interface',
       title: 'Button',
       description: 'Insert an interactive button that triggers actions',
       icon: (
@@ -1978,6 +1979,7 @@ function App() {
     },
     {
       id: 'numberDisplay',
+      category: 'Interface',
       title: 'Number Display',
       description: 'Insert a numeric display to show and constrain counters',
       icon: (
@@ -1991,6 +1993,7 @@ function App() {
     },
     {
       id: 'toggle',
+      category: 'Interface',
       title: 'Toggle',
       description: 'Insert a boolean toggle switch',
       icon: (
@@ -2003,6 +2006,7 @@ function App() {
     },
     {
       id: 'input',
+      category: 'Interface',
       title: 'Input',
       description: 'Insert a text input box for typing live values',
       icon: (
@@ -2017,6 +2021,7 @@ function App() {
     },
     {
       id: 'textLabel',
+      category: 'Interface',
       title: 'Text Label',
       description: 'Insert a text label that displays string values',
       icon: (
@@ -2029,6 +2034,7 @@ function App() {
     },
     {
       id: 'formula',
+      category: 'Interface',
       title: 'Formula Display',
       description: 'Insert a formula display that evaluates math expression bindings',
       icon: (
@@ -2041,6 +2047,7 @@ function App() {
     },
     {
       id: 'timer',
+      category: 'Interface',
       title: 'Timer',
       description: 'Insert a timer block that ticks and fires events',
       icon: (
@@ -2053,6 +2060,7 @@ function App() {
     },
     {
       id: 'historyChart',
+      category: 'Data',
       title: 'History Chart',
       description: 'Insert a history chart block that records and graphs values over time',
       icon: (
@@ -2066,6 +2074,7 @@ function App() {
     },
     {
       id: 'databaseBlock',
+      category: 'Data',
       title: 'Database Table',
       description: 'Insert an editable database block backed by Supabase',
       icon: (
@@ -2081,6 +2090,7 @@ function App() {
     },
     {
       id: 'list',
+      category: 'Data',
       title: 'List',
       description: 'Insert a list block that displays cards for database rows',
       icon: (
@@ -2097,6 +2107,7 @@ function App() {
     },
     {
       id: 'visitor',
+      category: 'Operations',
       title: 'Visitor',
       description: 'Who is looking at this page — gate content on it',
       icon: (
@@ -2109,6 +2120,7 @@ function App() {
     },
     {
       id: 'customHtml',
+      category: 'Interface',
       title: 'My Design',
       description: 'Paste your own HTML and CSS, and put live values inside it',
       icon: (
@@ -2121,6 +2133,7 @@ function App() {
     },
     {
       id: 'dataSource',
+      category: 'Data',
       title: 'Live Data',
       description: 'Pull live values from an API and show them',
       icon: (
@@ -2134,6 +2147,7 @@ function App() {
     },
     {
       id: 'pagevalue',
+      category: 'Operations',
       title: 'Page value',
       description: 'What this page was opened with — the row a link carried',
       icon: (
@@ -2146,6 +2160,7 @@ function App() {
     },
     {
       id: 'repeat',
+      category: 'Data',
       title: 'For each row',
       description: 'Your own card, repeated once per row. Blogs, galleries, directories',
       icon: (
@@ -2159,6 +2174,7 @@ function App() {
     },
     {
       id: 'image',
+      category: 'Interface',
       title: 'Image',
       description: 'A picture. Its value is its address, so anything can change it',
       icon: (
@@ -2172,6 +2188,7 @@ function App() {
     },
     {
       id: 'shape',
+      category: 'Interface',
       title: 'Shape',
       description: 'Insert a plain, roleless shape object',
       icon: (
@@ -2183,13 +2200,32 @@ function App() {
     }
   ], [editor])
 
+  /**
+   * The three layers, in the order a page is built: what a visitor touches,
+   * what feeds it, what the builder watches. Named in docs/TOOL_CATEGORIES.md
+   * long before anything used them.
+   */
+  const CATEGORY_ORDER = ['Interface', 'Data', 'Operations'] as const
+  const CATEGORY_BLURB: Record<string, string> = {
+    Interface: 'what a visitor touches',
+    Data: 'what feeds the page',
+    Operations: 'what the page knows about itself',
+  }
+
   const filteredCommands = useMemo(() => {
     if (!slashMenu) return []
     const q = slashMenu.query.toLowerCase()
-    return commands.filter(cmd => 
-      cmd.title.toLowerCase().includes(q) || 
+    const matching = commands.filter(cmd =>
+      cmd.title.toLowerCase().includes(q) ||
       cmd.description.toLowerCase().includes(q)
     )
+    // Sorted into layers, but still ONE flat list: arrow keys and the selected
+    // index run over this array, so grouping must not change what index 3 is.
+    const rank = (cmd: any) => {
+      const i = CATEGORY_ORDER.indexOf(cmd.category)
+      return i === -1 ? CATEGORY_ORDER.length : i
+    }
+    return [...matching].sort((a, b) => rank(a) - rank(b))
   }, [slashMenu, commands])
 
   // Sync references to avoid stale closures in ProseMirror event handlers
@@ -3322,16 +3358,38 @@ function App() {
                 boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.5)',
                 zIndex: 10000,
                 width: '320px',
-                maxHeight: '300px',
+                maxHeight: '380px',
                 overflowY: 'auto',
                 padding: '4px',
               }}
             >
               {filteredCommands.map((cmd, idx) => {
                 const isActive = idx === selectedIndex
+                // A heading whenever the layer changes. Rendered inside the same
+                // map rather than by nesting lists, so the flat index the
+                // keyboard walks stays exactly what it was.
+                const startsGroup = idx === 0 || filteredCommands[idx - 1].category !== cmd.category
                 return (
+                  <div key={cmd.id}>
+                  {startsGroup && (
+                    <div style={{
+                      padding: '8px 12px 4px',
+                      fontSize: '10px',
+                      fontWeight: 700,
+                      letterSpacing: '0.08em',
+                      textTransform: 'uppercase',
+                      color: '#64748b',
+                      display: 'flex',
+                      alignItems: 'baseline',
+                      gap: '6px',
+                    }}>
+                      <span>{cmd.category || 'Other'}</span>
+                      <span style={{ fontWeight: 400, letterSpacing: 0, textTransform: 'none', fontSize: '10px', color: '#475569' }}>
+                        {CATEGORY_BLURB[cmd.category] || ''}
+                      </span>
+                    </div>
+                  )}
                   <div
-                    key={cmd.id}
                     onClick={(e) => {
                       e.stopPropagation()
                       handleSelectCommand(cmd)
@@ -3359,6 +3417,7 @@ function App() {
                         {cmd.description}
                       </div>
                     </div>
+                  </div>
                   </div>
                 )
               })}

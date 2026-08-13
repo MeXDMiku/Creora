@@ -11,11 +11,12 @@ import { fetchDataSource } from '../lib/dataSource';
 import { computeDatabaseOutput } from '../lib/databaseOutput';
 import { CustomHtmlView } from '../blocks/CustomHtmlBlock';
 import { RepeatView } from '../blocks/RepeatBlock';
+import { FieldView, FieldError } from '../blocks/FieldView';
 import { refreshPageValue, buildParamsFromTemplate } from '../lib/pageValue';
 import { parseParams } from '../lib/pageParams';
 import { nodeTypeFromBlockId } from '../lib/blockRegistry';
 import { refreshVisitor } from '../lib/visitor';
-import { executeWorkflow, recalculateAllFormulas, markValidated } from '../lib/bindingEngine';
+import { executeWorkflow, recalculateAllFormulas } from '../lib/bindingEngine';
 import { normalizeImageUrl, IMAGE_MIME_TYPES } from '../lib/images';
 import { uploadImage } from '../lib/imageUpload';
 import {
@@ -687,65 +688,15 @@ function RenderedBlock({ block }: { block: ExtractedBlock }) {
 
   if (block.type === 'inputBlock') {
     /**
-     * Byte-for-byte the same rules, the same touched gate and the same messages
-     * as the editor, because both call markValidated. The editor and this file
-     * having their own opinion about a block is exactly how they drifted apart
-     * before, and validation is the worst possible place to let it happen again:
-     * a form that accepts in preview and rejects when published is unshippable.
+     * The same FieldView the editor draws, so a dropdown, a date picker or a
+     * set of checkboxes cannot behave differently once published. This block
+     * used to hold its own copy of the input, the touched rule and the error
+     * line; the copy is gone rather than kept in step by hand.
      */
-    const showError = !!(runtimeState?.touched && runtimeState?.validationError);
-    const errorColor = runtimeState?.errorColor || '#dc2626';
-    const showErrorText = runtimeState?.showErrorText !== false;
-    const isOff = !!runtimeState?.disabled;
-
     return (
       <div style={outerStyle}>
-        <input
-          type="text"
-          style={{
-            ...innerStyle,
-            ...(showError
-              ? { borderColor: errorColor, borderWidth: 2, borderStyle: 'solid', outlineColor: errorColor }
-              : null),
-            ...(isOff ? { opacity: 0.55, cursor: 'not-allowed' } : null),
-          }}
-          value={String(runtimeState?.value ?? '')}
-          disabled={isOff}
-          aria-invalid={showError}
-          onChange={(e) => {
-            // Read at write time, never the render-time copy.
-            const current = store.get(blockRuntimeAtom(block.id));
-            store.set(blockRuntimeAtom(block.id), {
-              ...current,
-              value: e.target.value,
-            });
-            if (current?.validateOn === 'change') {
-              markValidated(block.id, store, true);
-            } else if (current?.touched) {
-              markValidated(block.id, store, false);
-            }
-            executeWorkflow(block.id, 'onChange', store);
-            recalculateAllFormulas(store);
-          }}
-          onBlur={() => {
-            if (store.get(blockRuntimeAtom(block.id))?.validateOn === 'submit') return;
-            markValidated(block.id, store, true);
-          }}
-          placeholder={runtimeState?.placeholder ?? 'Type something...'}
-        />
-        {showError && showErrorText && (
-          <div
-            role="alert"
-            style={{
-              marginTop: '4px',
-              fontSize: '12px',
-              lineHeight: 1.3,
-              color: errorColor,
-            }}
-          >
-            {runtimeState?.validationError}
-          </div>
-        )}
+        <FieldView blockId={block.id} style={innerStyle} />
+        <FieldError blockId={block.id} />
       </div>
     );
   }

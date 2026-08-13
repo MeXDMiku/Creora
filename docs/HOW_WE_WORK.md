@@ -135,38 +135,38 @@ disagree, the audit is right and the queue is stale.
                                       list, click, open with a value, read it,
                                       show that one row.
 
-    1  More input types               Dropdown, checkbox, radio, number field,
-                                      long text, date picker. Every real form
-                                      needs at least one of these and Creora has
-                                      text and toggle.
+    -- More input types               DONE, cycle 9, 13 Aug. Ten kinds of field
+                                      as ONE setting on the Input block, not six
+                                      new blocks. Menu grouped into the three
+                                      layers at the same time.
 
-    2  Layout model                   Containers, stacking, reflow. Blocks sit at
+    1  Layout model                   Containers, stacking, reflow. Blocks sit at
                                       fixed x/y and do not move on a phone. This
                                       is a rewrite, not a feature, and it is the
                                       whole of Phase C -- everything visual sits
                                       on top of it, so the redesign after it is
                                       the redesign done once.
 
-    3  Visitor accounts               Email sign-in for the users of a BUILT
+    2  Visitor accounts               Email sign-in for the users of a BUILT
                                       site. Per-visitor rows exist; this is what
                                       makes them survive a second browser.
 
-    4  A private server layer         Edge Functions. Nowhere to keep a secret
+    3  A private server layer         Edge Functions. Nowhere to keep a secret
                                       today, which is why email, payments, API
                                       keys, spam guards and AI are all one
                                       missing foundation rather than five.
 
-    5  Email                          Tell the owner, tell the visitor. Small
+    4  Email                          Tell the owner, tell the visitor. Small
                                       once 5 exists, and half the ten site types
                                       are unfinished without it.
 
-    6  Roles and permissions          The Discord-style layer. Needs 3.
+    5  Roles and permissions          The Discord-style layer. Needs 2.
 
-    7  Payments and entitlements      Needs 3 and 4. Then perks, subscriptions
+    6  Payments and entitlements      Needs 2 and 3. Then perks, subscriptions
                                       and commission become settings rather than
                                       projects.
 
-    8  Rich text per row              Blogs and posts need more than one line.
+    7  Rich text per row              Blogs and posts need more than one line.
 
 Everything else lives in BACKLOG.md and does not jump this queue without a
 reason written down at step 6.

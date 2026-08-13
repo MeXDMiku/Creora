@@ -2,6 +2,7 @@ import { useAtom, useSetAtom, useStore } from 'jotai'
 import { useMemo } from 'react'
 import { blockRuntimeAtom, triggerSaveAtom, getBlockTypeDisplayName, getCanvasBlocks } from '../state/atoms'
 import { RULE_TYPES, ruleMeta, isValidPattern, validateValue } from '../lib/validation'
+import { FIELD_TYPES, fieldMeta, needsOptions, parseOptions } from '../lib/fields'
 import type { ValidationRule, ValidationRuleType } from '../lib/validation'
 
 const fieldStyle: React.CSSProperties = {
@@ -16,6 +17,14 @@ const fieldStyle: React.CSSProperties = {
   color: '#0f172a',
   outline: 'none',
   fontSize: '13px',
+}
+
+const hintStyle: React.CSSProperties = {
+  display: 'block',
+  fontSize: '11px',
+  color: '#64748b',
+  marginTop: '4px',
+  lineHeight: 1.4,
 }
 
 const smallBtn: React.CSSProperties = {
@@ -40,6 +49,7 @@ export default function InputBlockInspector({ blockId, editor }: { blockId: stri
   )
 
   const rules: ValidationRule[] = runtimeState.rules || []
+  const parsedOptions = parseOptions(runtimeState.options)
 
   const writeRules = (next: ValidationRule[]) => {
     setRuntimeState(prev => ({ ...prev, rules: next }))
@@ -85,6 +95,74 @@ export default function InputBlockInspector({ blockId, editor }: { blockId: stri
           style={fieldStyle}
         />
       </label>
+
+      <label style={{ display: 'block', marginBottom: '12px' }}>
+        Kind of field
+        <select
+          value={runtimeState.fieldType || 'text'}
+          onChange={(e) => {
+            const next = e.target.value
+            setRuntimeState(prev => ({
+              ...prev,
+              fieldType: next,
+              // A value from the old kind almost never fits the new one -- a
+              // date left in a dropdown is a choice nobody can re-pick. Cleared
+              // on purpose rather than left to look like data.
+              value: '',
+              validationError: null,
+              touched: false,
+            }))
+            triggerSave(prev => prev + 1)
+          }}
+          style={fieldStyle}
+        >
+          {FIELD_TYPES.map(f => (
+            <option key={f.type} value={f.type}>{f.label}</option>
+          ))}
+        </select>
+        {fieldMeta(runtimeState.fieldType as any).hint && (
+          <span style={hintStyle}>{fieldMeta(runtimeState.fieldType as any).hint}</span>
+        )}
+      </label>
+
+      {needsOptions(runtimeState.fieldType as any) && (
+        <label style={{ display: 'block', marginBottom: '12px' }}>
+          The choices
+          <textarea
+            value={runtimeState.options ?? ''}
+            onChange={(e) => {
+              setRuntimeState(prev => ({ ...prev, options: e.target.value }))
+              triggerSave(prev => prev + 1)
+            }}
+            rows={5}
+            placeholder={'Small\nMedium\nLarge'}
+            spellCheck={false}
+            style={{ ...fieldStyle, resize: 'vertical', fontFamily: 'inherit' }}
+          />
+          <span style={hintStyle}>
+            One per line, not comma-separated — somebody will want
+            "Bristol, Avon" as a single choice. Blank lines and repeats are
+            dropped. {parsedOptions.length} choice{parsedOptions.length === 1 ? '' : 's'}.
+          </span>
+        </label>
+      )}
+
+      {runtimeState.fieldType === 'longText' && (
+        <label style={{ display: 'block', marginBottom: '12px' }}>
+          How tall, in lines
+          <input
+            type="number"
+            min="2"
+            max="30"
+            value={runtimeState.lines ?? 4}
+            onChange={(e) => {
+              setRuntimeState(prev => ({ ...prev, lines: Number(e.target.value) }))
+              triggerSave(prev => prev + 1)
+            }}
+            style={fieldStyle}
+          />
+        </label>
+      )}
 
       <label style={{ display: 'block', marginBottom: '12px' }}>
         Hint inside the field
