@@ -119,7 +119,9 @@ Ordered by how much each unblocks, not by size or appeal. Cycle takes the top.
                                       row" rather than built twice. Uploads need
                                       docs/SETUP_STORAGE.md run once.
 
-    !! LIVE VERIFICATION              FIVE cycles owed. Nothing has been clicked
+    !! LIVE VERIFICATION              SIX cycles owed, and there is now unproven
+                                      SQL in the repo. This is no longer a
+                                      hygiene debt, it is a correctness one. Nothing has been clicked
                                       on the real domain since 11 Aug. Cycle 3
                                       fixed an XSS that was live, so confirming
                                       that fix on the real domain is now the
@@ -132,11 +134,16 @@ Ordered by how much each unblocks, not by size or appeal. Cycle takes the top.
                                       proved while the browser is down. Filters
                                       inside {{ }}, everywhere slots work.
 
-    1  Collections + per-visitor data rows stop belonging to a block, gain an
-                                      owner. Opens carts and "my things".
-                                      BLOCKED-ISH: needs a migration this
-                                      session cannot apply or verify. Write the
-                                      SQL first, apply it, then build against it.
+    -- Per-visitor rows                WRITTEN, cycle 6, 13 Aug. Migration 0004
+                                      plus one switch. NOT RUN, NOT PROVED.
+                                      docs/MIGRATION_0004.md has the five steps
+                                      that would prove it. Do that before
+                                      anything else builds on top.
+
+    1  Cross-page collections         rows keyed by a name rather than a block,
+                                      so two pages share one list. Half of it
+                                      already works: point two blocks at one
+                                      tracked id.
     -- Search, filter, sort, paginate DONE, cycle 5, 13 Aug. Controls come from
                                       blocks, so a visitor operates the list.
     2  Real sign-in for visitors      the multi-tenant one. Visitor already

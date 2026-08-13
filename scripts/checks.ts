@@ -15,6 +15,7 @@ import type { ValidationRule } from '../src/lib/validation';
 import { blockRuntimeAtom, workflowsAtom, allBlockIdsAtom } from '../src/state/atoms';
 import { executeWorkflow, validationErrorFor, markValidated } from '../src/lib/bindingEngine';
 import { evaluateCondition } from '../src/lib/conditions';
+import { describeCollectionError, MIGRATION_DOC } from '../src/lib/collections';
 import { withoutVisitorState, isBlockNodeType, BLOCK_NODE_TYPES } from '../src/lib/blockRegistry';
 import { safeUrl, isSafeUrlValue, schemeOf, stripIgnorable } from '../src/lib/urls';
 import { fillSlots, leadingSlotName, findSlots as findSlotsForCheck } from '../src/lib/sanitizeHtml';
@@ -1167,6 +1168,50 @@ group('nothing set behaves exactly as it did before any of this');
   check('page one of one', [out.page, out.pageCount], [1, 1]);
   check('no note', out.truncatedNote, null);
   check('no spec at all is the same', visibleRows(STAFF).rows.length, 4);
+}
+
+// -------------------------------------------------------- per-visitor rows
+group('the switch says what is missing, rather than failing quietly');
+{
+  const missing = describeCollectionError({ code: 'PGRST202', message: 'Could not find the function public.set_collection_private' });
+  check('a missing function names the migration file', missing.includes('0004_row_ownership.sql'), true);
+  check('and points at the doc', missing.includes(MIGRATION_DOC), true);
+  check('without repeating PostgREST jargon', missing.toLowerCase().includes('pgrst'), false);
+
+  // These two are here because a negative control caught the originals being
+  // decoration: their messages ALSO matched the "could not find the function"
+  // clause, so removing the code check and the schema-cache check broke
+  // nothing. Each signal now has a case where it is the only signal.
+  check(
+    'the error code alone is enough, even when the message says nothing useful',
+    describeCollectionError({ code: 'PGRST202', message: 'Not Found' }).includes('0004'),
+    true
+  );
+  check(
+    'a stale schema cache alone is enough',
+    describeCollectionError({ message: 'stale schema cache, retry' }).includes('0004'),
+    true
+  );
+  check(
+    'a refusal explains who may do it',
+    describeCollectionError({ code: '42501', message: 'not allowed' }),
+    'Only the person who owns this page can change that.'
+  );
+  check(
+    'an unsaved block says so, because that is the confusing one',
+    describeCollectionError({ message: 'unknown block' }),
+    'Save the page first — this Database has not reached the server yet.'
+  );
+  check(
+    'an unknown failure is passed through rather than swallowed',
+    describeCollectionError({ message: 'teapot' }),
+    'That did not work: teapot'
+  );
+  check(
+    'silence still says something',
+    describeCollectionError(null),
+    'That did not work, and the server did not say why.'
+  );
 }
 
 group('nobody has hand-written the block list again');

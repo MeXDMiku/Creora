@@ -1,4 +1,6 @@
 import { useAtom, useSetAtom } from 'jotai';
+import { useEffect, useState } from 'react';
+import { getCollectionPrivate, setCollectionPrivate } from '../lib/collections';
 import { computeDatabaseOutput } from '../lib/databaseOutput';
 import { blockRuntimeAtom, triggerSaveAtom, getBlockTypeDisplayName } from '../state/atoms';
 import { recalculateAllFormulas } from '../lib/bindingEngine';
@@ -6,6 +8,41 @@ import { recalculateAllFormulas } from '../lib/bindingEngine';
 export default function DatabaseBlockInspector({ blockId }: { blockId: string; editor: any }) {
   const [runtimeState, setRuntimeState] = useAtom(blockRuntimeAtom(blockId));
   const triggerSave = useSetAtom(triggerSaveAtom);
+
+  /**
+   * Per-visitor rows. The switch is NOT part of the page's saved state: it
+   * lives in the database, because a flag stored in the page is a flag the
+   * server never sees, and a privacy setting the server never sees is not a
+   * privacy setting. Read once when the block is selected.
+   */
+  const [isPrivate, setIsPrivate] = useState(false);
+  const [privacyError, setPrivacyError] = useState<string | null>(null);
+  const [privacyBusy, setPrivacyBusy] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setPrivacyBusy(true);
+    getCollectionPrivate(blockId).then((result) => {
+      if (cancelled) return;
+      setIsPrivate(result.value);
+      setPrivacyError(result.error);
+      setPrivacyBusy(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [blockId]);
+
+  const togglePrivate = async (next: boolean) => {
+    setPrivacyBusy(true);
+    // Shown immediately, corrected if the server disagrees. A checkbox that
+    // waits on a round trip feels broken; one that lies does not get corrected.
+    setIsPrivate(next);
+    const result = await setCollectionPrivate(blockId, next);
+    setIsPrivate(result.value);
+    setPrivacyError(result.error);
+    setPrivacyBusy(false);
+  };
 
   const columns = runtimeState?.columns || [];
   const rows = runtimeState?.rows || [];
@@ -189,6 +226,50 @@ export default function DatabaseBlockInspector({ blockId }: { blockId: string; e
 
   return (
     <div>
+      {/* Who can see these rows. First, because it is the question with the
+          worst consequences if it is answered wrongly. */}
+      <div
+        style={{
+          border: '1px solid #e2e8f0',
+          borderRadius: '6px',
+          padding: '10px',
+          marginBottom: '12px',
+          background: '#f8fafc',
+        }}
+      >
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '13px' }}>
+          <input
+            type="checkbox"
+            checked={isPrivate}
+            disabled={privacyBusy}
+            onChange={(e) => void togglePrivate(e.target.checked)}
+            style={{ marginTop: '3px' }}
+          />
+          <span>
+            Each visitor only sees their own rows
+            <span style={{ display: 'block', fontSize: '11px', color: '#64748b', lineHeight: 1.4, marginTop: '2px' }}>
+              For carts, orders and saved things. The server enforces this, not
+              the page, so the other rows are not simply hidden - they are never
+              sent. You still see everything, because it is your page.
+            </span>
+          </span>
+        </label>
+
+        {isPrivate && !privacyError && (
+          <div style={{ fontSize: '11px', color: '#64748b', lineHeight: 1.4, marginTop: '8px' }}>
+            A visitor is one browser. Clearing site data, or opening the page on
+            a phone instead of a laptop, is a different visitor with an empty
+            list. Real accounts for visitors are next.
+          </div>
+        )}
+
+        {privacyError && (
+          <div style={{ fontSize: '11px', color: '#b91c1c', lineHeight: 1.4, marginTop: '8px' }}>
+            {privacyError}
+          </div>
+        )}
+      </div>
+
       {/* Block Name */}
       <label style={controlLabelStyle}>
         Block Name

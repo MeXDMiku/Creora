@@ -861,6 +861,72 @@ they guard.
 
 ---
 
+### Cycle 6 — per-visitor rows *(13 Aug 2026)*
+
+Queue item 1, taken because the alternative was another cycle of client work
+while the thing every remaining item depends on stayed unwritten.
+
+**UNVERIFIED. The SQL in this cycle has never been run.** No browser, and no
+network path to Supabase from this session. It is written, reviewed line by line
+and documented; it is not proved. `docs/MIGRATION_0004.md` ends with the five
+steps that would prove it, and says plainly what to do if step 3 fails.
+
+**What it unlocks.** Until now a row belonged to a block and to nobody else,
+which makes "my cart", "my orders" and "my saved things" impossible — every
+visitor to a published page sees every other visitor's rows, because nothing on
+a row says whose it is.
+
+**The decision: privacy is enforced in the database, not in the editor.**
+The easy version is a checkbox that filters the list in the browser. That is not
+privacy — the other rows are one fetch away for anyone who opens the network
+tab, and a page that *looks* private while leaking every customer's order is
+worse than one that never claimed to be. So the flag is a row in
+`collection_settings`, and `list_database_rows` reads it before deciding what to
+return:
+
+    collection is not private  ->  everything, exactly as before
+    the page's owner           ->  everything; it is their shop
+    anyone else                ->  only rows they own
+
+**Also added**: `owner_id` on every row, stamped on insert;
+`update_my_database_row` and `delete_my_database_row`, which are the *visitor's*
+tools — their own row, on a page they may read. `update_database_row` and
+`delete_database_row` are untouched and remain the owner's. Before this, a
+visitor could add a row and then never touch it again, so "change the quantity
+in my basket" was unsayable.
+
+**The line worth reading twice**, in `list_database_rows`:
+
+    and (auth.uid() is not null and dr.owner_id = auth.uid())
+
+Without `auth.uid() is not null`, a caller with no session matches every row
+whose owner is null — which is every row written before this migration — and a
+private collection hands its whole history to anyone signed out.
+
+**What it deliberately does not do.** A visitor is an anonymous Supabase session,
+which lives in one browser. Clear site data, or open the page on a phone instead
+of a laptop, and it is a different visitor with an empty cart. Real accounts for
+visitors are the next item, and this is the half that has to exist first —
+accounts without ownership on rows would have nothing to attach to.
+
+**The client half degrades.** One switch on the Database block. Until the
+migration is run it reports exactly what is missing and points at the doc, in the
+same way the Image block does about its storage bucket.
+
+**The negative control caught two of my own checks being decoration.** Removing
+the `PGRST202` code check and the schema-cache check broke nothing, because both
+test messages also matched the "could not find the function" clause. Two checks
+were added where each signal is the only signal, and the sabotage then turned
+them red. **A check that cannot be made to fail is not coverage, it is a
+comforting sentence.**
+
+`npm run check` is now **370**.
+
+**Live verification: six cycles owed, and now it blocks something concrete.**
+There is unproven SQL in the repo.
+
+---
+
 ## File Structure Summary
 
 ```
