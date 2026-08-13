@@ -14,10 +14,11 @@ import { validateValue, isValidPattern } from '../src/lib/validation';
 import type { ValidationRule } from '../src/lib/validation';
 import { blockRuntimeAtom, workflowsAtom, allBlockIdsAtom } from '../src/state/atoms';
 import { executeWorkflow, validationErrorFor, markValidated } from '../src/lib/bindingEngine';
+import { evaluateCondition } from '../src/lib/conditions';
 import { withoutVisitorState, isBlockNodeType, BLOCK_NODE_TYPES } from '../src/lib/blockRegistry';
 import { safeUrl, isSafeUrlValue, schemeOf, stripIgnorable } from '../src/lib/urls';
 import { fillSlots, leadingSlotName, findSlots as findSlotsForCheck } from '../src/lib/sanitizeHtml';
-import { visibleRows, rowSlots, compareCells, slotNamesFor, MAX_RENDERED_ROWS } from '../src/lib/rows';
+import { visibleRows, rowSlots, compareCells, slotNamesFor, rowMatchesSearch, MAX_RENDERED_ROWS } from '../src/lib/rows';
 import {
   parseSlot,
   applyFilters,
@@ -1011,6 +1012,161 @@ group('filters in markup: escaped, and still URL-checked');
     fillSlots('<p>{{Created | date: D MMM YYYY}}</p>', { Created: new Date(2026, 7, 13) }),
     '<p>13 Aug 2026</p>'
   );
+}
+
+// ------------------------------------------------ search, filter, sort, pages
+const STAFF = [
+  { id: 'a', Name: 'Ada Lovelace', City: 'London', Role: 'Engineer', Score: 9 },
+  { id: 'b', Name: 'Bo Nguyen', City: 'Leeds', Role: 'Designer', Score: 10 },
+  { id: 'c', Name: 'Cy Adams', City: 'London', Role: 'Engineer', Score: 2 },
+  { id: 'd', Name: 'Di Patel', City: 'Bristol', Role: 'Writer', Score: '' },
+];
+
+group('comparing a blank is not comparing a zero');
+{
+  check('less than, blank actual', evaluateCondition('', 'lessThan', 9), false);
+  check('less than, blank expected', evaluateCondition(5, 'lessThan', ''), false);
+  check('more than, blank actual', evaluateCondition(null, 'greaterThan', 0), false);
+  check('at most, blank actual', evaluateCondition(undefined, 'lessOrEqual', 100), false);
+  check('a real zero still compares', evaluateCondition(0, 'lessThan', 9), true);
+  check('a zero as text still compares', evaluateCondition('0', 'lessThan', 9), true);
+  check('words never compare as numbers', evaluateCondition('nine', 'lessThan', 10), false);
+  check('normal comparisons are untouched', evaluateCondition(10, 'greaterThan', 9), true);
+}
+
+group('search: one box, several columns');
+{
+  const ids = (spec: any) => visibleRows(STAFF, spec).rows.map(r => r.id);
+
+  check('an empty search shows everything', ids({ search: '' }), ['a', 'b', 'c', 'd']);
+  check('whitespace only shows everything', ids({ search: '   ' }), ['a', 'b', 'c', 'd']);
+  check('a word in one column', ids({ search: 'leeds' }), ['b']);
+  check('search does not care about case', ids({ search: 'LOVELACE' }), ['a']);
+  check('a partial word matches', ids({ search: 'lov' }), ['a']);
+  check(
+    'TWO WORDS ACROSS TWO COLUMNS, which is what people actually type',
+    ids({ search: 'lovelace lon' }),
+    ['a']
+  );
+  check('order of the words does not matter', ids({ search: 'lon lovelace' }), ['a']);
+  check('all the words must be there', ids({ search: 'lovelace bristol' }), []);
+  check(
+    'a term matches inside a word, so "ada" finds Adams as well as Ada',
+    ids({ search: 'ada' }),
+    ['a', 'c']
+  );
+  check('a word matching several rows', ids({ search: 'engineer' }), ['a', 'c']);
+  check('searching only named columns', ids({ search: 'london', searchColumns: ['Name'] }), []);
+  check('and finding it when the column is included', ids({ search: 'london', searchColumns: ['City'] }), ['a', 'c']);
+  check('numbers are searchable as text', ids({ search: '10' }), ['b']);
+  check(
+    'the row id is not searched, so an id nobody can see cannot match',
+    visibleRows([{ id: 'zzqq', Name: 'Ada' }], { search: 'zzqq' }).rows.length,
+    0
+  );
+
+  check('the helper agrees on its own', rowMatchesSearch(STAFF[0], 'ada london'), true);
+  check('and disagrees when it should', rowMatchesSearch(STAFF[0], 'ada paris'), false);
+  check('nothing to search for is a match', rowMatchesSearch(STAFF[0], ''), true);
+}
+
+group('filter: the product operators, not a second set');
+{
+  const ids = (spec: any) => visibleRows(STAFF, spec).rows.map(r => r.id);
+
+  check('equals', ids({ filterColumn: 'City', filterOperator: 'equals', filterValue: 'London' }), ['a', 'c']);
+  check('is not', ids({ filterColumn: 'City', filterOperator: 'notEquals', filterValue: 'London' }), ['b', 'd']);
+  check('contains matches inside a word too', ids({ filterColumn: 'Name', filterOperator: 'contains', filterValue: 'Ada' }), ['a', 'c']);
+  check('contains is exact about case, unlike search', ids({ filterColumn: 'Name', filterOperator: 'contains', filterValue: 'ada' }), []);
+  check('more than', ids({ filterColumn: 'Score', filterOperator: 'greaterThan', filterValue: 8 }), ['a', 'b']);
+  check('at least', ids({ filterColumn: 'Score', filterOperator: 'greaterOrEqual', filterValue: 9 }), ['a', 'b']);
+  check(
+    'AN EMPTY CELL IS NOT ZERO: "less than 9" must not sweep up rows with no score',
+    ids({ filterColumn: 'Score', filterOperator: 'lessThan', filterValue: 9 }),
+    ['c']
+  );
+  check(
+    'nor the other way round',
+    ids({ filterColumn: 'Score', filterOperator: 'greaterOrEqual', filterValue: 0 }),
+    ['a', 'b', 'c']
+  );
+  check('is empty', ids({ filterColumn: 'Score', filterOperator: 'isEmpty' }), ['d']);
+  check('is not empty', ids({ filterColumn: 'Score', filterOperator: 'isNotEmpty' }), ['a', 'b', 'c']);
+  check('the default operator is equals', ids({ filterColumn: 'City', filterValue: 'Leeds' }), ['b']);
+
+  check(
+    'A BLANK VALUE MEANS NO FILTER, so an empty box shows everything rather than nothing',
+    ids({ filterColumn: 'City', filterOperator: 'equals', filterValue: '' }),
+    ['a', 'b', 'c', 'd']
+  );
+  check(
+    'but is-empty needs no value and still applies',
+    ids({ filterColumn: 'Score', filterOperator: 'isEmpty', filterValue: '' }),
+    ['d']
+  );
+  check('no column means no filter', ids({ filterOperator: 'equals', filterValue: 'nonsense' }).length, 4);
+}
+
+group('search and filter together, then order, then the page');
+{
+  check(
+    'search narrows, then the filter narrows that',
+    visibleRows(STAFF, { search: 'e', filterColumn: 'Role', filterValue: 'Engineer' }).rows.map(r => r.id),
+    ['a', 'c']
+  );
+  check(
+    'ordering applies to what survived',
+    visibleRows(STAFF, { filterColumn: 'Role', filterValue: 'Engineer', sortColumn: 'Score' }).rows.map(r => r.Score),
+    [2, 9]
+  );
+  check(
+    'matched counts what survived, not what is on the page',
+    visibleRows(STAFF, { pageSize: 2 }).matched,
+    4
+  );
+}
+
+group('pages');
+{
+  const page = (n: number) => visibleRows(STAFF, { pageSize: 2, page: n });
+
+  check('page one', page(1).rows.map(r => r.id), ['a', 'b']);
+  check('page two', page(2).rows.map(r => r.id), ['c', 'd']);
+  check('how many pages', page(1).pageCount, 2);
+  check('which page is being shown', page(2).page, 2);
+
+  check('PAST THE END SHOWS THE LAST PAGE, never an empty one', page(9).rows.map(r => r.id), ['c', 'd']);
+  check('and reports the page it actually showed', page(9).page, 2);
+  check('before the beginning shows the first', page(0).rows.map(r => r.id), ['a', 'b']);
+  check('a fractional page is floored, not rejected', visibleRows(STAFF, { pageSize: 2, page: 2.7 }).page, 2);
+
+  check('no page asked for means page one', visibleRows(STAFF, { pageSize: 2 }).page, 1);
+  check('a page size larger than the list is one page', visibleRows(STAFF, { pageSize: 50 }).pageCount, 1);
+  check('nothing to show is still page one of one', visibleRows([], { pageSize: 2 }).pageCount, 1);
+  check('paging never claims to be truncating', page(1).truncatedNote, null);
+
+  check(
+    'a search changes how many pages there are',
+    visibleRows(STAFF, { pageSize: 2, search: 'london' }).pageCount,
+    1
+  );
+  check(
+    'THE TRAP: page 2 of a search that now has one page shows the last page, not nothing',
+    visibleRows(STAFF, { pageSize: 2, search: 'london', page: 2 }).rows.length,
+    2
+  );
+
+  check('paging beats maxRows when both are set', visibleRows(STAFF, { pageSize: 3, maxRows: 1 }).rows.length, 3);
+  check('a page size over the ceiling is capped', visibleRows(STAFF, { pageSize: 9999 }).rows.length, 4);
+}
+
+group('nothing set behaves exactly as it did before any of this');
+{
+  const out = visibleRows(STAFF, {});
+  check('every row', out.rows.length, 4);
+  check('page one of one', [out.page, out.pageCount], [1, 1]);
+  check('no note', out.truncatedNote, null);
+  check('no spec at all is the same', visibleRows(STAFF).rows.length, 4);
 }
 
 group('nobody has hand-written the block list again');

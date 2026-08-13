@@ -5,6 +5,10 @@ import { blockRuntimeAtom, workflowsAtom, formulasAtom, allBlockIdsAtom, getBloc
 import { sendWebhook } from './webhook';
 import { computeDatabaseOutput } from './databaseOutput';
 import { validateValue } from './validation';
+// Re-exported so every existing import of evaluateCondition from this file
+// keeps working. The definition now lives in conditions.ts.
+import { evaluateCondition } from './conditions';
+export { evaluateCondition };
 import { renderTemplate } from './format';
 import { supabase } from './supabase';
 
@@ -107,58 +111,6 @@ export function conditionHolds(
   if (operator === 'isInvalid') return validationErrorFor(fieldId, store) !== null;
   const state = store.get(blockRuntimeAtom(fieldId));
   return evaluateCondition(state?.value, operator, expected);
-}
-
-/**
- * One condition, evaluated. Pulled out of executeWorkflow so a step can hold a
- * list of them rather than exactly one.
- *
- * Operators come in pairs on purpose: every positive has a negative, because
- * "only run this if X has NOT happened" is as common as the other way round and
- * used to be impossible to say.
- */
-export function evaluateCondition(actual: any, operator: string, expected: any): boolean {
-  const asNumber = (v: any) => Number(v);
-  const bothNumeric =
-    (typeof actual === 'number' || (actual !== null && actual !== '' && !isNaN(Number(actual)))) &&
-    expected !== undefined && expected !== null && expected !== '' && !isNaN(Number(expected));
-
-  switch (operator) {
-    case 'is ON':
-    case 'is_ON':
-      return actual === true;
-    case 'is OFF':
-    case 'is_OFF':
-      return actual === false;
-    case 'equals':
-      return bothNumeric ? asNumber(actual) === asNumber(expected) : actual === expected;
-    case 'notEquals':
-      return bothNumeric ? asNumber(actual) !== asNumber(expected) : actual !== expected;
-    case 'greaterThan':
-    case 'greater than':
-      return asNumber(actual) > asNumber(expected);
-    case 'lessThan':
-    case 'less than':
-      return asNumber(actual) < asNumber(expected);
-    case 'greaterOrEqual':
-      return asNumber(actual) >= asNumber(expected);
-    case 'lessOrEqual':
-      return asNumber(actual) <= asNumber(expected);
-    case 'contains':
-      return (typeof actual === 'string' || Array.isArray(actual)) ? actual.includes(expected) : false;
-    case 'notContains':
-      return (typeof actual === 'string' || Array.isArray(actual)) ? !actual.includes(expected) : true;
-    case 'isEmpty':
-      if (actual === null || actual === undefined) return true;
-      if (typeof actual === 'string' || Array.isArray(actual)) return actual.length === 0;
-      return false;
-    case 'isNotEmpty':
-      if (actual === null || actual === undefined) return false;
-      if (typeof actual === 'string' || Array.isArray(actual)) return actual.length > 0;
-      return true;
-    default:
-      return false;
-  }
 }
 
 /**

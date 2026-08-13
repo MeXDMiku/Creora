@@ -119,7 +119,7 @@ Ordered by how much each unblocks, not by size or appeal. Cycle takes the top.
                                       row" rather than built twice. Uploads need
                                       docs/SETUP_STORAGE.md run once.
 
-    !! LIVE VERIFICATION              FOUR cycles owed. Nothing has been clicked
+    !! LIVE VERIFICATION              FIVE cycles owed. Nothing has been clicked
                                       on the real domain since 11 Aug. Cycle 3
                                       fixed an XSS that was live, so confirming
                                       that fix on the real domain is now the
@@ -137,13 +137,13 @@ Ordered by how much each unblocks, not by size or appeal. Cycle takes the top.
                                       BLOCKED-ISH: needs a migration this
                                       session cannot apply or verify. Write the
                                       SQL first, apply it, then build against it.
-    2  Search, filter, sort, paginate a table of 500 rows is unusable today, and
-                                      the repeater caps at 200 with a note.
-    3  Real sign-in for visitors      the multi-tenant one. Visitor already
+    -- Search, filter, sort, paginate DONE, cycle 5, 13 Aug. Controls come from
+                                      blocks, so a visitor operates the list.
+    2  Real sign-in for visitors      the multi-tenant one. Visitor already
                                       exists; this makes it mean something.
-    4  Status dashboard (Layer 3)     what is running, what failed, usage.
-    5  Team permissions               independent of 3, cheaper than it looks.
-    6  Payments and entitlements      then perks and commission become settings.
+    3  Status dashboard (Layer 3)     what is running, what failed, usage.
+    4  Team permissions               independent of 2, cheaper than it looks.
+    5  Payments and entitlements      then perks and commission become settings.
 
 Everything else lives in BACKLOG.md and does not jump this queue without a reason
 written down at step 6.

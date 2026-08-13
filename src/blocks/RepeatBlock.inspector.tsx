@@ -42,10 +42,15 @@ export default function RepeatBlockInspector({ blockId, editor }: { blockId: str
   const triggerSave = useSetAtom(triggerSaveAtom)
   const store = useStore()
 
-  const databases = useMemo(
-    () => getCanvasBlocks(editor, store, blockId).filter(b => b.type === 'databaseBlock'),
+  const allBlocks = useMemo(
+    () => getCanvasBlocks(editor, store, blockId),
     [editor, store, blockId, runtimeState]
   )
+  const databases = allBlocks.filter(b => b.type === 'databaseBlock')
+  // Anything can drive a control: an Input for search, a Toggle for direction,
+  // a Shape acting as a category button. Filtering the list to "sensible" types
+  // would be a ceiling, and there is no way to guess what someone will wire.
+  const otherBlocks = allBlocks.filter(b => b.type !== 'databaseBlock')
 
   const tracked = useAtomValue(blockRuntimeAtom(runtimeState.trackedBlockId || ''))
   const columns = (tracked?.columns || []).map(c => c.name).filter(Boolean)
@@ -170,6 +175,47 @@ export default function RepeatBlockInspector({ blockId, editor }: { blockId: str
 
       <div style={{ border: '1px solid #e2e8f0', borderRadius: '6px', padding: '10px', marginBottom: '12px', background: '#f8fafc' }}>
         <div style={{ fontWeight: 600, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px', color: '#334155', marginBottom: '8px' }}>
+          Search
+        </div>
+
+        <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px' }}>
+          Search box
+          <select
+            value={runtimeState.searchBlockId || ''}
+            onChange={(e) => set({ searchBlockId: e.target.value })}
+            style={fieldStyle}
+          >
+            <option value="">(no search)</option>
+            {otherBlocks.map(b => <option key={b.id} value={b.id}>{b.label}</option>)}
+          </select>
+          <span style={hintStyle}>
+            Point this at an Input block and whatever a visitor types narrows the
+            list as they type. Every word has to appear somewhere in the row, but
+            not in the same column — "ada lon" finds Ada in London.
+          </span>
+        </label>
+
+        <label style={{ display: 'block', fontSize: '12px' }}>
+          Looking at
+          <select
+            multiple
+            size={Math.min(5, Math.max(2, columns.length))}
+            value={runtimeState.searchColumns || []}
+            onChange={(e) =>
+              set({ searchColumns: Array.from(e.target.selectedOptions).map(o => o.value) })
+            }
+            style={{ ...fieldStyle, height: 'auto' }}
+          >
+            {columns.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <span style={hintStyle}>
+            Nothing selected means every column, which is usually what you want.
+          </span>
+        </label>
+      </div>
+
+      <div style={{ border: '1px solid #e2e8f0', borderRadius: '6px', padding: '10px', marginBottom: '12px', background: '#f8fafc' }}>
+        <div style={{ fontWeight: 600, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px', color: '#334155', marginBottom: '8px' }}>
           Which rows, in what order
         </div>
 
@@ -184,15 +230,52 @@ export default function RepeatBlockInspector({ blockId, editor }: { blockId: str
               <option value="">(every row)</option>
               {columns.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
-            <input
-              type="text"
-              value={runtimeState.filterValue ?? ''}
-              onChange={(e) => set({ filterValue: e.target.value })}
-              placeholder="equals..."
+            <select
+              value={runtimeState.filterOperator || 'equals'}
+              onChange={(e) => set({ filterOperator: e.target.value })}
               style={{ ...fieldStyle, marginTop: 0, flex: 1 }}
-            />
+            >
+              <option value="equals">is</option>
+              <option value="notEquals">is not</option>
+              <option value="contains">contains</option>
+              <option value="notContains">does not contain</option>
+              <option value="greaterThan">is more than</option>
+              <option value="lessThan">is less than</option>
+              <option value="greaterOrEqual">is at least</option>
+              <option value="lessOrEqual">is at most</option>
+              <option value="isEmpty">is empty</option>
+              <option value="isNotEmpty">is not empty</option>
+            </select>
           </div>
         </label>
+
+        {runtimeState.filterColumn && (
+          <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px' }}>
+            Compared with
+            <select
+              value={runtimeState.filterBlockId || ''}
+              onChange={(e) => set({ filterBlockId: e.target.value })}
+              style={fieldStyle}
+            >
+              <option value="">a fixed value</option>
+              {otherBlocks.map(b => <option key={b.id} value={b.id}>{b.label}</option>)}
+            </select>
+            {!runtimeState.filterBlockId && (
+              <input
+                type="text"
+                value={runtimeState.filterValue ?? ''}
+                onChange={(e) => set({ filterValue: e.target.value })}
+                placeholder="the value"
+                style={fieldStyle}
+              />
+            )}
+            <span style={hintStyle}>
+              Point it at a block and a visitor controls it — a dropdown of
+              categories, a toggle for "in stock only". A blank value means no
+              filter at all, so an empty box shows everything rather than nothing.
+            </span>
+          </label>
+        )}
 
         <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px' }}>
           Ordered by
@@ -220,6 +303,32 @@ export default function RepeatBlockInspector({ blockId, editor }: { blockId: str
           </span>
         </label>
 
+        <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px' }}>
+          Let a visitor choose the order
+          <div style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>
+            <select
+              value={runtimeState.sortColumnBlockId || ''}
+              onChange={(e) => set({ sortColumnBlockId: e.target.value })}
+              style={{ ...fieldStyle, marginTop: 0, flex: 1 }}
+            >
+              <option value="">column: fixed above</option>
+              {otherBlocks.map(b => <option key={b.id} value={b.id}>{b.label}</option>)}
+            </select>
+            <select
+              value={runtimeState.sortDirectionBlockId || ''}
+              onChange={(e) => set({ sortDirectionBlockId: e.target.value })}
+              style={{ ...fieldStyle, marginTop: 0, flex: 1 }}
+            >
+              <option value="">direction: fixed above</option>
+              {otherBlocks.map(b => <option key={b.id} value={b.id}>{b.label}</option>)}
+            </select>
+          </div>
+          <span style={hintStyle}>
+            A block whose value is a column name, and a Toggle where on means
+            last-to-first. Either one overrides the fixed setting above.
+          </span>
+        </label>
+
         <label style={{ display: 'block', fontSize: '12px' }}>
           At most this many
           <input
@@ -231,10 +340,61 @@ export default function RepeatBlockInspector({ blockId, editor }: { blockId: str
             style={fieldStyle}
           />
           <span style={hintStyle}>
-            Whatever you put here, no more than {MAX_RENDERED_ROWS} are drawn at
-            once, and the page says so on screen when it stops short.
+            Ignored once pages are on. Without either, no more than
+            {' '}{MAX_RENDERED_ROWS} are drawn at once and the page says so.
           </span>
         </label>
+      </div>
+
+      <div style={{ border: '1px solid #e2e8f0', borderRadius: '6px', padding: '10px', marginBottom: '12px', background: '#f8fafc' }}>
+        <div style={{ fontWeight: 600, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px', color: '#334155', marginBottom: '8px' }}>
+          Pages
+        </div>
+
+        <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px' }}>
+          Rows per page
+          <input
+            type="number"
+            min="0"
+            value={runtimeState.pageSize ?? ''}
+            onChange={(e) => set({ pageSize: e.target.value === '' ? 0 : Number(e.target.value) })}
+            placeholder="0 — no pages"
+            style={fieldStyle}
+          />
+          <span style={hintStyle}>
+            Turning this on is what makes a table of 500 rows usable. Searching
+            or re-sorting always returns to page one, because page four of the
+            old results is an empty page that reads as "nothing found".
+          </span>
+        </label>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', fontSize: '12px' }}>
+          <input
+            type="checkbox"
+            checked={runtimeState.showPager !== false}
+            onChange={(e) => set({ showPager: e.target.checked })}
+          />
+          Show Previous / Next
+        </label>
+
+        {runtimeState.showPager !== false && (
+          <div style={{ display: 'flex', gap: '4px' }}>
+            <input
+              type="text"
+              value={runtimeState.prevLabel ?? ''}
+              onChange={(e) => set({ prevLabel: e.target.value })}
+              placeholder="Previous"
+              style={{ ...fieldStyle, marginTop: 0, flex: 1 }}
+            />
+            <input
+              type="text"
+              value={runtimeState.nextLabel ?? ''}
+              onChange={(e) => set({ nextLabel: e.target.value })}
+              placeholder="Next"
+              style={{ ...fieldStyle, marginTop: 0, flex: 1 }}
+            />
+          </div>
+        )}
       </div>
 
       <label style={{ display: 'block', marginBottom: '8px' }}>

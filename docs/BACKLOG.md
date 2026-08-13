@@ -543,3 +543,21 @@ file or opening the actual page.
 - **No timezone control.** Dates format in the viewer's local timezone. For a
   page whose readers are in one place and whose author is in another, "posted
   today" can be wrong by a day. Needs a per-block or per-page timezone setting.
+
+## Added during cycle 5 (search, filter, sort, paginate) — 13 Aug 2026
+
+- **Everything is filtered in the browser.** All rows are fetched and then
+  narrowed client-side, so 500 rows means 500 rows over the wire on every load.
+  Fine at this size, wrong at 50,000. The fix is pushing search and paging into
+  the RPC, and it wants doing at the same time as collections.
+- **Search is case-insensitive; `contains` is not.** Search lowercases both
+  sides because a person typing into a box does not think about case; the
+  `contains` operator compares exactly, because a workflow condition that
+  silently ignored case would be worse. Defensible, but they read as the same
+  word in the panel and one day someone will be surprised.
+- **The pager cannot be styled.** It is a plain Previous / Next with the
+  builder's own labels, or off entirely. Custom CSS reaches the block but not
+  the pager's own buttons.
+- **One filter at a time.** A step can hold many conditions; a repeater holds
+  one filter. Two filters ("London AND Engineer") needs the same
+  conditions[]/match shape the workflow steps already have.

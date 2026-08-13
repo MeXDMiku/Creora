@@ -43,6 +43,18 @@ import { executeWorkflow, recalculateAllFormulas } from '../lib/bindingEngine';
  * something different once published is worse than no repeater.
  */
 
+function pagerButtonStyle(disabled: boolean): React.CSSProperties {
+  return {
+    padding: '6px 12px',
+    borderRadius: '6px',
+    border: '1px solid #cbd5e1',
+    background: disabled ? '#f1f5f9' : '#ffffff',
+    color: disabled ? '#94a3b8' : '#0f172a',
+    cursor: disabled ? 'default' : 'pointer',
+    fontSize: '13px',
+  };
+}
+
 export function RepeatView({
   blockId,
   poll = false,
@@ -56,7 +68,70 @@ export function RepeatView({
   const state = useAtomValue(blockRuntimeAtom(blockId));
   const { rows, isLoading, error } = useDatabaseRows(state?.trackedBlockId, poll);
 
-  const view = useMemo(() => visibleRows(rows, state), [rows, state]);
+  /**
+   * The four controls a visitor can be holding.
+   *
+   * Read unconditionally, with an empty id standing in for "not wired", so the
+   * number of hooks never changes between renders. A hook behind an `if` is a
+   * hook that fires in a different order the moment a builder picks a search box.
+   */
+  const searchState = useAtomValue(blockRuntimeAtom(state?.searchBlockId || ''));
+  const filterState = useAtomValue(blockRuntimeAtom(state?.filterBlockId || ''));
+  const sortColumnState = useAtomValue(blockRuntimeAtom(state?.sortColumnBlockId || ''));
+  const sortDirectionState = useAtomValue(blockRuntimeAtom(state?.sortDirectionBlockId || ''));
+
+  const searchText = state?.searchBlockId ? String(searchState?.value ?? '') : '';
+  // A live filter value wins over the fixed one, so a builder can set a sensible
+  // default in the panel and still let a visitor change it.
+  const filterValue = state?.filterBlockId ? filterState?.value : state?.filterValue;
+  const sortColumn = state?.sortColumnBlockId
+    ? String(sortColumnState?.value ?? '') || undefined
+    : state?.sortColumn;
+  const sortDirection = state?.sortDirectionBlockId
+    ? (sortDirectionState?.value ? 'desc' : 'asc')
+    : state?.sortDirection;
+
+  const [page, setPage] = useState(1);
+
+  /**
+   * Back to page one whenever what is being looked at changes.
+   *
+   * Without this, searching while on page 4 of the old results shows an empty
+   * page, and every visitor reads that as "no results" rather than "wrong page".
+   * It is the classic paging bug and it is one line.
+   */
+  useEffect(() => {
+    setPage(1);
+  }, [searchText, filterValue, sortColumn, sortDirection, state?.pageSize]);
+
+  const view = useMemo(
+    () =>
+      visibleRows(rows, {
+        search: searchText,
+        searchColumns: state?.searchColumns,
+        filterColumn: state?.filterColumn,
+        filterOperator: state?.filterOperator,
+        filterValue,
+        sortColumn,
+        sortDirection,
+        page,
+        pageSize: state?.pageSize,
+        maxRows: state?.maxRows,
+      }),
+    [
+      rows,
+      searchText,
+      state?.searchColumns,
+      state?.filterColumn,
+      state?.filterOperator,
+      filterValue,
+      sortColumn,
+      sortDirection,
+      page,
+      state?.pageSize,
+      state?.maxRows,
+    ]
+  );
   const template = useMemo(() => sanitizeHtml(state?.rowHtml), [state?.rowHtml]);
   const empty = useMemo(() => sanitizeHtml(state?.emptyHtml), [state?.emptyHtml]);
 
@@ -144,6 +219,45 @@ export function RepeatView({
       {view.truncatedNote && (
         <div style={{ marginTop: '8px', fontSize: '11px', color: '#64748b', fontFamily: 'sans-serif' }}>
           {view.truncatedNote}
+        </div>
+      )}
+
+      {/*
+        The built-in pager, switchable off. A builder who wants their own
+        buttons should not have to hide ours: the page number is ordinary state
+        and two buttons wired to it do the same job.
+      */}
+      {state?.showPager !== false && view.pageCount > 1 && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '8px',
+            marginTop: gap + 'px',
+            fontFamily: 'sans-serif',
+            fontSize: '13px',
+          }}
+        >
+          <button
+            type="button"
+            disabled={view.page <= 1}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            style={pagerButtonStyle(view.page <= 1)}
+          >
+            {state?.prevLabel || 'Previous'}
+          </button>
+          <span style={{ color: '#64748b' }}>
+            Page {view.page} of {view.pageCount}
+          </span>
+          <button
+            type="button"
+            disabled={view.page >= view.pageCount}
+            onClick={() => setPage((p) => p + 1)}
+            style={pagerButtonStyle(view.page >= view.pageCount)}
+          >
+            {state?.nextLabel || 'Next'}
+          </button>
         </div>
       )}
     </div>

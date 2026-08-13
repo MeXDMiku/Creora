@@ -1,4 +1,5 @@
 import type { BlockRuntimeState } from '../types/creora';
+import { evaluateCondition } from './conditions';
 
 /**
  * Which rows a repeater shows, and in what order.
@@ -25,17 +26,77 @@ export type Row = Record<string, any>;
 export const MAX_RENDERED_ROWS = 200;
 
 /**
- * The filter is deliberately the same one a Database block already uses:
- * equality, compared as text, so "5" typed into a box matches 5 in a number
- * column. Two filters with different rules in one product is a thing nobody
- * can hold in their head.
+ * What a visitor is looking at: which rows, in what order, which page.
+ *
+ * A plain object rather than a block's runtime state, deliberately. Half of
+ * these come from a fixed setting the builder typed and half come from a live
+ * block a visitor is typing into, and the difference belongs in the component
+ * that resolves them -- not in here, where it would make every check need a
+ * store.
  */
-function applyFilter(rows: Row[], state?: BlockRuntimeState): Row[] {
-  const col = state?.filterColumn;
-  if (!col) return rows;
-  const want = state?.filterValue;
-  const wanted = want === undefined || want === null ? '' : String(want);
-  return rows.filter((r) => String(r?.[col] ?? '') === wanted);
+export interface ViewSpec {
+  /** Free text, matched across `searchColumns`. */
+  search?: string;
+  /** Which columns the search looks at. Empty means all of them. */
+  searchColumns?: string[];
+  filterColumn?: string;
+  /** Any operator from conditions.ts. Defaults to equals. */
+  filterOperator?: string;
+  filterValue?: any;
+  sortColumn?: string;
+  sortDirection?: 'asc' | 'desc';
+  /** 1-based. Out of range is clamped, never empty. */
+  page?: number;
+  pageSize?: number;
+  /** Used only when there is no pageSize. */
+  maxRows?: number;
+}
+
+/** Operators that are complete on their own, so a blank value is not "no filter". */
+const VALUELESS_OPERATORS = new Set(['isEmpty', 'isNotEmpty', 'is ON', 'is OFF', 'is_ON', 'is_OFF']);
+
+function cellText(value: any): string {
+  if (value === null || value === undefined) return '';
+  if (value instanceof Date) return value.toISOString();
+  return String(value);
+}
+
+/**
+ * Free-text search across a row.
+ *
+ * Every word must appear somewhere in the row, but not necessarily in the same
+ * column: "ada lon" finds the row with Ada in Name and London in City. That is
+ * what people mean when they type two words into one box, and matching the
+ * whole phrase against each column separately -- the obvious implementation --
+ * finds nothing and reads as broken.
+ */
+export function rowMatchesSearch(row: Row, search: string, columns?: string[]): boolean {
+  const terms = (search || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return true;
+
+  const keys = columns && columns.length ? columns : Object.keys(row || {}).filter((k) => k !== 'id');
+  const haystack = keys.map((k) => cellText(row?.[k])).join(' ').toLowerCase();
+
+  return terms.every((term) => haystack.includes(term));
+}
+
+/**
+ * The filter, using the product's own operator vocabulary rather than a second
+ * private one. A visitor narrowing a list and a workflow deciding whether to
+ * run are asking the same question; conditions.ts answers it once.
+ *
+ * A blank value means no filter, except for the operators that do not take one.
+ * Otherwise an empty search box would hide every row, which is the single most
+ * common way a filtered list looks broken on first load.
+ */
+function passesFilter(row: Row, spec: ViewSpec): boolean {
+  const col = spec.filterColumn;
+  if (!col) return true;
+  const operator = spec.filterOperator || 'equals';
+  const value = spec.filterValue;
+  const blank = value === undefined || value === null || value === '';
+  if (blank && !VALUELESS_OPERATORS.has(operator)) return true;
+  return evaluateCondition(row?.[col], operator, value);
 }
 
 /**
@@ -70,48 +131,81 @@ export function compareCells(a: any, b: any): number {
 
 export interface VisibleRowsResult {
   rows: Row[];
-  /** How many matched the filter, before any limit. */
+  /** How many survived search and filter, before any page or limit. */
   matched: number;
-  /** Set when rows were dropped, so the page can admit it rather than imply completeness. */
+  /** The page actually shown, after clamping. 1 when there are no pages. */
+  page: number;
+  /** How many pages there are. 1 when paging is off or there is nothing. */
+  pageCount: number;
+  /** Set when rows were dropped without being asked for, so the page can admit it. */
   truncatedNote: string | null;
 }
 
 /**
- * Filter, then order, then limit -- in that order, because any other order
- * answers a different question. "The three cheapest red ones" is not "the red
- * ones out of the three cheapest".
+ * Search, then filter, then order, then take a page -- in that order, because
+ * any other order answers a different question. "The three cheapest red ones"
+ * is not "the red ones out of the three cheapest", and page 2 of a search is
+ * not a search of page 2.
  */
-export function visibleRows(rows: Row[] | undefined | null, state?: BlockRuntimeState): VisibleRowsResult {
+export function visibleRows(rows: Row[] | undefined | null, spec: ViewSpec = {}): VisibleRowsResult {
   const all = Array.isArray(rows) ? rows : [];
-  const filtered = applyFilter(all, state);
 
-  const sortColumn = state?.sortColumn;
+  const searched = spec.search && spec.search.trim() !== ''
+    ? all.filter((r) => rowMatchesSearch(r, spec.search as string, spec.searchColumns))
+    : all;
+
+  const filtered = searched.filter((r) => passesFilter(r, spec));
+
+  const sortColumn = spec.sortColumn;
   let ordered = filtered;
   if (sortColumn) {
-    const direction = state?.sortDirection === 'desc' ? -1 : 1;
+    const direction = spec.sortDirection === 'desc' ? -1 : 1;
     // Copied before sorting: sort() mutates, and this array belongs to the
     // Database block's runtime state, which is shared with the table itself.
     ordered = [...filtered].sort((a, b) => compareCells(a?.[sortColumn], b?.[sortColumn]) * direction);
-  } else if (state?.sortDirection === 'desc') {
+  } else if (spec.sortDirection === 'desc') {
     // No column named, but "newest first" asked for: rows arrive oldest-first,
     // so reversing them IS newest-first, and it is what people mean.
     ordered = [...filtered].reverse();
   }
 
-  const asked = state?.maxRows;
+  const matched = ordered.length;
+
+  // --- paging ---
+  const pageSize = typeof spec.pageSize === 'number' && spec.pageSize > 0
+    ? Math.min(spec.pageSize, MAX_RENDERED_ROWS)
+    : 0;
+
+  if (pageSize > 0) {
+    const pageCount = Math.max(1, Math.ceil(matched / pageSize));
+    // Clamped rather than trusted. A page number can come from a block a
+    // visitor is pressing, and "Next" past the end must show the last page,
+    // not an empty one that reads as "your search broke".
+    const page = Math.min(Math.max(1, Math.floor(spec.page || 1)), pageCount);
+    const start = (page - 1) * pageSize;
+    return {
+      rows: ordered.slice(start, start + pageSize),
+      matched,
+      page,
+      pageCount,
+      truncatedNote: null,
+    };
+  }
+
+  const asked = spec.maxRows;
   const wanted = typeof asked === 'number' && asked > 0 ? Math.min(asked, MAX_RENDERED_ROWS) : MAX_RENDERED_ROWS;
   const shown = ordered.slice(0, wanted);
 
   let truncatedNote: string | null = null;
-  if (ordered.length > shown.length) {
-    const hidden = ordered.length - shown.length;
+  if (matched > shown.length) {
+    const hidden = matched - shown.length;
     truncatedNote =
       typeof asked === 'number' && asked > 0 && asked <= MAX_RENDERED_ROWS
         ? null // The builder asked for exactly this many. Not a truncation.
-        : 'Showing ' + shown.length + ' of ' + ordered.length + ' (' + hidden + ' not shown)';
+        : 'Showing ' + shown.length + ' of ' + matched + ' (' + hidden + ' not shown)';
   }
 
-  return { rows: shown, matched: filtered.length, truncatedNote };
+  return { rows: shown, matched, page: 1, pageCount: 1, truncatedNote };
 }
 
 /**

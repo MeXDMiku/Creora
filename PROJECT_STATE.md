@@ -803,6 +803,64 @@ scheme past it.
 
 ---
 
+### Cycle 5 — search, filter, sort, paginate *(13 Aug 2026)*
+
+Queue item 2, and the thing the repeater's 200-row cap was already asking for.
+
+**The idea is the same one that made images work: make the controls values.**
+Every control on a repeater can now come from a block instead of a fixed
+setting, which is what turns a static list into something a visitor operates.
+
+- **Search** — point it at an Input block and typing narrows the list. **Every
+  word must appear somewhere in the row, but not in the same column**: "lovelace
+  lon" finds Ada in London. Matching the whole phrase against each column
+  separately is the obvious implementation, finds nothing, and reads as broken.
+  Optionally restricted to named columns; blank means all of them.
+- **Filter** — now with the product's **own operator vocabulary** rather than a
+  second private one: is, is not, contains, more than, at least, is empty, and
+  the rest. The value can be fixed or come from a block, so a dropdown of
+  categories or an "in stock only" toggle drives it.
+- **Sort** — still settable in the panel, and now overridable by a block: one
+  block naming the column, a Toggle for the direction. That is a visitor-sortable
+  list without a new concept.
+- **Pages** — rows per page, with a built-in Previous / Next that can be switched
+  off for anyone who wants their own buttons. The page number is clamped, not
+  trusted: **past the end shows the last page, never an empty one**, because an
+  empty page reads as "nothing found" rather than "wrong page".
+- **Searching or re-sorting returns to page one.** The classic paging bug, one
+  line, and a check named after it.
+
+**Order of operations, again**: search, then filter, then order, then take a
+page. Page 2 of a search is not a search of page 2.
+
+**`evaluateCondition` moved to `src/lib/conditions.ts`.** Not for the import
+graph — because a visitor typing in a search box and a workflow deciding whether
+to run a step are asking the same question, and answering it twice would mean
+"contains" quietly meaning two things.
+
+**A real bug the checks found, in shipped code**
+
+`evaluateCondition('', 'lessThan', 9)` was **true**, because `Number('')` is 0.
+So "only run this if Score is less than 9" fired for every row whose Score had
+never been filled in — in workflows, which have shipped for weeks, not just in
+the new filter. It is the same mistake as sorting blanks first, decided
+correctly in cycle 3 and wrongly here. Comparisons now go through a helper that
+treats a blank on either side as "cannot be compared". A real 0 still compares.
+
+**Three of my own checks were wrong, and the code was right.** "ada lon" does
+match *Cy Adams, London*, because substrings match inside words. Rather than
+weaken the checks, the behaviour is now documented by a check that says so out
+loud — `search: 'ada'` returns both Ada and Adams.
+
+`npm run check` is now **361**, up from 299. Negative-controlled three ways at
+once — page clamp removed, search reduced to phrase-per-column, blank-is-zero
+restored — and nine checks went red, including all three named after the traps
+they guard.
+
+**Live verification: five cycles owed.**
+
+---
+
 ## File Structure Summary
 
 ```

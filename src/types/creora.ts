@@ -297,6 +297,25 @@ export interface BlockRuntimeState {
   gap?: number;
   /** Clicking a row puts that row's value for this column into this block. */
   clickColumn?: string;
+  // --- Search, filter, sort, paginate: the live half ---
+  /** Which block holds the text a visitor is searching for. */
+  searchBlockId?: string;
+  /** Columns the search looks at. Empty means all of them. */
+  searchColumns?: string[];
+  /** Any operator from conditions.ts. Defaults to equals. */
+  filterOperator?: string;
+  /** Take the filter's value from this block instead of the fixed one. */
+  filterBlockId?: string;
+  /** A block whose value names the column to sort by. */
+  sortColumnBlockId?: string;
+  /** A block -- usually a Toggle -- where true means last-to-first. */
+  sortDirectionBlockId?: string;
+  /** Rows per page. Zero or blank means no paging. */
+  pageSize?: number;
+  /** Draw the built-in Previous / Next row. Off means build your own. */
+  showPager?: boolean;
+  prevLabel?: string;
+  nextLabel?: string;
 }
 
 export interface DatabaseField {

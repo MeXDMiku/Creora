@@ -150,6 +150,11 @@ export function defaultRuntimeForNodeType(nodeType: BlockNodeType | null): Block
         gridColumns: 3,
         gap: 12,
         sortDirection: 'asc',
+        filterOperator: 'equals',
+        pageSize: 0,
+        showPager: true,
+        prevLabel: 'Previous',
+        nextLabel: 'Next',
         width: 360,
       };
     case 'imageBlock':
