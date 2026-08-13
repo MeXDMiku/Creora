@@ -173,6 +173,9 @@ export const FormulaDisplayBlock = Node.create({
     return {
       blockId: {
         default: () => 'frm_' + Math.random().toString(36).substring(2, 11),
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-blockid'),
+        renderHTML: (attributes: Record<string, any>) =>
+          attributes.blockId ? { 'data-blockid': attributes.blockId } : {},
       },
     };
   },

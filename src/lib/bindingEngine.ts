@@ -227,12 +227,18 @@ export function executeWorkflow(
   }
 
   const workflows = store.get(workflowsAtom);
-  console.log('executeWorkflow: all workflows in store:', workflows);
-  console.log('executeWorkflow: filtering for sourceId =', sourceId, 'event =', event);
+  /**
+   * These used to be console.log, on every click, on every page.
+   *
+   * A visitor to somebody's published page got the entire workflow structure of
+   * that page dumped into their console -- 84 messages from two clicks, while I
+   * was looking. It is noise, it is a small amount of information nobody asked
+   * to publish, and it has been redundant since the run log was built: the run
+   * log records the same thing, in the product, where a builder can read it.
+   */
   const matchingWorkflows = workflows.filter(
     (w) => w.sourceId === sourceId && w.sourceEvent === event
   );
-  console.log('executeWorkflow: matching workflows count =', matchingWorkflows.length);
 
   // The most useful entry in the whole log is this one: the trigger fired and
   // nothing was listening. "I clicked it and nothing happened" was previously
@@ -604,10 +610,6 @@ export function executeWorkflow(
                   .then(({ error: updateError }: any) => {
                     if (updateError) {
                       console.warn('[Supabase execute info]: Could not update row via workflow action.', updateError.message);
-                    } else {
-                      console.log('[Supabase execute info]: Successfully updated row inside database_rows.');
-                      // State explicitly that the row count is unchanged
-                      console.log('[Supabase execute info]: Row count in database_rows is verified UNCHANGED.');
                     }
                   });
               });

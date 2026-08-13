@@ -129,7 +129,31 @@ export const PageValueBlock = Node.create({
   group: 'block',
   atom: true,
   selectable: true,
-  addAttributes() { return { blockId: { default: null } }; },
+/**
+ * Attributes have to survive a round trip through HTML.
+ *
+ * They did not. renderHTML wrote blockId and label into the markup and
+ * parseHTML matched only the tag, so anything loaded as HTML rather than as
+ * JSON came back with the attributes GONE and the defaults put in their place.
+ *
+ * For `label` that means a button called "Submit!" silently becomes "Button",
+ * and the next save makes it permanent -- which is exactly what happened to the
+ * live Feedback page while it was being looked at.
+ *
+ * For `blockId` it is worse: a fresh random id means every wire, workflow and
+ * saved row that referred to that block is pointing at something that no longer
+ * exists.
+ */
+  addAttributes() {
+    return {
+      blockId: {
+        default: null,
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-blockid'),
+        renderHTML: (attributes: Record<string, any>) =>
+          attributes.blockId ? { 'data-blockid': attributes.blockId } : {},
+      },
+    };
+  },
   parseHTML() { return [{ tag: 'div[data-type="page-value-block"]' }]; },
   renderHTML({ HTMLAttributes }) { return ['div', { ...HTMLAttributes, 'data-type': 'page-value-block' }]; },
   addNodeView() { return ReactNodeViewRenderer(PageValueComponent, { as: 'div' }); },

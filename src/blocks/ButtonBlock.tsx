@@ -223,6 +223,21 @@ export const ButtonBlock = Node.create({
   atom: true,
   selectable: true,
 
+/**
+ * Attributes have to survive a round trip through HTML.
+ *
+ * They did not. renderHTML wrote blockId and label into the markup and
+ * parseHTML matched only the tag, so anything loaded as HTML rather than as
+ * JSON came back with the attributes GONE and the defaults put in their place.
+ *
+ * For `label` that means a button called "Submit!" silently becomes "Button",
+ * and the next save makes it permanent -- which is exactly what happened to the
+ * live Feedback page while it was being looked at.
+ *
+ * For `blockId` it is worse: a fresh random id means every wire, workflow and
+ * saved row that referred to that block is pointing at something that no longer
+ * exists.
+ */
   addAttributes() {
     return {
       blockId: {
@@ -230,6 +245,9 @@ export const ButtonBlock = Node.create({
       },
       label: {
         default: 'Click me',
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-label'),
+        renderHTML: (attributes: Record<string, any>) =>
+          attributes.label ? { 'data-label': attributes.label } : {},
       },
     };
   },

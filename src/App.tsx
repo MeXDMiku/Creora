@@ -3113,8 +3113,22 @@ function App() {
           position: 'relative',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '16px' }}>
-          <h1 style={{ margin: 0 }}>Creora Playground</h1>
+        {/*
+          The toolbar used to be one row that could not wrap. At 1920px the
+          account badge already sat 67px off the right edge; on a 1366px laptop
+          Export, Import, Live and the account were simply gone, with no
+          scrollbar to reach them because the overflow was the whole document's.
+          Measured in a real browser -- nothing about the code looked wrong.
+        */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          marginBottom: '16px',
+          flexWrap: 'wrap',
+          maxWidth: '100%',
+        }}>
+          <h1 style={{ margin: 0, fontSize: 'clamp(20px, 2vw, 32px)', whiteSpace: 'nowrap' }}>Creora Playground</h1>
           {isLoading ? (
             <span style={{ fontSize: '14px', color: '#6b7280', background: '#f3f4f6', padding: '4px 8px', borderRadius: '4px' }}>
               Loading from database...
@@ -3134,7 +3148,16 @@ function App() {
           )}
 
           {/* Page Switcher Tabs */}
-          <div style={{ display: 'flex', gap: '4px', alignItems: 'center', background: '#f1f5f9', padding: '3px', borderRadius: '6px', marginLeft: '16px' }}>
+          {/*
+            The page strip scrolls on its own rather than pushing the rest of
+            the toolbar off the screen. Twenty pages should cost twenty pages of
+            scrolling here, not the Export button.
+          */}
+          <div style={{
+            display: 'flex', gap: '4px', alignItems: 'center', background: '#f1f5f9',
+            padding: '3px', borderRadius: '6px',
+            maxWidth: 'min(520px, 40vw)', overflowX: 'auto', flexShrink: 1,
+          }}>
             {pagesList.map((page) => {
               const isActive = page.id === (activePageId || PAGE_ID);
               return (
