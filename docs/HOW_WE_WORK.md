@@ -131,46 +131,42 @@ disagree, the audit is right and the queue is stale.
                                       slash menu have not been touched by a
                                       human since 11 Aug.
 
-    1  Page parameters                A page can be opened WITH a row, and can
-                                      ask which row it was opened with. Blocks
-                                      blog, directory and shop detail pages all
-                                      by itself. The smallest item here and the
-                                      largest blast radius -- found by walking a
-                                      site click by click, not by listing
-                                      features.
+    -- Page parameters                DONE, cycle 8, 13 Aug. The chain closes:
+                                      list, click, open with a value, read it,
+                                      show that one row.
 
-    2  More input types               Dropdown, checkbox, radio, number field,
+    1  More input types               Dropdown, checkbox, radio, number field,
                                       long text, date picker. Every real form
                                       needs at least one of these and Creora has
                                       text and toggle.
 
-    3  Layout model                   Containers, stacking, reflow. Blocks sit at
+    2  Layout model                   Containers, stacking, reflow. Blocks sit at
                                       fixed x/y and do not move on a phone. This
                                       is a rewrite, not a feature, and it is the
                                       whole of Phase C -- everything visual sits
                                       on top of it, so the redesign after it is
                                       the redesign done once.
 
-    4  Visitor accounts               Email sign-in for the users of a BUILT
+    3  Visitor accounts               Email sign-in for the users of a BUILT
                                       site. Per-visitor rows exist; this is what
                                       makes them survive a second browser.
 
-    5  A private server layer         Edge Functions. Nowhere to keep a secret
+    4  A private server layer         Edge Functions. Nowhere to keep a secret
                                       today, which is why email, payments, API
                                       keys, spam guards and AI are all one
                                       missing foundation rather than five.
 
-    6  Email                          Tell the owner, tell the visitor. Small
+    5  Email                          Tell the owner, tell the visitor. Small
                                       once 5 exists, and half the ten site types
                                       are unfinished without it.
 
-    7  Roles and permissions          The Discord-style layer. Needs 4.
+    6  Roles and permissions          The Discord-style layer. Needs 3.
 
-    8  Payments and entitlements      Needs 4 and 5. Then perks, subscriptions
+    7  Payments and entitlements      Needs 3 and 4. Then perks, subscriptions
                                       and commission become settings rather than
                                       projects.
 
-    9  Rich text per row              Blogs and posts need more than one line.
+    8  Rich text per row              Blogs and posts need more than one line.
 
 Everything else lives in BACKLOG.md and does not jump this queue without a
 reason written down at step 6.

@@ -16,6 +16,8 @@ import { blockRuntimeAtom, workflowsAtom, allBlockIdsAtom } from '../src/state/a
 import { executeWorkflow, validationErrorFor, markValidated } from '../src/lib/bindingEngine';
 import { evaluateCondition } from '../src/lib/conditions';
 import { describeCollectionError, MIGRATION_DOC } from '../src/lib/collections';
+import { parseParams, readParam, buildQuery, parseParamTemplate } from '../src/lib/pageParams';
+import { resolvePageValue, buildParamsFromTemplate } from '../src/lib/pageValue';
 import { withoutVisitorState, isBlockNodeType, BLOCK_NODE_TYPES } from '../src/lib/blockRegistry';
 import { safeUrl, isSafeUrlValue, schemeOf, stripIgnorable } from '../src/lib/urls';
 import { fillSlots, leadingSlotName, findSlots as findSlotsForCheck } from '../src/lib/sanitizeHtml';
@@ -1211,6 +1213,136 @@ group('the switch says what is missing, rather than failing quietly');
     'silence still says something',
     describeCollectionError(null),
     'That did not work, and the server did not say why.'
+  );
+}
+
+// ------------------------------------------------------------ page parameters
+group('reading what a page was opened with');
+{
+  check('one value', parseParams('?id=abc'), { id: 'abc' });
+  check('several', parseParams('?id=abc&tab=details'), { id: 'abc', tab: 'details' });
+  check('the question mark is optional', parseParams('id=abc'), { id: 'abc' });
+  check('nothing at all', parseParams(''), {});
+  check('null', parseParams(null), {});
+  check('a name with no value', parseParams('?id='), { id: '' });
+  check('a name with no equals sign', parseParams('?flag'), { flag: '' });
+  check('a repeated name keeps the first, so a mistake stays visible', parseParams('?id=1&id=2'), { id: '1' });
+
+  check('percent encoding is decoded', parseParams('?q=tea%20%26%20coffee'), { q: 'tea & coffee' });
+  check('a plus is a space, as it is in every form', parseParams('?q=tea+coffee'), { q: 'tea coffee' });
+  check('a slash survives', parseParams('?path=%2Fa%2Fb'), { path: '/a/b' });
+  check(
+    'A LONE PERCENT DOES NOT BLANK THE PAGE, because decodeURIComponent throws',
+    parseParams('?q=100%'),
+    { q: '100%' }
+  );
+
+  check('readParam finds it', readParam('?id=abc', 'id'), 'abc');
+  check('readParam falls back when absent', readParam('?other=1', 'id', 'none'), 'none');
+  check('readParam falls back when empty', readParam('?id=', 'id', 'none'), 'none');
+  check('readParam with no name at all', readParam('?id=abc', '', 'none'), 'none');
+}
+
+group('building an address to open a page with');
+{
+  check('one value', buildQuery({ id: 'abc' }), '?id=abc');
+  check('several, in order', buildQuery({ id: 'abc', tab: 'x' }), '?id=abc&tab=x');
+  check('nothing to carry is no question mark at all', buildQuery({}), '');
+  check('an empty value is dropped, not written as id=', buildQuery({ id: '' }), '');
+  check('a blank name is dropped', buildQuery({ '': 'x' }), '');
+
+  check(
+    'AN AMPERSAND IN A VALUE STAYS ONE VALUE',
+    buildQuery({ title: 'Tea & Coffee' }),
+    '?title=Tea%20%26%20Coffee'
+  );
+  check('a space', buildQuery({ q: 'two words' }), '?q=two%20words');
+  check('an equals sign', buildQuery({ q: 'a=b' }), '?q=a%3Db');
+  check('a hash', buildQuery({ q: 'a#b' }), '?q=a%23b');
+  check('a slash', buildQuery({ path: '/a/b' }), '?path=%2Fa%2Fb');
+  check(
+    'and it survives the round trip, which is the only thing that matters',
+    parseParams(buildQuery({ title: 'Tea & Coffee', q: 'a=b#c' })),
+    { title: 'Tea & Coffee', q: 'a=b#c' }
+  );
+}
+
+group('the builder writes a template, not a finished address');
+{
+  check('one pair', parseParamTemplate('id={{Row id}}'), [{ name: 'id', valueTemplate: '{{Row id}}' }]);
+  check(
+    'two pairs',
+    parseParamTemplate('id={{Row id}}&tab=details'),
+    [{ name: 'id', valueTemplate: '{{Row id}}' }, { name: 'tab', valueTemplate: 'details' }]
+  );
+  check('a leading question mark is tolerated', parseParamTemplate('?id=1'), [{ name: 'id', valueTemplate: '1' }]);
+  check('a pair with no equals sign is skipped', parseParamTemplate('id=1&broken'), [{ name: 'id', valueTemplate: '1' }]);
+  check('nothing', parseParamTemplate(''), []);
+
+  const row = { 'Row id': 'r7', Name: 'Tea & Coffee', Price: 4.5 };
+  check(
+    'filled from a row',
+    buildParamsFromTemplate('id={{Row id}}', row),
+    '?id=r7'
+  );
+  check(
+    'THE ORDERING THAT MATTERS: split first, fill second, encode last — so an ampersand in a title cannot become a second parameter',
+    buildParamsFromTemplate('id={{Row id}}&title={{Name}}', row),
+    '?id=r7&title=Tea%20%26%20Coffee'
+  );
+  check(
+    'and it comes back out whole',
+    parseParams(buildParamsFromTemplate('id={{Row id}}&title={{Name}}', row)).title,
+    'Tea & Coffee'
+  );
+  check(
+    'filters work in a link, because it is the same template engine',
+    buildParamsFromTemplate('price={{Price | money: $}}', row),
+    '?price=%244.50'
+  );
+  check(
+    'a slot with no value drops the whole pair rather than sending an empty one',
+    buildParamsFromTemplate('id={{Row id}}&missing={{Nope}}', row),
+    '?id=r7'
+  );
+  check('no template is no address', buildParamsFromTemplate('', row), '');
+}
+
+group('what a Page value block shows');
+{
+  const state = { paramName: 'id', previewValue: 'preview-row', fallbackValue: 'none' };
+
+  check('in the editor there is no address, so the stand-in shows', resolvePageValue(null, state), 'preview-row');
+  check(
+    'with no stand-in the editor falls back',
+    resolvePageValue(null, { paramName: 'id', fallbackValue: 'none' }),
+    'none'
+  );
+  check('on a real page the address wins', resolvePageValue({ id: 'r7' }, state), 'r7');
+  check(
+    'A PUBLISHED PAGE IGNORES THE STAND-IN, or every visitor would see the same row',
+    resolvePageValue({}, state),
+    'none'
+  );
+  check('an empty value counts as absent', resolvePageValue({ id: '' }, state), 'none');
+  check('a different name is not read by accident', resolvePageValue({ other: 'x' }, state), 'none');
+  check('no name configured means the fallback', resolvePageValue({ id: 'r7' }, { fallbackValue: 'none' }), 'none');
+  check('no state at all does not throw', resolvePageValue({ id: 'r7' }, undefined), '');
+}
+
+group('a value out of the address is still untrusted');
+{
+  // A URL parameter is typed by whoever sent the link. It reaches markup through
+  // exactly the same door as everything else, and that door is already guarded.
+  check(
+    'markup in a parameter is text',
+    fillSlots('<p>{{Q}}</p>', { Q: parseParams('?q=%3Cb%3Ehi%3C%2Fb%3E').q }),
+    '<p>&lt;b&gt;hi&lt;/b&gt;</p>'
+  );
+  check(
+    'a scheme in a parameter cannot reach an href',
+    fillSlots('<a href="{{Link}}">x</a>', { Link: parseParams('?link=javascript%3Aalert(1)').link }, ['Link']),
+    '<a href="">x</a>'
   );
 }
 

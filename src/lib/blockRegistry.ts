@@ -32,6 +32,7 @@ export const BLOCK_NODE_TYPES = [
   'visitorBlock',
   'imageBlock',
   'repeatBlock',
+  'pageValueBlock',
 ] as const;
 
 export type BlockNodeType = (typeof BLOCK_NODE_TYPES)[number];
@@ -113,6 +114,8 @@ export function defaultValueForNodeType(nodeType: BlockNodeType | null): any {
     case 'imageBlock':
     // A repeater's value is whatever row was last clicked, so it starts empty.
     case 'repeatBlock':
+    // A page value is whatever the address carried, so it starts empty too.
+    case 'pageValueBlock':
       return '';
     default:
       return 0;
@@ -134,6 +137,20 @@ export function defaultRuntimeForNodeType(nodeType: BlockNodeType | null): Block
   };
 
   switch (nodeType) {
+    case 'pageValueBlock':
+      return {
+        ...base,
+        blockName: 'Page value',
+        value: '',
+        paramName: 'id',
+        previewValue: '',
+        fallbackValue: '',
+        backgroundColor: '#0f172a',
+        textColor: '#ffffff',
+        borderRadius: 8,
+        fontSize: 14,
+        width: 200,
+      };
     case 'repeatBlock':
       return {
         ...base,

@@ -316,6 +316,20 @@ export interface BlockRuntimeState {
   showPager?: boolean;
   prevLabel?: string;
   nextLabel?: string;
+  // --- Page value: what this page was opened with ---
+  /** Which named value in the address this block reads. */
+  paramName?: string;
+  /** Stood in for while designing, when there is no address at all. */
+  previewValue?: string;
+  /** Used on a real page when the address does not carry that value. */
+  fallbackValue?: string;
+  // --- Opening another page with values ---
+  /** Clicking a row opens this page. */
+  clickTargetPageId?: string;
+  /** What to carry, e.g. "id={{Row id}}&tab=details". Filled per row. */
+  clickParams?: string;
+  /** What a Button carries when it navigates. Same shape. */
+  targetParams?: string;
 }
 
 export interface DatabaseField {

@@ -165,6 +165,25 @@ export default function ButtonBlockInspector({ blockId }: { blockId: string; edi
           </select>
         </label>
         {runtimeState.targetPageId && (
+          <label style={{ display: 'block', marginTop: '8px', fontSize: '12px', color: '#475569' }}>
+            Carrying
+            <input
+              type="text"
+              value={runtimeState.targetParams ?? ''}
+              onChange={(e) => {
+                setRuntimeState(prev => ({ ...prev, targetParams: e.target.value }))
+                triggerSave(prev => prev + 1)
+              }}
+              placeholder="id={{Selected}}"
+              style={{ display: 'block', marginTop: '4px', width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #ccc', boxSizing: 'border-box', background: '#f8fafc', color: '#0f172a', outline: 'none', fontSize: '13px' }}
+            />
+            <span style={{ display: 'block', fontSize: '11px', color: '#64748b', marginTop: '4px', lineHeight: 1.4 }}>
+              Values to hand the next page, built from blocks on this one. A Page
+              value block over there reads them by name. Filters work here too.
+            </span>
+          </label>
+        )}
+        {runtimeState.targetPageId && (
           <button
             onClick={() => {
               if (switchPageFn && runtimeState.targetPageId) {

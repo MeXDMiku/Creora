@@ -978,6 +978,62 @@ a statement about a file.
 
 ---
 
+### Cycle 8 — page parameters: the chain closes *(13 Aug 2026)*
+
+Queue item 1, straight off the re-run audit. **Seventeenth block type.**
+
+**The whole chain now exists:** a repeater lists rows, clicking one opens another
+page carrying that row, the destination reads what it was opened with, and its
+own repeater filters to that single row. Blog, directory and shop detail pages —
+three of the ten site types — were blocked on the one sentence in the middle.
+
+- **Page value block** — reads a named value out of the address.
+  `/view/<page>?id=abc` gives it `abc`. Named values rather than "the row id"
+  deliberately: `?category=shoes&sort=price` costs nothing extra, and a design
+  that only carried row ids would need replacing the first time somebody wanted
+  a filtered link.
+- **Clicking a row opens a page**, carrying a template the builder writes:
+  `id={{Row id}}&title={{Name}}`. Filters work in it, because it is the same
+  template engine as everywhere else.
+- **Buttons carry values too**, built from blocks on the page.
+- **`Row id` is a filter column**, so a detail page works with no setup at all.
+  Requiring a Slug column first would be more correct and would stop most people
+  at step one.
+
+**The ordering that is the whole job: split the template first, fill it second,
+encode it last.** Fill first and a title containing an ampersand has already
+become a second parameter before anything looks at it. That is the same shape as
+the bug that once let a filter smuggle a scheme past the URL guard, in a
+different costume, and there is a check named after it.
+
+**What I cut, and why.** A `goToPage` *workflow action* was planned and dropped.
+It needs a wire dragged to a target block, and navigation has no target block, so
+it would have been an action that ignores its own target. More to the point it
+unblocks **zero** additional site types — row-click plus button parameters close
+the chain. **Generality that unblocks nothing is scope, not power.** In the
+backlog with that reason.
+
+**The gap that only showed up by walking the click path.** In the editor there is
+no address, so a detail page would be blank while you design it. `pageParamsAtom`
+is `null` in the editor and an object on a published page — the distinction is
+the feature. Null means "show the stand-in so this page can be laid out"; an
+object means "this is a real address, the stand-in is not yours to use". One
+empty object could not have told those apart, **and a published page showing the
+builder's preview row would mean every visitor sees the same row.** There is a
+check named after that too, and the negative control proves it fails when the
+distinction is removed.
+
+**Also fixed while passing:** the new refresh loop matched block ids with
+`id.startsWith('pageValueBlock')`. A string standing in for a type check is
+exactly what made three block types unsaveable in cycle 2. It goes through
+`nodeTypeFromBlockId` now.
+
+`npm run check` is **418**, up from 370. Negative-controlled two ways — encoding
+removed and the stand-in leaked onto published pages — twelve went red, including
+every one named after a trap.
+
+---
+
 ## File Structure Summary
 
 ```

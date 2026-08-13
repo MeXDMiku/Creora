@@ -561,3 +561,18 @@ file or opening the actual page.
 - **One filter at a time.** A step can hold many conditions; a repeater holds
   one filter. Two filters ("London AND Engineer") needs the same
   conditions[]/match shape the workflow steps already have.
+
+## Added during cycle 8 (page parameters) — 13 Aug 2026
+
+- **`goToPage` as a workflow action.** Cut on purpose. A workflow step is built
+  by dragging a wire to a target block, and navigation has no target block, so
+  the action would ignore its own target. It also unblocks zero additional site
+  types — row-click and button parameters close the chain. Worth doing only when
+  something genuinely needs *conditional* navigation.
+- **Page values cannot be written, only read.** A page cannot change its own
+  address, so "apply this filter and make the link shareable" is not possible.
+  Wants `history.replaceState` and a decision about what belongs in an address.
+- **No detail-page template.** Building one is four manual steps: add a Page
+  value block, add a repeater, point its filter at the block, set the filter
+  column to Row id. Every one is obvious in hindsight and none are discoverable.
+  A "make a detail page for this list" button belongs in the arrangement phase.

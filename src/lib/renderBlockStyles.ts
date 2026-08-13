@@ -18,7 +18,20 @@ export function blockToCSS(
 
   const inner: CSSProperties = {};
 
-  if (type === 'visitorBlock') {
+  if (type === 'pageValueBlock') {
+    Object.assign(inner, {
+      padding: '8px 14px',
+      background: runtimeState?.backgroundColor || '#0f172a',
+      color: runtimeState?.textColor || '#ffffff',
+      borderRadius: runtimeState?.borderRadius !== undefined ? runtimeState.borderRadius + 'px' : '8px',
+      fontSize: runtimeState?.fontSize !== undefined ? runtimeState.fontSize + 'px' : '14px',
+      fontWeight: 600,
+      display: 'inline-block',
+      width: runtimeState?.width !== undefined ? runtimeState.width + 'px' : 'auto',
+      minWidth: '120px',
+      boxSizing: 'border-box',
+    });
+  } else if (type === 'visitorBlock') {
     Object.assign(inner, {
       padding: '8px 14px',
       background: runtimeState?.backgroundColor || '#334155',

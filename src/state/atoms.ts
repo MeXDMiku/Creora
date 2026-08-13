@@ -28,6 +28,7 @@ export function getBlockTypeDisplayName(nodeType: string): string {
   if (type.includes('visitor')) return 'Visitor';
   if (type.includes('customhtml')) return 'My Design';
   if (type.includes('datasource')) return 'Live Data';
+  if (type.includes('pagevalue')) return 'Page value';
   if (type.includes('repeat')) return 'For each row';
   if (type.includes('image')) return 'Image';
   if (type.includes('shape')) return 'Shape';
@@ -75,6 +76,17 @@ export const pendingConnectionAtom = atom<{
   x2: number;
   y2: number;
 } | null>(null);
+
+/**
+ * The values a published page was opened with, or null in the editor.
+ *
+ * Null rather than {} is the whole distinction: on a published page an absent
+ * parameter means "there is no category", and in the editor it means "there is
+ * no address yet, show me the preview value so I can lay this page out". One
+ * empty object could not tell those apart, and a detail page you cannot see
+ * while designing it is a detail page nobody designs well.
+ */
+export const pageParamsAtom = atom<Record<string, string> | null>(null);
 
 export const triggerSaveAtom = atom<number>(0);
 
@@ -155,6 +167,7 @@ export function getBlockDataType(nodeType: string): BlockDataType {
     case 'customHtmlBlock': return 'unknown';
     case 'imageBlock': return 'string'; // the address of the picture
     case 'repeatBlock': return 'string'; // whatever row was last clicked
+    case 'pageValueBlock': return 'string'; // whatever the address carried
     case 'visitorBlock': return 'unknown'; // boolean or text, depending on the field
     default: return 'unknown';
   }

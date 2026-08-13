@@ -19,6 +19,7 @@ import { sanitizeHtml, findSlots, fillSlots } from '../lib/sanitizeHtml';
 import { useSlotValues } from '../lib/useSlotValues';
 import { useDatabaseRows } from '../hooks/useDatabaseRows';
 import { visibleRows, rowSlots } from '../lib/rows';
+import { buildParamsFromTemplate } from '../lib/pageValue';
 import { executeWorkflow, recalculateAllFormulas } from '../lib/bindingEngine';
 
 /**
@@ -59,10 +60,13 @@ export function RepeatView({
   blockId,
   poll = false,
   interactive = true,
+  onNavigate,
 }: {
   blockId: string;
   poll?: boolean;
   interactive?: boolean;
+  /** Supplied by the published renderer, which is the only place with a router. */
+  onNavigate?: (to: string) => void;
 }) {
   const store = useStore();
   const state = useAtomValue(blockRuntimeAtom(blockId));
@@ -142,24 +146,37 @@ export function RepeatView({
   const pageValues = useSlotValues(templateSlots);
 
   const clickColumn = state?.clickColumn;
-  const rowsAreClickable = interactive && !!clickColumn;
+  const clickTargetPageId = state?.clickTargetPageId;
+  // Clickable if it either records something or goes somewhere. Opening a
+  // detail page is the far more common of the two and used to be impossible.
+  const rowsAreClickable = interactive && (!!clickColumn || !!clickTargetPageId);
 
   const onRowClick = useCallback(
-    (row: Record<string, any>) => {
-      if (!clickColumn) return;
-      const picked = clickColumn === 'Row id' ? row?.id : row?.[clickColumn];
-      const current = store.get(blockRuntimeAtom(blockId));
-      store.set(blockRuntimeAtom(blockId), {
-        ...current,
-        value: picked === undefined || picked === null ? '' : picked,
-      });
+    (row: Record<string, any>, index: number) => {
+      if (clickColumn) {
+        const picked = clickColumn === 'Row id' ? row?.id : row?.[clickColumn];
+        const current = store.get(blockRuntimeAtom(blockId));
+        store.set(blockRuntimeAtom(blockId), {
+          ...current,
+          value: picked === undefined || picked === null ? '' : picked,
+        });
+      }
+
       // onClick rather than onChange: pressing a card is a press. The value is
       // already updated by the time anything wired to it runs, so a workflow
       // reading this block sees the row that was actually clicked.
       executeWorkflow(blockId, 'onClick', store);
       recalculateAllFormulas(store);
+
+      if (clickTargetPageId && onNavigate) {
+        // The row's own values, so the link carries what was clicked -- and the
+        // template is split before it is filled, so a title containing an
+        // ampersand cannot become a second parameter.
+        const query = buildParamsFromTemplate(state?.clickParams, rowSlots(row, index));
+        onNavigate(`/view/${clickTargetPageId}${query}`);
+      }
     },
-    [blockId, clickColumn, store]
+    [blockId, clickColumn, clickTargetPageId, state?.clickParams, onNavigate, store]
   );
 
   const gap = state?.gap ?? 12;
@@ -209,7 +226,7 @@ export function RepeatView({
           return (
             <div
               key={row?.id ?? index}
-              onClick={rowsAreClickable ? () => onRowClick(row) : undefined}
+              onClick={rowsAreClickable ? () => onRowClick(row, index) : undefined}
               style={rowsAreClickable ? { cursor: 'pointer' } : undefined}
               dangerouslySetInnerHTML={{ __html: html }}
             />

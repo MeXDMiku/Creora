@@ -89,6 +89,18 @@ export function rowMatchesSearch(row: Row, search: string, columns?: string[]): 
  * Otherwise an empty search box would hide every row, which is the single most
  * common way a filtered list looks broken on first load.
  */
+/**
+ * A cell, with one name that is not a column.
+ *
+ * "Row id" is how a detail page finds its row with no setup at all: a link
+ * carries the id, a Page value block reads it, the filter compares against it.
+ * Requiring a Slug column first would be more correct and would stop most
+ * people building a detail page at the first step.
+ */
+function cellFor(row: Row, column: string): any {
+  return column === 'Row id' ? row?.id : row?.[column];
+}
+
 function passesFilter(row: Row, spec: ViewSpec): boolean {
   const col = spec.filterColumn;
   if (!col) return true;
@@ -96,7 +108,7 @@ function passesFilter(row: Row, spec: ViewSpec): boolean {
   const value = spec.filterValue;
   const blank = value === undefined || value === null || value === '';
   if (blank && !VALUELESS_OPERATORS.has(operator)) return true;
-  return evaluateCondition(row?.[col], operator, value);
+  return evaluateCondition(cellFor(row, col), operator, value);
 }
 
 /**
@@ -162,7 +174,7 @@ export function visibleRows(rows: Row[] | undefined | null, spec: ViewSpec = {})
     const direction = spec.sortDirection === 'desc' ? -1 : 1;
     // Copied before sorting: sort() mutates, and this array belongs to the
     // Database block's runtime state, which is shared with the table itself.
-    ordered = [...filtered].sort((a, b) => compareCells(a?.[sortColumn], b?.[sortColumn]) * direction);
+    ordered = [...filtered].sort((a, b) => compareCells(cellFor(a, sortColumn), cellFor(b, sortColumn)) * direction);
   } else if (spec.sortDirection === 'desc') {
     // No column named, but "newest first" asked for: rows arrive oldest-first,
     // so reversing them IS newest-first, and it is what people mean.

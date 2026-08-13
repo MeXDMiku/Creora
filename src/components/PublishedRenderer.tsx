@@ -2,7 +2,7 @@ import { withoutVisitorState, isBlockNodeType } from '../lib/blockRegistry';
 import { usePollWhileVisible } from '../hooks/usePollWhileVisible';
 import { useValueChangeAnimation } from '../hooks/useValueChangeAnimation';
 import { useEffect, useState, useRef, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useStore, useAtomValue } from 'jotai';
 import { supabase } from '../lib/supabase';
 import { blockToCSS } from '../lib/renderBlockStyles';
@@ -11,6 +11,9 @@ import { fetchDataSource } from '../lib/dataSource';
 import { computeDatabaseOutput } from '../lib/databaseOutput';
 import { CustomHtmlView } from '../blocks/CustomHtmlBlock';
 import { RepeatView } from '../blocks/RepeatBlock';
+import { refreshPageValue, buildParamsFromTemplate } from '../lib/pageValue';
+import { parseParams } from '../lib/pageParams';
+import { nodeTypeFromBlockId } from '../lib/blockRegistry';
 import { refreshVisitor } from '../lib/visitor';
 import { executeWorkflow, recalculateAllFormulas, markValidated } from '../lib/bindingEngine';
 import { normalizeImageUrl, IMAGE_MIME_TYPES } from '../lib/images';
@@ -18,10 +21,12 @@ import { uploadImage } from '../lib/imageUpload';
 import {
   blockPositionAtom,
   blockRuntimeAtom,
+  pageParamsAtom,
   workflowsAtom,
   formulasAtom,
   connectionsAtom,
   allBlockIdsAtom,
+  blockValuesByName,
 } from '../state/atoms';
 
 // Document Item & Block extraction
@@ -604,7 +609,12 @@ function RenderedBlock({ block }: { block: ExtractedBlock }) {
     executeWorkflow(block.id, 'onClick', store);
     recalculateAllFormulas(store);
     const targetPageId = runtimeState?.targetPageId;
-    if (targetPageId) navigate(`/view/${targetPageId}`);
+    if (targetPageId) {
+      // Values built from other blocks on this page, so a "See details" button
+      // can carry whatever is selected. Same template shape as a row click.
+      const query = buildParamsFromTemplate(runtimeState?.targetParams, blockValuesByName(store));
+      navigate(`/view/${targetPageId}${query}`);
+    }
   };
 
   const { outer: outerStyle, inner: innerStyle } = blockToCSS(block.type, position, runtimeState);
@@ -858,8 +868,19 @@ function RenderedBlock({ block }: { block: ExtractedBlock }) {
     return (
       <div style={outerStyle}>
         <div style={{ ...innerStyle, width: (runtimeState?.width ?? 360) + 'px' }}>
-          <RepeatView blockId={block.id} poll interactive />
+          <RepeatView blockId={block.id} poll interactive onNavigate={(to) => navigate(to)} />
         </div>
+      </div>
+    );
+  }
+
+  if (block.type === 'pageValueBlock') {
+    // Deliberately visible. A builder who does not want it on the page hides it
+    // with the visible switch, exactly like any other block -- rather than this
+    // being a special invisible thing with its own rules.
+    return (
+      <div style={outerStyle}>
+        <div style={innerStyle}>{String(runtimeState?.value ?? '')}</div>
       </div>
     );
   }
@@ -1189,6 +1210,7 @@ function orderForNarrow(blocks: ExtractedBlock[], store: any): ExtractedBlock[] 
 
 export default function PublishedRenderer() {
   const { pageId } = useParams<{ pageId: string }>();
+  const location = useLocation();
   const store = useStore();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1202,6 +1224,25 @@ export default function PublishedRenderer() {
     ),
     [docItemsList, store]
   );
+
+  /**
+   * What this page was opened with, published in one place.
+   *
+   * Set BEFORE the page loads and updated whenever the address changes, so a
+   * link from one detail page to another -- next post, related product -- works
+   * without a full reload. Setting it to an object rather than leaving it null
+   * is what tells every Page value block "this is a real address; stop showing
+   * the editor's stand-in".
+   */
+  useEffect(() => {
+    store.set(pageParamsAtom, parseParams(location.search));
+    for (const id of (store.get(allBlockIdsAtom) || []) as string[]) {
+      // Resolved through the registry, not by matching the start of an id.
+      // A string standing in for a type check is the exact thing that once made
+      // three block types unsaveable.
+      if (nodeTypeFromBlockId(id) === 'pageValueBlock') refreshPageValue(id, store);
+    }
+  }, [location.search, store, docItemsList]);
 
   useEffect(() => {
     if (!pageId) return;

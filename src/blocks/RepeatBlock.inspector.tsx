@@ -5,6 +5,7 @@ import { useStore } from 'jotai'
 import { sanitizeHtml } from '../lib/sanitizeHtml'
 import { MAX_RENDERED_ROWS } from '../lib/rows'
 import { FilterHelp } from '../components/FilterHelp'
+import { pagesListAtom, currentPageIdAtom } from '../state/atoms'
 
 const fieldStyle: React.CSSProperties = {
   display: 'block',
@@ -41,6 +42,8 @@ export default function RepeatBlockInspector({ blockId, editor }: { blockId: str
   const [runtimeState, setRuntimeState] = useAtom(blockRuntimeAtom(blockId))
   const triggerSave = useSetAtom(triggerSaveAtom)
   const store = useStore()
+  const pagesList = useAtomValue(pagesListAtom)
+  const currentPageId = useAtomValue(currentPageIdAtom)
 
   const allBlocks = useMemo(
     () => getCanvasBlocks(editor, store, blockId),
@@ -229,6 +232,7 @@ export default function RepeatBlockInspector({ blockId, editor }: { blockId: str
             >
               <option value="">(every row)</option>
               {columns.map(c => <option key={c} value={c}>{c}</option>)}
+              <option value="Row id">Row id</option>
             </select>
             <select
               value={runtimeState.filterOperator || 'equals'}
@@ -445,6 +449,46 @@ export default function RepeatBlockInspector({ blockId, editor }: { blockId: str
           style={fieldStyle}
         />
       </label>
+
+      <div style={{ border: '1px solid #e2e8f0', borderRadius: '6px', padding: '10px', marginBottom: '12px', background: '#f8fafc' }}>
+        <div style={{ fontWeight: 600, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px', color: '#334155', marginBottom: '8px' }}>
+          Clicking a row opens a page
+        </div>
+
+        <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px' }}>
+          Go to
+          <select
+            value={runtimeState.clickTargetPageId || ''}
+            onChange={(e) => set({ clickTargetPageId: e.target.value })}
+            style={fieldStyle}
+          >
+            <option value="">(stay here)</option>
+            {pagesList.filter(p => p.id !== currentPageId).map(p => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        </label>
+
+        {runtimeState.clickTargetPageId && (
+          <label style={{ display: 'block', fontSize: '12px' }}>
+            Carrying
+            <input
+              type="text"
+              value={runtimeState.clickParams ?? ''}
+              onChange={(e) => set({ clickParams: e.target.value })}
+              placeholder="id={{Row id}}"
+              style={fieldStyle}
+            />
+            <span style={hintStyle}>
+              Put a Page value block on the other page reading <code>id</code>,
+              and point its repeater's filter at that block: you have a detail
+              page. Slots and filters work here, so
+              {' '}<code>{'id={{Row id}}&title={{Name}}'}</code> is fine, and a
+              value containing an ampersand cannot break the link.
+            </span>
+          </label>
+        )}
+      </div>
 
       <label style={{ display: 'block', marginBottom: '12px' }}>
         Clicking a row gives me
