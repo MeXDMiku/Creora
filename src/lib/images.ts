@@ -1,3 +1,4 @@
+import { safeUrl } from './urls';
 /**
  * Everything about an image that can be decided without a network.
  *
@@ -71,52 +72,26 @@ export function checkImageFile(file: PickedFile | null | undefined): string | nu
   return null;
 }
 
-const CONTROL_CHARS = /[\u0000-\u0020]/g;
-const SCHEME = /^([a-z][a-z0-9+.-]*):/i;
-const DATA_IMAGE = /^data:image\//i;
-const BARE_DOMAIN = /^[^\s/]+\.[^\s/]+/;
-const QUERY_OR_HASH = /[?#]/;
-const IMAGE_EXTENSION = /\.(png|jpe?g|gif|webp|avif|svg)$/i;
-
 /**
  * Tidy an address someone typed or pasted, and refuse the dangerous ones.
  *
- * A javascript: scheme in an image address is not hypothetical - it is what an
- * attacker puts in a field that ends up in a src. The allowlist mirrors
- * sanitizeHtml.ts on purpose: two places that decide what a URL may be must
- * agree, or the stricter one is decoration.
+ * This used to carry its own scheme rules. It does not any more: sanitizeHtml
+ * had a second, weaker set, and two places deciding what a URL may be is how
+ * one of them ends up wrong. Both now call src/lib/urls.ts.
+ *
+ * Two things are true here that are not true in an href, and they are the only
+ * arguments this passes: an inline `data:image` is an ordinary picture, and a
+ * bare "example.com/logo.png" is what people paste into an address field.
  *
  * Returns an empty string for anything refused, so a caller that forgets to
  * check still renders nothing rather than something hostile.
  */
 export function normalizeImageUrl(raw: string | null | undefined): string {
-  if (!raw) return '';
-  const url = String(raw).trim();
-  if (url === '') return '';
-
-  // Strip whitespace and control characters first, because a newline inside a
-  // scheme is a real way of smuggling one past a naive check.
-  const flat = url.replace(CONTROL_CHARS, '');
-  const scheme = SCHEME.exec(flat);
-
-  if (scheme) {
-    const proto = scheme[1].toLowerCase();
-    if (proto === 'http' || proto === 'https' || proto === 'blob') return flat;
-    // Inline images are fine. A data URL holding markup is a page pretending
-    // to be a picture.
-    if (proto === 'data') return DATA_IMAGE.test(flat) ? flat : '';
-    return '';
-  }
-
-  // Site-relative and protocol-relative addresses are ordinary and safe.
-  if (flat.startsWith('/')) return flat;
-
-  // A bare "example.com/logo.png" is what people paste. Assume https rather
-  // than leaving it to be read as a relative path that will never resolve.
-  if (BARE_DOMAIN.test(flat)) return 'https://' + flat;
-
-  return flat;
+  return safeUrl(raw, { allowInlineImages: true, assumeHttps: true }) ?? '';
 }
+
+const QUERY_OR_HASH = /[?#]/;
+const IMAGE_EXTENSION = /\.(png|jpe?g|gif|webp|avif|svg)$/i;
 
 /** A quick "does this look like it points at a picture", for the inspector hint. */
 export function isProbablyImageUrl(raw: string | null | undefined): boolean {

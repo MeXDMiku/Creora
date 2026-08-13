@@ -19,6 +19,7 @@ import { DataSourceBlock } from './blocks/DataSourceBlock'
 import { CustomHtmlBlock } from './blocks/CustomHtmlBlock'
 import { VisitorBlock } from './blocks/VisitorBlock'
 import { ImageBlock } from './blocks/ImageBlock'
+import { RepeatBlock } from './blocks/RepeatBlock'
 import { WireOverlay } from './components/WireOverlay'
 import { supabase } from './lib/supabase'
 import { ensureSession } from './lib/session'
@@ -1417,6 +1418,7 @@ function App() {
       CustomHtmlBlock,
       VisitorBlock,
       ImageBlock,
+      RepeatBlock,
     ],
     content: '',
     onUpdate: ({ editor }) => {
@@ -2103,6 +2105,19 @@ function App() {
         </svg>
       ),
       action: () => insertBlock('dataSourceBlock')
+    },
+    {
+      id: 'repeat',
+      title: 'For each row',
+      description: 'Your own card, repeated once per row. Blogs, galleries, directories',
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="3" width="18" height="6" rx="2" />
+          <rect x="3" y="12" width="18" height="6" rx="2" />
+          <path d="M7 21h10" />
+        </svg>
+      ),
+      action: () => insertBlock('repeatBlock')
     },
     {
       id: 'image',

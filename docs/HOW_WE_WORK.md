@@ -112,24 +112,24 @@ Ordered by how much each unblocks, not by size or appeal. Cycle takes the top.
                                       row" rather than built twice. Uploads need
                                       docs/SETUP_STORAGE.md run once.
 
-    !! LIVE VERIFICATION              Two cycles owed. Nothing has been clicked
-                                      on the real domain since 11 Aug. This is
-                                      the first thing in cycle 3, before any
-                                      building, the moment a browser is reachable.
+    !! LIVE VERIFICATION              THREE cycles owed. Nothing has been clicked
+                                      on the real domain since 11 Aug. Cycle 3
+                                      fixed an XSS that was live, so confirming
+                                      that fix on the real domain is now the
+                                      first thing worth a browser.
 
-    1  For each row                   until this exists no list can be laid out,
-                                      which blocks blogs, directories, galleries,
-                                      search results. A gallery falls out of it.
-    2  Collections + per-visitor data rows stop belonging to a block, gain an
+    -- For each row                   DONE, cycle 3, 13 Aug. Gallery falls out of
+                                      it, as predicted, via grid layout.
+    1  Collections + per-visitor data rows stop belonging to a block, gain an
                                       owner. Opens carts and "my things".
-    3  Text and date primitives       join, format, now, add days. Small, needed
+    2  Text and date primitives       join, format, now, add days. Small, needed
                                       by nearly every site.
-    4  Search, filter, sort, paginate a table of 500 rows is unusable today.
-    5  Real sign-in for visitors      the multi-tenant one. Visitor already
+    3  Search, filter, sort, paginate a table of 500 rows is unusable today.
+    4  Real sign-in for visitors      the multi-tenant one. Visitor already
                                       exists; this makes it mean something.
-    6  Status dashboard (Layer 3)     what is running, what failed, usage.
-    7  Team permissions               independent of 5, cheaper than it looks.
-    8  Payments and entitlements      then perks and commission become settings.
+    5  Status dashboard (Layer 3)     what is running, what failed, usage.
+    6  Team permissions               independent of 4, cheaper than it looks.
+    7  Payments and entitlements      then perks and commission become settings.
 
 Everything else lives in BACKLOG.md and does not jump this queue without a reason
 written down at step 6.

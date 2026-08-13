@@ -10,6 +10,7 @@ import { valueAtPath } from '../lib/jsonPaths';
 import { fetchDataSource } from '../lib/dataSource';
 import { computeDatabaseOutput } from '../lib/databaseOutput';
 import { CustomHtmlView } from '../blocks/CustomHtmlBlock';
+import { RepeatView } from '../blocks/RepeatBlock';
 import { refreshVisitor } from '../lib/visitor';
 import { executeWorkflow, recalculateAllFormulas, markValidated } from '../lib/bindingEngine';
 import { normalizeImageUrl, IMAGE_MIME_TYPES } from '../lib/images';
@@ -845,6 +846,19 @@ function RenderedBlock({ block }: { block: ExtractedBlock }) {
               {uploadError}
             </div>
           )}
+        </div>
+      </div>
+    );
+  }
+
+  if (block.type === 'repeatBlock') {
+    // Same component as the editor, so what was designed is what is served.
+    // `poll` is on here and off in the editor: a visitor should watch the list
+    // grow as other people add to it, which is the shared-state idea working.
+    return (
+      <div style={outerStyle}>
+        <div style={{ ...innerStyle, width: (runtimeState?.width ?? 360) + 'px' }}>
+          <RepeatView blockId={block.id} poll interactive />
         </div>
       </div>
     );

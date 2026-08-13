@@ -277,6 +277,24 @@ export interface BlockRuntimeState {
   uploadHint?: string;
   /** Why the last upload did not work, in words. Never saved. */
   uploadError?: string | null;
+  // --- For each row ---
+  /** Which column orders the rows. Blank keeps the order they arrived in. */
+  sortColumn?: string;
+  sortDirection?: 'asc' | 'desc';
+  /** Show at most this many. Blank means all of them, up to the safety ceiling. */
+  maxRows?: number;
+  /** One row's markup, with {{Column}} slots. Repeated per row. */
+  rowHtml?: string;
+  /** What to show when no rows match. A list with nothing in it must say so. */
+  emptyHtml?: string;
+  /** 'list' stacks them, 'grid' lays them out in columns. */
+  layout?: 'list' | 'grid';
+  /** How many across, in grid layout. */
+  gridColumns?: number;
+  /** Space between rows, in pixels. */
+  gap?: number;
+  /** Clicking a row puts that row's value for this column into this block. */
+  clickColumn?: string;
 }
 
 export interface DatabaseField {

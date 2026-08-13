@@ -15,6 +15,9 @@ import type { ValidationRule } from '../src/lib/validation';
 import { blockRuntimeAtom, workflowsAtom, allBlockIdsAtom } from '../src/state/atoms';
 import { executeWorkflow, validationErrorFor, markValidated } from '../src/lib/bindingEngine';
 import { withoutVisitorState, isBlockNodeType, BLOCK_NODE_TYPES } from '../src/lib/blockRegistry';
+import { safeUrl, isSafeUrlValue, schemeOf, stripIgnorable } from '../src/lib/urls';
+import { fillSlots, leadingSlotName } from '../src/lib/sanitizeHtml';
+import { visibleRows, rowSlots, compareCells, slotNamesFor, MAX_RENDERED_ROWS } from '../src/lib/rows';
 import {
   checkImageFile,
   normalizeImageUrl,
@@ -534,6 +537,242 @@ group('upload failures say what to do');
     'a silent failure still says something',
     describeUploadError(null),
     'The upload failed, and the server did not say why.'
+  );
+}
+
+// ------------------------------------------------------------- the URL policy
+group('one policy: what may be an address');
+{
+  check('https survives', safeUrl('https://x.com/a'), 'https://x.com/a');
+  check('http survives', safeUrl('http://x.com/a'), 'http://x.com/a');
+  check('mailto is a link people write', safeUrl('mailto:a@b.com'), 'mailto:a@b.com');
+  check('tel is too', safeUrl('tel:+441234567890'), 'tel:+441234567890');
+  check('a fragment is fine', safeUrl('#section-2'), '#section-2');
+  check('a relative path is fine', safeUrl('images/logo.png'), 'images/logo.png');
+  check('empty is nothing, not an error', safeUrl(''), null);
+
+  check('javascript is refused', safeUrl('javascript:alert(1)'), null);
+  check('vbscript is refused', safeUrl('vbscript:msgbox(1)'), null);
+  check('file is refused', safeUrl('file:///etc/passwd'), null);
+  check('data:text/html is refused', safeUrl('data:text/html,<b>x</b>'), null);
+  check('data:image is refused where pictures are not expected', safeUrl('data:image/png;base64,AA'), null);
+  check(
+    'data:image is allowed where they are',
+    safeUrl('data:image/png;base64,AA', { allowInlineImages: true }),
+    'data:image/png;base64,AA'
+  );
+}
+
+group('the hole that started this: characters a browser ignores');
+{
+  // Each of these is what an attribute actually contains after the DOM has
+  // decoded the entity a page author wrote. The old check compared the string
+  // it was handed; a browser compares that string with the noise taken out.
+  check('a newline inside the scheme', safeUrl('java\nscript:alert(1)'), null);
+  check('a tab inside the scheme', safeUrl('java\tscript:alert(1)'), null);
+  check('a carriage return inside the scheme', safeUrl('java\rscript:alert(1)'), null);
+  check('a NUL inside the scheme', safeUrl('java\u0000script:alert(1)'), null);
+  check('a zero-width space inside the scheme', safeUrl('java\u200bscript:alert(1)'), null);
+  check('a BOM in front of it', safeUrl('\ufeffjavascript:alert(1)'), null);
+  check('a non-breaking space in front of it', safeUrl('\u00a0javascript:alert(1)'), null);
+  check('ordinary leading spaces', safeUrl('    javascript:alert(1)'), null);
+  check('mixed case', safeUrl('JaVaScRiPt:alert(1)'), null);
+  check(
+    'all of it at once',
+    safeUrl('  Ja\tVa\nScRiPt\u200b:alert(1)'),
+    null
+  );
+
+  check('the noise is what gets removed', stripIgnorable('a b\u200bc\td'), 'abcd');
+  check('the scheme is read after the noise goes', schemeOf('java\nscript:x'), 'javascript');
+  check('no scheme is null, not a guess', schemeOf('/a/b'), null);
+
+  check('nothing at all is not dangerous', isSafeUrlValue(''), true);
+  check('undefined is not dangerous', isSafeUrlValue(undefined), true);
+  check('but javascript still is', isSafeUrlValue('javascript:alert(1)'), false);
+}
+
+group('a slot at the front of a URL decides the scheme');
+{
+  check('a slot that is the whole value', leadingSlotName('{{Link}}'), 'Link');
+  check('with spaces inside the braces', leadingSlotName('{{ Link }}'), 'Link');
+  check('with spaces before it', leadingSlotName('  {{Link}}'), 'Link');
+  check('a slot that starts a longer value', leadingSlotName('{{Base}}/photo.png'), 'Base');
+  check('only the first of several', leadingSlotName('{{A}}/{{B}}'), 'A');
+  check('a slot after literal text is not it', leadingSlotName('/user/{{Id}}'), null);
+  check('a plain address is not it', leadingSlotName('https://x.com'), null);
+  check('nothing is not it', leadingSlotName(''), null);
+}
+
+group('filling a slot that lands in an href');
+{
+  const html = '<a href="{{Link}}">go</a>';
+  check(
+    'a normal address goes in',
+    fillSlots(html, { Link: 'https://x.com' }, ['Link']),
+    '<a href="https://x.com">go</a>'
+  );
+  check(
+    'javascript out of a database row does not',
+    fillSlots(html, { Link: 'javascript:alert(1)' }, ['Link']),
+    '<a href="">go</a>'
+  );
+  check(
+    'nor when the newline trick is used',
+    fillSlots(html, { Link: 'java\nscript:alert(1)' }, ['Link']),
+    '<a href="">go</a>'
+  );
+  check(
+    'THE BUG: without the urlSlots list nothing is checked, which is what used to happen every time',
+    fillSlots(html, { Link: 'javascript:alert(1)' }).includes('javascript:'),
+    true
+  );
+  check(
+    'a slot that is not a URL is escaped, not scheme-checked',
+    fillSlots('<p>{{Name}}</p>', { Name: 'javascript:alert(1)' }, ['Link']),
+    '<p>javascript:alert(1)</p>'
+  );
+  check(
+    'markup in a value is text, never markup',
+    fillSlots('<p>{{Name}}</p>', { Name: '<b>hi</b>' }),
+    '<p>&lt;b&gt;hi&lt;/b&gt;</p>'
+  );
+  check(
+    'a quote in a value cannot break out of an attribute',
+    fillSlots('<a title="{{Name}}">x</a>', { Name: '" onmouseover="alert(1)' }),
+    '<a title="&quot; onmouseover=&quot;alert(1)">x</a>'
+  );
+  check('a missing value becomes nothing', fillSlots('<p>{{Gone}}</p>', {}), '<p></p>');
+}
+
+// ---------------------------------------------------------------- for each row
+const PEOPLE = [
+  { id: 'r1', Name: 'Ada', Score: 9, City: 'London' },
+  { id: 'r2', Name: 'Bo', Score: 10, City: 'Leeds' },
+  { id: 'r3', Name: 'Cy', Score: 2, City: 'London' },
+  { id: 'r4', Name: 'Di', Score: '', City: 'Leeds' },
+];
+
+group('which rows, in what order, how many');
+{
+  check('no settings means every row, in order', visibleRows(PEOPLE, {} as any).rows.map(r => r.id), ['r1', 'r2', 'r3', 'r4']);
+  check('no rows is not an error', visibleRows([], {} as any).rows, []);
+  check('undefined rows is not an error', visibleRows(undefined, {} as any).rows, []);
+
+  check(
+    'a filter keeps only what matches',
+    visibleRows(PEOPLE, { filterColumn: 'City', filterValue: 'London' } as any).rows.map(r => r.id),
+    ['r1', 'r3']
+  );
+  check(
+    'the filter compares as text, so a typed 10 finds a numeric 10',
+    visibleRows(PEOPLE, { filterColumn: 'Score', filterValue: '10' } as any).rows.map(r => r.id),
+    ['r2']
+  );
+  check(
+    'a filter that matches nothing gives nothing, not everything',
+    visibleRows(PEOPLE, { filterColumn: 'City', filterValue: 'Perth' } as any).rows,
+    []
+  );
+
+  check(
+    'sorting is numeric where the values are numbers',
+    visibleRows(PEOPLE, { sortColumn: 'Score' } as any).rows.map(r => r.Score),
+    [2, 9, 10, '']
+  );
+  check(
+    'descending reverses it, and blanks still sort last',
+    visibleRows(PEOPLE, { sortColumn: 'Score', sortDirection: 'desc' } as any).rows.map(r => r.Score),
+    ['', 10, 9, 2]
+  );
+  check(
+    'sorting by text is alphabetical',
+    visibleRows(PEOPLE, { sortColumn: 'Name' } as any).rows.map(r => r.Name),
+    ['Ada', 'Bo', 'Cy', 'Di']
+  );
+  check(
+    'no column plus last-to-first is newest first, which is what a feed means',
+    visibleRows(PEOPLE, { sortDirection: 'desc' } as any).rows.map(r => r.id),
+    ['r4', 'r3', 'r2', 'r1']
+  );
+
+  check('a limit takes the first N after ordering', visibleRows(PEOPLE, { maxRows: 2 } as any).rows.map(r => r.id), ['r1', 'r2']);
+  check(
+    'THE ORDER MATTERS: the two cheapest London rows, not the London rows out of the two cheapest',
+    visibleRows(PEOPLE, { filterColumn: 'City', filterValue: 'London', sortColumn: 'Score', maxRows: 2 } as any).rows.map(r => r.Name),
+    ['Cy', 'Ada']
+  );
+  check('matched counts what passed the filter, before the limit', visibleRows(PEOPLE, { filterColumn: 'City', filterValue: 'Leeds', maxRows: 1 } as any).matched, 2);
+
+  check('asking for a number of rows is not a truncation', visibleRows(PEOPLE, { maxRows: 2 } as any).truncatedNote, null);
+  check('nor is showing all of them', visibleRows(PEOPLE, {} as any).truncatedNote, null);
+}
+
+group('the rendering ceiling is admitted, not hidden');
+{
+  const many = Array.from({ length: MAX_RENDERED_ROWS + 30 }, (_, i) => ({ id: 'r' + i, N: i }));
+  const out = visibleRows(many, {} as any);
+  check('it stops at the ceiling', out.rows.length, MAX_RENDERED_ROWS);
+  check('and says so rather than implying completeness', out.truncatedNote, 'Showing 200 of 230 (30 not shown)');
+  check(
+    'a builder asking for more than the ceiling still gets the ceiling',
+    visibleRows(many, { maxRows: 5000 } as any).rows.length,
+    MAX_RENDERED_ROWS
+  );
+}
+
+group('comparing two cells without being told the type');
+{
+  check('numbers as numbers, not as text', compareCells(9, 10) < 0, true);
+  check('numeric strings too, so 10 does not sort before 9', compareCells('9', '10') < 0, true);
+  check('text alphabetically', compareCells('apple', 'banana') < 0, true);
+  check('false before true', compareCells(false, true) < 0, true);
+  check('equal is zero', compareCells('a', 'a'), 0);
+  check('a blank sorts after a value', compareCells('', 'a') > 0, true);
+  check('and after a value the other way round too', compareCells('a', '') < 0, true);
+  check('two blanks are equal', compareCells('', null), 0);
+}
+
+group('what a row offers a template');
+{
+  const slots = rowSlots(PEOPLE[1], 1);
+  check('columns come through by name', slots.Name, 'Bo');
+  check('row number is 1-based, because people count from one', slots['Row number'], 2);
+  check('the row id is available under a readable name', slots['Row id'], 'r2');
+  check('the raw id key is not leaked as a slot', 'id' in slots, false);
+  check('a row with nothing in it does not throw', rowSlots({} as any, 0)['Row number'], 1);
+
+  check(
+    'the inspector lists columns plus the two extras',
+    slotNamesFor({ columns: [{ name: 'Title', type: 'text' }] } as any),
+    ['Title', 'Row number', 'Row id']
+  );
+  check('with no columns it still offers the extras', slotNamesFor({} as any), ['Row number', 'Row id']);
+}
+
+group('a template filled from a row');
+{
+  const template = '<div><h3>{{Name}}</h3><a href="{{Link}}">{{City}}</a></div>';
+  const row = { id: 'r9', Name: 'Ada', City: 'London', Link: 'https://x.com/ada' };
+  check(
+    'columns land where the slots are',
+    fillSlots(template, rowSlots(row, 0), ['Link']),
+    '<div><h3>Ada</h3><a href="https://x.com/ada">London</a></div>'
+  );
+  check(
+    'a hostile link IN A ROW is refused, which is the whole reason urlSlots exists',
+    fillSlots(template, rowSlots({ ...row, Link: 'javascript:alert(1)' }, 0), ['Link']),
+    '<div><h3>Ada</h3><a href="">London</a></div>'
+  );
+  check(
+    'a row value containing markup stays text',
+    fillSlots('<p>{{Name}}</p>', rowSlots({ id: 'x', Name: '<b>bold</b>' }, 0)),
+    '<p>&lt;b&gt;bold&lt;/b&gt;</p>'
+  );
+  check(
+    'a slot with no column becomes nothing rather than showing the braces',
+    fillSlots('<p>{{Nope}}</p>', rowSlots(row, 0)),
+    '<p></p>'
   );
 }
 

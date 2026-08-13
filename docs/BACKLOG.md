@@ -508,3 +508,22 @@ file or opening the actual page.
   only so it is not mistaken for something forgotten.
 - **Drag and drop onto an Image block.** The file picker works; dropping a file
   on the block does not. Small, obvious, not blocking anything.
+
+## Added during cycle 3 (URL policy + for each row) — 13 Aug 2026
+
+- **`<style>` contents are not checked.** `style` is an allowed tag and a slot
+  inside one is filled without any CSS-level filtering. Nothing found is
+  dangerous on a modern browser, but CSS can fetch (`background:url(...)`), which
+  is an exfiltration channel. Not urgent, not nothing.
+- **Paging.** The repeater draws at most 200 rows and says so. Real paging —
+  page size, next/previous, or infinite scroll — is queue item 3
+  (search/filter/sort/paginate) and this is the guard until then.
+- **Per-row wires.** Clicking a row sets one value from one column. Wiring
+  something to a *specific* row, or to a button inside a card, is not possible.
+  Probably wants the click to carry the whole row rather than one column.
+- **`recalculateAllFormulas` still finds List blocks by `blockId.includes('list')`.**
+  A string-match standing in for a type check, exactly the class of thing
+  `isBlockNodeType` was created to kill. The Repeat block deliberately does not
+  use that path — it has its own hook — but the List one is still there.
+- **A repeater cannot read a Database on another page.** The picker lists
+  databases on the current page only, same limitation ListBlock has.

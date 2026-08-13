@@ -31,7 +31,10 @@ export function CustomHtmlView({ blockId }: { blockId: string }) {
   const cleaned = useMemo(() => sanitizeHtml(raw), [raw]);
   const slots = useMemo(() => findSlots(cleaned.html), [cleaned.html]);
   const values = useSlotValues(slots);
-  const html = useMemo(() => fillSlots(cleaned.html, values), [cleaned.html, values]);
+  const html = useMemo(
+    () => fillSlots(cleaned.html, values, cleaned.urlSlots),
+    [cleaned.html, values, cleaned.urlSlots]
+  );
 
   return <div dangerouslySetInnerHTML={{ __html: html }} />;
 }

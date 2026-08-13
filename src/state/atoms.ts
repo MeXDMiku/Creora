@@ -28,6 +28,7 @@ export function getBlockTypeDisplayName(nodeType: string): string {
   if (type.includes('visitor')) return 'Visitor';
   if (type.includes('customhtml')) return 'My Design';
   if (type.includes('datasource')) return 'Live Data';
+  if (type.includes('repeat')) return 'For each row';
   if (type.includes('image')) return 'Image';
   if (type.includes('shape')) return 'Shape';
   return 'Block';
@@ -153,6 +154,7 @@ export function getBlockDataType(nodeType: string): BlockDataType {
     case 'dataSourceBlock': return 'unknown'; // resolved from the picked field at wire time
     case 'customHtmlBlock': return 'unknown';
     case 'imageBlock': return 'string'; // the address of the picture
+    case 'repeatBlock': return 'string'; // whatever row was last clicked
     case 'visitorBlock': return 'unknown'; // boolean or text, depending on the field
     default: return 'unknown';
   }

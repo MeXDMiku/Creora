@@ -31,6 +31,7 @@ export const BLOCK_NODE_TYPES = [
   'customHtmlBlock',
   'visitorBlock',
   'imageBlock',
+  'repeatBlock',
 ] as const;
 
 export type BlockNodeType = (typeof BLOCK_NODE_TYPES)[number];
@@ -110,6 +111,8 @@ export function defaultValueForNodeType(nodeType: BlockNodeType | null): any {
     // action, condition and wire that already works on text works on a picture
     // without a single line written for it.
     case 'imageBlock':
+    // A repeater's value is whatever row was last clicked, so it starts empty.
+    case 'repeatBlock':
       return '';
     default:
       return 0;
@@ -131,6 +134,24 @@ export function defaultRuntimeForNodeType(nodeType: BlockNodeType | null): Block
   };
 
   switch (nodeType) {
+    case 'repeatBlock':
+      return {
+        ...base,
+        blockName: 'For each row',
+        value: '',
+        trackedBlockId: '',
+        rowHtml:
+          '<div style="padding:12px;border:1px solid #e2e8f0;border-radius:10px;font-family:sans-serif">' +
+          '<div style="font-weight:600">{{Name}}</div>' +
+          '<div style="color:#64748b;font-size:13px">{{Age}}</div>' +
+          '</div>',
+        emptyHtml: '<div style="color:#64748b;font-family:sans-serif">Nothing here yet.</div>',
+        layout: 'list',
+        gridColumns: 3,
+        gap: 12,
+        sortDirection: 'asc',
+        width: 360,
+      };
     case 'imageBlock':
       return {
         ...base,
