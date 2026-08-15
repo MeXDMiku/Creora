@@ -19,6 +19,7 @@ import { describeCollectionError, MIGRATION_DOC } from '../src/lib/collections';
 import { parseParams, readParam, buildQuery, parseParamTemplate } from '../src/lib/pageParams';
 import { resolvePageValue, buildParamsFromTemplate } from '../src/lib/pageValue';
 import { diagnosePage, sortProblems, referencedIds } from '../src/lib/diagnose';
+import { guessMappings, matchScore, normaliseName, whyItCannotWork } from '../src/lib/connectionDraft';
 import {
   resolveLayout,
   layoutPage,
@@ -1886,6 +1887,105 @@ group('worst first');
   ] as any;
   check('read in the order anybody wants them', sortProblems(mixed).map((p: any) => p.title), ['a', 'b', 'c']);
   check('sorting does not mutate the original', mixed[0].title, 'c');
+}
+
+// --------------------------------------------------- wiring a button to a table
+group('which field does this column want');
+{
+  check('the same word', matchScore('Name', 'Name'), 3);
+  check('case and spacing do not matter', matchScore('Name', 'your name'), 2);
+  check('THE SHAPE EVERYBODY WRITES: a label like "Your message" answers to Message', matchScore('Message', 'Your message'), 2);
+  check('the other way round scores lower but still counts', matchScore('Full name', 'Name'), 1);
+  check('unrelated words do not match', matchScore('Name', 'Submit'), 0);
+  check('nothing matches nothing', matchScore('', 'Name'), 0);
+  check('punctuation is ignored', normaliseName('Your name! '), 'yourname');
+}
+
+group('the columns arrive already pointed at the right fields');
+{
+  const columns = [{ name: 'Name' }, { name: 'Message' }];
+  const blocks = [
+    { id: 'inputBlock__1', label: 'Your name' },
+    { id: 'inputBlock__2', label: 'Your message' },
+    { id: 'buttonBlock__3', label: 'Submit' },
+  ];
+  const guessed = guessMappings(columns, blocks);
+  check('the name field lands in Name', guessed.Name, { source: 'block', value: 'inputBlock__1' });
+  check('the message field lands in Message', guessed.Message, { source: 'block', value: 'inputBlock__2' });
+
+  check(
+    'a column with nothing that answers to it is left blank rather than filled with a guess',
+    guessMappings([{ name: 'Postcode' }], blocks).Postcode,
+    { source: 'fixed', value: '' }
+  );
+
+  const clash = guessMappings(
+    [{ name: 'Name' }, { name: 'Nickname' }],
+    [{ id: 'inputBlock__1', label: 'Name' }]
+  );
+  check('ONE BLOCK IS USED ONCE -- two columns sharing a field looks like it worked and is worse', clash.Name, { source: 'block', value: 'inputBlock__1' });
+  check('so the other column stays empty and visibly needs a decision', clash.Nickname, { source: 'fixed', value: '' });
+
+  check('no blocks on the page means no guesses', guessMappings(columns, []).Name, { source: 'fixed', value: '' });
+  check('every column is present even when nothing matched', Object.keys(guessMappings(columns, [])).sort(), ['Message', 'Name']);
+}
+
+group('refusing to create something that cannot work');
+{
+  const filled = { source: 'block' as const, value: 'inputBlock__1' };
+
+  check(
+    'ADD ROW WITH EVERY COLUMN EMPTY would add a blank row',
+    whyItCannotWork({ action: 'addRow', mappings: { Name: { source: 'fixed', value: '' } } })?.includes('blank row'),
+    true
+  );
+  check('one filled column is enough', whyItCannotWork({ action: 'addRow', mappings: { Name: filled } }), null);
+  check('a fixed value counts as filled', whyItCannotWork({ action: 'addRow', mappings: { Name: { source: 'fixed', value: 'x' } } }), null);
+  check('whitespace does not count as filled', whyItCannotWork({ action: 'addRow', mappings: { Name: { source: 'fixed', value: '   ' } } }) !== null, true);
+
+  // The exact thing the owner built: Update Row, nothing to match on, nothing to change.
+  const ownersStep = whyItCannotWork({
+    action: 'updateRow',
+    matchColumn: 'Name',
+    matchValue: { source: 'fixed', value: '' },
+    mappings: { Name: { source: 'fixed', value: '' } },
+  });
+  check('THE ONE THE OWNER BUILT is refused', ownersStep !== null, true);
+  check('and it says which part is missing, by name', ownersStep?.includes('Name equals'), true);
+
+  check(
+    'update row that finds a row and changes nothing is refused too',
+    whyItCannotWork({
+      action: 'updateRow',
+      matchColumn: 'Name',
+      matchValue: { source: 'fixed', value: 'Ada' },
+      mappings: { Name: { source: 'fixed', value: '' } },
+    })?.includes('changes nothing'),
+    true
+  );
+  check(
+    'a complete update row is allowed',
+    whyItCannotWork({
+      action: 'updateRow',
+      matchColumn: 'Name',
+      matchValue: { source: 'fixed', value: 'Ada' },
+      mappings: { Name: { source: 'fixed', value: 'Bo' } },
+    }),
+    null
+  );
+  check(
+    'delete row needs only something to find it by',
+    whyItCannotWork({ action: 'deleteRow', matchColumn: 'Name', matchValue: { source: 'fixed', value: 'Ada' } }),
+    null
+  );
+  check(
+    'a webhook with nowhere to send is refused',
+    whyItCannotWork({ action: 'sendWebhook', webhookUrl: '  ' })?.includes('nowhere'),
+    true
+  );
+  check('setText with no words is refused', whyItCannotWork({ action: 'setText', value: '' }) !== null, true);
+  check('an ordinary increment is never blocked', whyItCannotWork({ action: 'increment' }), null);
+  check('nor is a toggle', whyItCannotWork({ action: 'toggle' }), null);
 }
 
 group('nobody has hand-written the block list again');

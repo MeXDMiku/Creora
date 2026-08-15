@@ -22,6 +22,7 @@ import { ImageBlock } from './blocks/ImageBlock'
 import { RepeatBlock } from './blocks/RepeatBlock'
 import { PageValueBlock } from './blocks/PageValueBlock'
 import { PHONE_MAX_WIDTH } from './lib/layout'
+import { guessMappings, whyItCannotWork } from './lib/connectionDraft'
 import { PlacementControls } from './components/PlacementControls'
 import { HealthPanel } from './components/HealthPanel'
 import { WireOverlay } from './components/WireOverlay'
@@ -372,6 +373,12 @@ function ConnectionPopup({ editor }: { editor: any }) {
   const targetState = pending ? store.get(blockRuntimeAtom(pending.targetBlockId)) : null
   const databaseColumns = targetState?.columns || []
 
+  // Get all OTHER blocks on the canvas
+  const canvasBlocks = useMemo(() => {
+    if (!editor || !pending) return []
+    return getCanvasBlocks(editor, store, pending.targetBlockId)
+  }, [editor, pending, store])
+
   const [mappings, setMappings] = useState<Record<string, { source: 'fixed' | 'block'; value: string }>>({})
   const [matchColumn, setMatchColumn] = useState<string>('')
   const [matchValueSource, setMatchValueSource] = useState<'fixed' | 'block'>('fixed')
@@ -379,23 +386,20 @@ function ConnectionPopup({ editor }: { editor: any }) {
 
   useEffect(() => {
     if (isDatabaseBlock && databaseColumns.length > 0) {
-      const initialMappings: Record<string, { source: 'fixed' | 'block'; value: string }> = {}
-      databaseColumns.forEach((col: any) => {
-        initialMappings[col.name] = { source: 'fixed', value: '' }
-      })
-      setMappings(initialMappings)
+      /**
+       * Guessed, not blank. Every column used to start as "Fixed value" with
+       * nothing in it, which is the one thing almost nobody wants -- and the
+       * three steps needed to fix it were invisible. Now the columns arrive
+       * pointed at the fields that obviously belong to them and the builder
+       * corrects the ones that are wrong.
+       */
+      setMappings(guessMappings(databaseColumns, canvasBlocks))
 
       if (!matchColumn || !databaseColumns.some((c: any) => c.name === matchColumn)) {
         setMatchColumn(databaseColumns[0].name)
       }
     }
-  }, [isDatabaseBlock, databaseColumns])
-
-  // Get all OTHER blocks on the canvas
-  const canvasBlocks = useMemo(() => {
-    if (!editor || !pending) return []
-    return getCanvasBlocks(editor, store, pending.targetBlockId)
-  }, [editor, pending, store])
+  }, [isDatabaseBlock, databaseColumns, canvasBlocks])
 
   // Sync action default state when pending connection loads
   useEffect(() => {
@@ -427,6 +431,23 @@ function ConnectionPopup({ editor }: { editor: any }) {
       setConds(prev => prev.map((c, n) => (n === 0 ? { ...c, fieldId: canvasBlocks[0].id } : c)))
     }
   }, [canvasBlocks, conds])
+
+  /**
+   * Why the thing currently on screen could not do anything, checked as it is
+   * built rather than after it is created. The owner made an Update Row with
+   * nothing to match on and every column empty, pressed Connect, and got a wire
+   * that looked real and did nothing at all.
+   */
+  const blocker = whyItCannotWork({
+    action: isToggleBlock
+      ? (action === 'turnOn' || action === 'turnOff' ? 'set' : action)
+      : action,
+    mappings,
+    matchColumn,
+    matchValue: { source: matchValueSource, value: matchValueVal },
+    webhookUrl,
+    value,
+  })
 
   if (!pending) return null
 
@@ -466,15 +487,30 @@ function ConnectionPopup({ editor }: { editor: any }) {
   const canvasEl = document.getElementById('editor-container')
   const canvasRect = canvasEl ? canvasEl.getBoundingClientRect() : { left: 0, top: 0 }
   
-  const popupWidth = 260
-  const popupExpectedHeight = isConditional ? 420 : 300
-  
+  const popupWidth = 300
+  /**
+   * The popup used to guess its own height -- 300, or 420 when conditional --
+   * and position itself from the guess. Wired into a Database with column
+   * mappings it is more than twice that, so the Connect button sat below the
+   * bottom of the screen with no way to scroll to it. Wiring was impossible and
+   * the code looked perfectly reasonable.
+   *
+   * It now takes at most the height of the window and scrolls inside itself, so
+   * the guess cannot be wrong.
+   */
+  const popupMaxHeight = Math.max(240, window.innerHeight - 32)
+
   const targetViewportX = canvasRect.left + pending.x2
   const targetViewportY = canvasRect.top + pending.y2
 
-  // Clamp positioning inside the viewport boundaries
-  const leftPos = targetViewportX > window.innerWidth - 300 ? targetViewportX - popupWidth - 10 : targetViewportX + 10
-  const topPos = Math.max(10, Math.min(targetViewportY - 80, window.innerHeight - popupExpectedHeight - 10))
+  const leftPos = Math.max(
+    8,
+    Math.min(
+      targetViewportX > window.innerWidth - 340 ? targetViewportX - popupWidth - 10 : targetViewportX + 10,
+      window.innerWidth - popupWidth - 8
+    )
+  )
+  const topPos = Math.max(16, Math.min(targetViewportY - 80, window.innerHeight - popupMaxHeight - 16))
 
   const popupStyle: React.CSSProperties = {
     position: 'fixed',
@@ -485,8 +521,10 @@ function ConnectionPopup({ editor }: { editor: any }) {
     border: '1px solid #cbd5e1',
     borderRadius: '12px',
     boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.05)',
-    padding: '24px',
+    padding: '20px',
     width: `${popupWidth}px`,
+    maxHeight: `${popupMaxHeight}px`,
+    overflowY: 'auto',
     display: 'flex',
     flexDirection: 'column',
     gap: '12px',
@@ -655,9 +693,9 @@ function ConnectionPopup({ editor }: { editor: any }) {
             </>
           ) : isDatabaseBlock ? (
             <>
-              <option value="addRow">Add Row</option>
-              <option value="updateRow">Update Row</option>
-              <option value="deleteRow">Delete Row</option>
+                <option value="addRow">Add a new row</option>
+              <option value="updateRow">Change a row that is already there</option>
+              <option value="deleteRow">Remove a row</option>
               <option value="exportCsv">Download as CSV (opens in Excel)</option>
               <option value="sendWebhook">Send to another app</option>
             </>
@@ -699,6 +737,14 @@ function ConnectionPopup({ editor }: { editor: any }) {
             </span>
           </span>
         </label>
+      )}
+
+      {isDatabaseBlock && (action === 'addRow' || action === 'updateRow') && (
+        <div style={{ fontSize: '11px', color: '#6b7280', lineHeight: 1.45, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '8px 10px' }}>
+          {action === 'addRow'
+            ? 'Each column below says where its value comes from. "From block" takes whatever someone typed into that field — that is how a form saves what people write.'
+            : 'This finds one row and changes it. It needs something to find it BY, and at least one column to change.'}
+        </div>
       )}
 
       {action === 'sendWebhook' && (
@@ -1069,17 +1115,29 @@ function ConnectionPopup({ editor }: { editor: any }) {
         </div>
       )}
 
+      {blocker && (
+        <div style={{
+          background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px',
+          padding: '8px 10px', fontSize: '12px', color: '#b91c1c', lineHeight: 1.4,
+        }}>
+          <strong style={{ display: 'block', marginBottom: '2px' }}>This would not do anything</strong>
+          {blocker}
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
         <button 
           onClick={handleConnect}
+          disabled={!!blocker}
+          title={blocker || 'Create this action'}
           style={{
             flex: 1,
             padding: '8px',
-            background: '#6366f1',
-            color: 'white',
+            background: blocker ? '#e2e8f0' : '#6366f1',
+            color: blocker ? '#94a3b8' : 'white',
             border: 'none',
             borderRadius: '6px',
-            cursor: 'pointer',
+            cursor: blocker ? 'not-allowed' : 'pointer',
             fontWeight: 600,
             fontSize: '13px'
           }}

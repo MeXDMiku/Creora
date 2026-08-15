@@ -1347,6 +1347,65 @@ that cannot fail.
 
 ---
 
+### Cycle 12 — wiring a form to a table, which was effectively impossible *(13 Aug 2026)*
+
+Reported by the owner, with a screenshot, and it was three problems stacked on
+top of each other. The last one is the real one.
+
+**1. The popup ran off the bottom of the screen.**
+
+It guessed its own height -- `300`, or `420` when conditional -- and positioned
+itself from that guess. Wired into a Database with column mappings it is more
+than twice that, and nothing scrolled, so **the Connect button was below the
+bottom of the screen with no way to reach it.** Wiring was not hard, it was
+impossible. It now takes at most the window height and scrolls inside itself, so
+the guess cannot be wrong.
+
+**2. It let him build something that could not possibly work, and said nothing.**
+
+His popup: **Update Row**, *equals value* empty, every column mapping "Fixed
+value" with nothing in it. So it looks for a row whose Name equals nothing, finds
+none, and stops. No error, no useful run-log entry, no way to tell. The wire
+looked real.
+
+`whyItCannotWork()` now checks the draft as it is being built and the Connect
+button is disabled with the reason in plain words above it -- naming the actual
+column: *"Name equals ... has no value, so it will never match anything."* There
+is a check named after the exact step he built.
+
+**3. The real one: nothing told anyone how to get a typed value into a column.**
+
+To save what somebody types you had to know to pick Add Row, then change each
+column from "Fixed value" to "From block", then choose the right field. Three
+non-obvious steps, and **the default for every column was the case almost nobody
+wants.** In his words: *"how do a user know if I type something should be updated
+in the database, its so damn hard figuring out and finding no way to do it"*.
+
+**The columns now arrive already pointed at the fields that obviously belong to
+them.** `guessMappings` matches column names against block names -- exact, then
+contains, then contained-by -- so *Your name* lands in **Name** and *Your message*
+lands in **Message**, which is the shape of every label anybody writes. Each block
+is used at most once: two columns sharing one field looks like it worked, which
+is worse than one column visibly left blank. A column with nothing that answers
+to it stays empty rather than being filled with a guess.
+
+**A guess that is right most of the time and visible when it is wrong beats a
+blank that is wrong every time and looks deliberate.**
+
+Also: "Add Row / Update Row / Delete Row" are now sentences -- *"Add a new row"*,
+*"Change a row that is already there"* -- with a line under them explaining that
+"From block" is how a form saves what people write.
+
+**One thing checked rather than assumed.** I suspected the default action was
+silently invalid for a Database target -- that the select showed "Add Row" while
+the state still said `increment`, producing a wire that did nothing. **It is not:
+the effect correctly sets `addRow`.** Read the code before writing the fix.
+
+`npm run check` is **569**. Negative-controlled two ways, both anchors asserted
+after the last cycle's control turned out to be a silent no-op.
+
+---
+
 ## File Structure Summary
 
 ```
