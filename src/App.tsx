@@ -24,6 +24,7 @@ import { PageValueBlock } from './blocks/PageValueBlock'
 import { PHONE_MAX_WIDTH } from './lib/layout'
 import { stepZoom, zoomToFit, zoomLabel, contentExtent, clampZoom } from './lib/zoom'
 import { guessMappings, whyItCannotWork } from './lib/connectionDraft'
+import { wireSentence } from './lib/wireWords'
 import { PlacementControls } from './components/PlacementControls'
 import { HealthPanel } from './components/HealthPanel'
 import { WireOverlay } from './components/WireOverlay'
@@ -382,6 +383,13 @@ function ConnectionPopup({ editor }: { editor: any }) {
   const isToggleBlock = targetNodeType === 'toggleBlock'
   const isDatabaseBlock = targetNodeType === 'databaseBlock'
   const targetState = pending ? store.get(blockRuntimeAtom(pending.targetBlockId)) : null
+  const sourceState = pending ? store.get(blockRuntimeAtom(pending.sourceBlockId)) : null
+
+  /** Names, not ids. A sentence saying buttonBlock__1426237deb teaches nothing. */
+  const readableName = (state: any, nodeType: string | null) =>
+    isGarbageName(state?.blockName)
+      ? getBlockTypeDisplayName(nodeType ?? '')
+      : String(state.blockName)
   const databaseColumns = targetState?.columns || []
 
   // Get all OTHER blocks on the canvas
@@ -672,7 +680,26 @@ function ConnectionPopup({ editor }: { editor: any }) {
 
   return (
     <div style={popupStyle} onPointerDown={(e) => e.stopPropagation()}>
-      <div style={{ fontWeight: 'bold', fontSize: '15px', color: '#1e293b', marginBottom: '4px' }}>Configure Action</div>
+      {/*
+        What this wire will do, in one line, updating as the action changes.
+        The heading used to say "Configure Action" and nothing else -- you had
+        to reconstruct from memory which two blocks it was about and what you
+        were building.
+      */}
+      <div style={{ fontSize: '13px', color: '#0f172a', lineHeight: 1.45, background: '#eef2ff', border: '1px solid #c7d2fe', borderRadius: '8px', padding: '10px 12px' }}>
+        {wireSentence({
+          sourceName: readableName(sourceState, sourceNodeType),
+          targetName: readableName(targetState, targetNodeType),
+          event:
+            sourceNodeType === 'timerBlock'
+              ? timerEvent
+              : sourceNodeType === 'databaseBlock'
+                ? 'onChange'
+                : 'onClick',
+          action,
+          conditional: isConditional,
+        })}
+      </div>
       
       {sourceNodeType === 'timerBlock' && (
         <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontWeight: 500, color: '#475569', fontSize: '13px' }}>

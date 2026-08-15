@@ -107,6 +107,7 @@ const PageValueComponent = ({ node }: NodeViewProps) => {
       <div
         contentEditable={false}
         data-port-output={blockId}
+        title="Drag from here to another block: this hands over its value and makes that block react"
         onPointerDown={onOutputPortPointerDown}
         style={{
           position: 'absolute', right: '-5px', top: '50%', transform: 'translateY(-50%)',

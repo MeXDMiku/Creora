@@ -155,6 +155,7 @@ const InputBlockComponent = (props: NodeViewProps) => {
       <div
         contentEditable={false}
         data-port-output={blockId}
+        title="Drag from here to another block: this hands over its value and makes that block react"
         onPointerDown={onOutputPortPointerDown}
         style={{
           position: 'absolute',

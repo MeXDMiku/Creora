@@ -21,6 +21,7 @@ import { resolvePageValue, buildParamsFromTemplate } from '../src/lib/pageValue'
 import { diagnosePage, sortProblems, referencedIds } from '../src/lib/diagnose';
 import { guessMappings, matchScore, normaliseName, whyItCannotWork } from '../src/lib/connectionDraft';
 import { clampZoom, stepZoom, zoomToFit, zoomLabel, contentExtent, toCanvasPoint, MIN_ZOOM, MAX_ZOOM } from '../src/lib/zoom';
+import { wireSentence, actionWords, eventWords, outputMeaning, PORT_OUT_HINT, PORT_IN_HINT } from '../src/lib/wireWords';
 import {
   resolveLayout,
   layoutPage,
@@ -2042,6 +2043,77 @@ group('the cursor and the canvas are two coordinate systems');
   );
   check('and zoomed in, the other way', toCanvasPoint({ x: 300, y: 200 }, 2), { x: 150, y: 100 });
   check('a nonsense zoom does not produce a nonsense position', toCanvasPoint({ x: 300, y: 200 }, NaN), { x: 300, y: 200 });
+}
+
+// ------------------------------------------------- saying what a wire will do
+group('the wire explains itself');
+{
+  check(
+    'THE SENTENCE THE POPUP OPENS WITH',
+    wireSentence({ sourceName: 'Button 1', targetName: 'Submissions', event: 'onClick', action: 'addRow' }),
+    'When Button 1 is pressed → add a row to Submissions'
+  );
+  check(
+    'and it changes with the action, so you can see what you are building',
+    wireSentence({ sourceName: 'Button 1', targetName: 'Submissions', event: 'onClick', action: 'updateRow' }),
+    'When Button 1 is pressed → change a row in Submissions'
+  );
+  check(
+    'a timer reads properly too',
+    wireSentence({ sourceName: 'Countdown', targetName: 'Score', event: 'onComplete', action: 'reset' }),
+    'When Countdown reaches zero → reset Score'
+  );
+  check(
+    'a conditional wire admits it rather than overpromising',
+    wireSentence({ sourceName: 'A', targetName: 'B', event: 'onClick', action: 'set', conditional: true }),
+    'When A is pressed → set B, but only sometimes'
+  );
+  check(
+    'nameless blocks still produce a sentence rather than a blank',
+    wireSentence({ sourceName: '', targetName: '  ', event: 'onClick', action: 'toggle' }),
+    'When this is pressed → flip that'
+  );
+
+  // Tested by looking for camelCase leaking through, not by "the words differ
+  // from the name" -- `set` and `reset` are already the right words, and the
+  // first version of this check called both of them missing.
+  check('no action leaks its camelCase name into the sentence', [
+    'increment', 'decrement', 'set', 'setText', 'toggle', 'reset', 'turnOn', 'turnOff',
+    'addRow', 'updateRow', 'deleteRow', 'exportCsv', 'sendWebhook',
+    'validate', 'setLoading', 'clearLoading', 'setDisabled', 'setEnabled',
+  ].filter(a => /[A-Z]/.test(actionWords(a))), []);
+  check('a name with no words in the list leaks, which is how the check works', /[A-Z]/.test(actionWords('someNewAction')), true);
+  check('every event has words', ['onClick', 'onChange', 'onTick', 'onComplete'].filter(e => eventWords(e) === 'happens'), []);
+  check('an unknown action still reads as something', actionWords('somethingNew'), 'somethingNew');
+
+  check('ports say what they do instead of showing a letter', outputMeaning('number'), 'gives a number');
+  check('text', outputMeaning('string'), 'gives text');
+  check('a toggle', outputMeaning('boolean'), 'gives yes or no');
+  check('and anything unknown still says something true', outputMeaning('mystery'), 'gives its value');
+}
+
+group('every port in every block is labelled');
+{
+  /**
+   * The hints are written into each block's JSX because a title attribute
+   * cannot be a call in seventeen files without seventeen imports. Hoping the
+   * copies stay in step is exactly how three block types went unsaveable, so
+   * this counts them instead.
+   */
+  const files = readdirSync('src/blocks').filter(f => /Block\.tsx$/.test(f));
+  const missingOut: string[] = [];
+  const missingIn: string[] = [];
+  for (const file of files) {
+    const text = readFileSync(`src/blocks/${file}`, 'utf8');
+    const outs = (text.match(/data-port-output=\{blockId\}/g) || []).length;
+    const ins = (text.match(/data-port-input=\{blockId\}/g) || []).length;
+    const outTitles = (text.split(PORT_OUT_HINT).length - 1);
+    const inTitles = (text.split(PORT_IN_HINT).length - 1);
+    if (outs > outTitles) missingOut.push(file);
+    if (ins > inTitles) missingIn.push(file);
+  }
+  check('no output port is unlabelled', missingOut, []);
+  check('no input port is unlabelled', missingIn, []);
 }
 
 group('nobody has hand-written the block list again');

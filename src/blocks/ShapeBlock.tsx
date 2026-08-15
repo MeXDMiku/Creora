@@ -190,6 +190,7 @@ const ShapeBlockComponent = (props: NodeViewProps) => {
         <div
           contentEditable={false}
           data-port-input={blockId}
+          title="Something wired into here makes this block react"
           style={{
             position: 'absolute',
             left: '-5px',
@@ -227,6 +228,7 @@ const ShapeBlockComponent = (props: NodeViewProps) => {
         <div
           contentEditable={false}
           data-port-output={blockId}
+          title="Drag from here to another block: this hands over its value and makes that block react"
           onPointerDown={onOutputPortPointerDown}
           style={{
             position: 'absolute',

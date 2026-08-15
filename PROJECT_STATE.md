@@ -1463,6 +1463,54 @@ negative control turns it red.
 
 ---
 
+### Cycle 14 — the wire explains itself *(13 Aug 2026)*
+
+First piece of *nothing unexplained, nothing unnamed*, applied where the owner
+actually got stuck.
+
+**The Configure Action popup was headed "Configure Action" and said nothing
+else.** You drag a wire, a form appears, and you have to reconstruct from memory
+which two blocks it is about and what the thing you are building will do. It now
+opens with the wire, in a sentence:
+
+    When Button 1 is pressed → add a row to Submissions
+
+and it **rewrites itself as the action changes**, so choosing *"change a row that
+is already there"* reads back as *"→ change a row in Submissions"*. A conditional
+wire admits it: *"…, but only sometimes"*. You can tell whether you are building
+the thing you meant before filling in a single field.
+
+Names, not ids. A sentence containing `buttonBlock__1426237deb` teaches nothing,
+and the block names are right there.
+
+**And the ports stopped being a code.** `#`, `T`, `?`, `DB` are something a
+person has to learn. Every port in every block now carries the words on hover —
+*"Drag from here to another block: this hands over its value and makes that
+block react"* — which is the answer to a question nothing on screen was
+answering: **how do you know you can drag from a block at all?**
+
+**Held by a count, not by hope.** The hints are written into each block's JSX,
+because a `title` cannot be a function call in seventeen files without seventeen
+imports. So a check counts ports against labels in every block file and fails if
+one is missing. Hoping seventeen copies stay in step is exactly how three block
+types went unsaveable in cycle 2.
+
+**Two mistakes made and caught while doing it**
+
+1. A regex-based edit with an indentation backreference **broke fourteen block
+   files at once**. Restored with `git show HEAD:file > file` — `git checkout`
+   still cannot work here, because this environment cannot unlink. Redone
+   line-by-line, which is duller and did not break anything.
+2. My completeness check asked whether each action's words *differed from its
+   name*, and so called `set` and `reset` unnamed — they are already the right
+   words. It now looks for **camelCase leaking through**, which is the actual
+   failure mode, and there is a check proving the check bites.
+
+`npm run check` is **604**. Negative-controlled twice: the words for `addRow`
+removed, and one port label deleted.
+
+---
+
 ## File Structure Summary
 
 ```
