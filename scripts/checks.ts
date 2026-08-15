@@ -20,6 +20,7 @@ import { parseParams, readParam, buildQuery, parseParamTemplate } from '../src/l
 import { resolvePageValue, buildParamsFromTemplate } from '../src/lib/pageValue';
 import { diagnosePage, sortProblems, referencedIds } from '../src/lib/diagnose';
 import { guessMappings, matchScore, normaliseName, whyItCannotWork } from '../src/lib/connectionDraft';
+import { clampZoom, stepZoom, zoomToFit, zoomLabel, contentExtent, toCanvasPoint, MIN_ZOOM, MAX_ZOOM } from '../src/lib/zoom';
 import {
   resolveLayout,
   layoutPage,
@@ -1986,6 +1987,61 @@ group('refusing to create something that cannot work');
   check('setText with no words is refused', whyItCannotWork({ action: 'setText', value: '' }) !== null, true);
   check('an ordinary increment is never blocked', whyItCannotWork({ action: 'increment' }), null);
   check('nor is a toggle', whyItCannotWork({ action: 'toggle' }), null);
+}
+
+// ----------------------------------------------------------------- the canvas
+group('zooming');
+{
+  check('life size stays life size', clampZoom(1), 1);
+  check('too far in is capped', clampZoom(99), MAX_ZOOM);
+  check('too far out is capped', clampZoom(0.01), MIN_ZOOM);
+  check('nonsense becomes life size rather than a blank canvas', clampZoom(NaN), 1);
+
+  check('in from 100%', stepZoom(1, 1), 1.25);
+  check('out from 100%', stepZoom(1, -1), 0.75);
+  check(
+    'IN THEN OUT RETURNS EXACTLY WHERE YOU WERE, which multiplying by 1.2 does not',
+    stepZoom(stepZoom(0.5, 1), -1),
+    0.5
+  );
+  check('it cannot step past the ceiling', stepZoom(MAX_ZOOM, 1), MAX_ZOOM);
+  check('or the floor', stepZoom(MIN_ZOOM, -1), MIN_ZOOM);
+  check('the steps are the round numbers a person reads', [zoomLabel(0.5), zoomLabel(0.6667), zoomLabel(1)], ['50%', '67%', '100%']);
+}
+
+group('fitting everything on screen');
+{
+  const wide = contentExtent([
+    { x: 0, y: 0, width: 200 },
+    { x: 1800, y: 40, width: 300 },
+  ]);
+  check('the extent reaches the far edge of the last block', wide.right, 2100);
+
+  check(
+    'a page wider than the window zooms out until it fits',
+    zoomToFit(wide, { width: 1000, height: 800 }) < 1,
+    true
+  );
+  check(
+    'A PAGE THAT ALREADY FITS IS NOT BLOWN UP -- three blocks at 200% looks broken',
+    zoomToFit(contentExtent([{ x: 0, y: 0, width: 100 }]), { width: 1600, height: 900 }),
+    1
+  );
+  check('an empty page is life size', zoomToFit(contentExtent([]), { width: 800, height: 600 }), 1);
+  check('fit never goes below the floor', zoomToFit({ right: 999999, bottom: 999999 }, { width: 400, height: 300 }), MIN_ZOOM);
+  check('a block with no width still counts, using a fallback', contentExtent([{ x: 100, y: 0 }]).right > 100, true);
+}
+
+group('the cursor and the canvas are two coordinate systems');
+{
+  check('at life size they are the same', toCanvasPoint({ x: 300, y: 200 }, 1), { x: 300, y: 200 });
+  check(
+    'AT HALF SIZE A CURSOR 300px ACROSS IS 600px INTO THE PAGE -- without this, dragging lands further from the cursor the further out you go',
+    toCanvasPoint({ x: 300, y: 200 }, 0.5),
+    { x: 600, y: 400 }
+  );
+  check('and zoomed in, the other way', toCanvasPoint({ x: 300, y: 200 }, 2), { x: 150, y: 100 });
+  check('a nonsense zoom does not produce a nonsense position', toCanvasPoint({ x: 300, y: 200 }, NaN), { x: 300, y: 200 });
 }
 
 group('nobody has hand-written the block list again');

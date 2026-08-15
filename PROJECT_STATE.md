@@ -1406,6 +1406,63 @@ after the last cycle's control turned out to be a silent no-op.
 
 ---
 
+### Cycle 13 — the design direction, written down; and the canvas gets a zoom *(13 Aug 2026)*
+
+**`docs/DESIGN_DIRECTION.md`** — two references the owner supplied, read
+specifically rather than admired. The complaint behind them is *"our visual
+teaching is too harsh, they can't get things done, they can't understand
+things"*, which is not a complaint about colours.
+
+Recorded in detail on purpose: a reference looked at once and not written down
+becomes "make it prettier" three weeks later, and that is not a brief anybody can
+build from. Twice this session something has fallen out of a plan because the
+plan was prose.
+
+**The split the doc makes, which is the useful part.** Half of what makes those
+interfaces teachable is **styling** — palette, spacing, the light card look —
+and that waits for Phase C, because doing it before the layout model and the
+categories means doing it twice. The other half is **information design**: ports
+that are named and typed, state shown as a sentence rather than an icon, a label
+under every number, a persistent status line, zoom. **Those are not cosmetic**,
+several are small, and the owner could not work out how to get a typed value
+into a column an hour earlier — which was never a colour problem.
+
+So: the redesign waits; individual pieces of information design do not have to,
+when they are cheap and they unblock somebody. Three already shipped and belong
+on that list — the menu grouped into the three layers, the Health panel, and
+column mappings that arrive filled in.
+
+**The one rule kept from both references: nothing unexplained, nothing unnamed.**
+
+---
+
+**Then the first piece: the canvas had no zoom at all.**
+
+Straight off his own reference, which carries `- + Fit Reset 72%` in its corner.
+A page laid out wider than the window had parts **that could not be reached** —
+the same complaint, in the same message, as the action popup running off the
+bottom of the screen.
+
+- Steps snap to a list — 25, 33, 50, 67, 75, 100, 125, 150, 200 — rather than
+  multiplying by a factor. **In then out returns exactly where you were**, which
+  multiplying does not, and the numbers on screen are the round ones.
+- **Fit never zooms in.** A page with three blocks blown up to 200% is
+  disorienting and reads as broken. Fit means "I can see all of it"; when it
+  already fits, the answer is 100%.
+- One CSS transform on the whole canvas, so no block has to know a zoom exists.
+
+**Except dragging, which is the part that would have silently broken.** A drag
+reads the cursor relative to the container and writes it straight into a block's
+coordinates — and once the canvas is scaled those are two different coordinate
+systems. Without dividing by the zoom, every drag lands further from the cursor
+the further from the origin it is, which reads as *"dragging is broken"* rather
+than *"there is a zoom"*. There is a check named after that sentence, and the
+negative control turns it red.
+
+`npm run check` is **589**. Negative-controlled two ways, anchors asserted.
+
+---
+
 ## File Structure Summary
 
 ```

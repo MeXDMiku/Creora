@@ -2,7 +2,7 @@ import { useEffect, useRef, useCallback, useState, useMemo } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { useSetAtom, useAtom, useAtomValue, useStore } from 'jotai'
-import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, getCanvasBlocks, shapeRoleDataType, currentPageIdAtom, currentPageIsPublishedAtom, pagesListAtom, switchPageFnAtom, isPreviewModeAtom, canvasModeAtom, editingBreakpointAtom } from './state/atoms'
+import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, getCanvasBlocks, shapeRoleDataType, currentPageIdAtom, currentPageIsPublishedAtom, pagesListAtom, switchPageFnAtom, isPreviewModeAtom, canvasModeAtom, editingBreakpointAtom, canvasZoomAtom } from './state/atoms'
 import { newBlockId, defaultRuntimeForNodeType, defaultAttrsForNodeType, BLOCK_FOOTPRINT, nodeTypeFromBlockId, shortBlockId, isBlockNodeType, withoutVisitorState, type BlockNodeType } from './lib/blockRegistry'
 import { ButtonBlock } from './blocks/ButtonBlock'
 import { NumberDisplayBlock } from './blocks/NumberDisplayBlock'
@@ -22,6 +22,7 @@ import { ImageBlock } from './blocks/ImageBlock'
 import { RepeatBlock } from './blocks/RepeatBlock'
 import { PageValueBlock } from './blocks/PageValueBlock'
 import { PHONE_MAX_WIDTH } from './lib/layout'
+import { stepZoom, zoomToFit, zoomLabel, contentExtent, clampZoom } from './lib/zoom'
 import { guessMappings, whyItCannotWork } from './lib/connectionDraft'
 import { PlacementControls } from './components/PlacementControls'
 import { HealthPanel } from './components/HealthPanel'
@@ -303,6 +304,16 @@ function Inspector({ editor }: { editor: any }) {
  * The two that write a row, because that is the moment a typo becomes permanent.
  * Everything else stays off by default; the checkbox is there either way.
  */
+const zoomBtnStyle: React.CSSProperties = {
+  padding: '6px 10px',
+  border: 'none',
+  background: '#ffffff',
+  color: '#475569',
+  cursor: 'pointer',
+  fontSize: '13px',
+  fontWeight: 600,
+}
+
 function guardDefaultFor(action: string): boolean {
   return action === 'addRow' || action === 'updateRow'
 }
@@ -1491,6 +1502,7 @@ function App() {
   const [canvasMode, setCanvasMode] = useAtom(canvasModeAtom)
   const [editingBreakpoint, setEditingBreakpoint] = useAtom(editingBreakpointAtom)
   const [showHealth, setShowHealth] = useState(false)
+  const [zoom, setZoom] = useAtom(canvasZoomAtom)
 
   const activePageIdRef = useRef(PAGE_ID)
   useEffect(() => {
@@ -3314,6 +3326,41 @@ function App() {
             ))}
           </div>
 
+          {/*
+            Zoom. The canvas had none, so a page laid out wider than the window
+            had parts that simply could not be reached -- the same complaint as
+            the action popup running off the bottom of the screen.
+          */}
+          <div style={{ display: 'flex', alignItems: 'center', marginLeft: '8px', border: '1px solid #cbd5e1', borderRadius: '6px', overflow: 'hidden' }}>
+            <button onClick={() => setZoom(z => stepZoom(z, -1))} title="Zoom out" style={zoomBtnStyle}>−</button>
+            <button
+              onClick={() => setZoom(1)}
+              title="Back to life size"
+              style={{ ...zoomBtnStyle, minWidth: '52px', fontVariantNumeric: 'tabular-nums' }}
+            >
+              {zoomLabel(zoom)}
+            </button>
+            <button onClick={() => setZoom(z => stepZoom(z, 1))} title="Zoom in" style={zoomBtnStyle}>+</button>
+            <button
+              onClick={() => {
+                const el = document.getElementById('editor-container')
+                const boxes = (allBlockIds || []).map((id: string) => {
+                  const p = store.get(blockPositionAtom(id)) || { x: 0, y: 0 }
+                  const rs = store.get(blockRuntimeAtom(id))
+                  return { x: p.x, y: p.y, width: typeof rs?.width === 'number' ? rs.width : undefined }
+                })
+                setZoom(zoomToFit(contentExtent(boxes), {
+                  width: el?.clientWidth || window.innerWidth,
+                  height: el?.clientHeight || window.innerHeight,
+                }))
+              }}
+              title="Zoom out until everything on this page is visible"
+              style={{ ...zoomBtnStyle, borderLeft: '1px solid #e2e8f0' }}
+            >
+              Fit
+            </button>
+          </div>
+
           <button
             onClick={() => setShowHealth((v: boolean) => !v)}
             title="What this page is, and what on it cannot work"
@@ -3475,6 +3522,11 @@ function App() {
             // coordinates being dragged are the coordinates a visitor gets.
             // A preview that is the right shape but the wrong size teaches the
             // wrong thing.
+            // One transform on the whole canvas. Every block is positioned
+            // inside it, so nothing else has to know that a zoom exists --
+            // except dragging, which divides by it.
+            transform: zoom === 1 ? undefined : `scale(${clampZoom(zoom)})`,
+            transformOrigin: 'top left',
             ...(editingBreakpoint === 'phone'
               ? {
                   maxWidth: PHONE_MAX_WIDTH + 'px',

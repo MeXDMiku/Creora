@@ -104,6 +104,9 @@ export const pageParamsAtom = atom<Record<string, string> | null>(null);
  */
 export const editingBreakpointAtom = atom<'base' | 'phone'>('base');
 
+/** How far the canvas is zoomed. 1 is life size. See src/lib/zoom.ts. */
+export const canvasZoomAtom = atom<number>(1);
+
 export const triggerSaveAtom = atom<number>(0);
 
 export const isPreviewModeAtom = atom<boolean>(false);

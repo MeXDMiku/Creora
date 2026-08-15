@@ -1,7 +1,8 @@
 import { useRef, useCallback } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
-import { blockPositionAtom, selectedBlockIdAtom, triggerSaveAtom, isPreviewModeAtom, editingBreakpointAtom } from '../state/atoms';
+import { blockPositionAtom, selectedBlockIdAtom, triggerSaveAtom, isPreviewModeAtom, editingBreakpointAtom, canvasZoomAtom } from '../state/atoms';
 import { resolveLayout } from '../lib/layout';
+import { toCanvasPoint } from '../lib/zoom';
 
 export function useBlockDrag(blockId: string, containerRef: React.RefObject<HTMLElement>) {
   /**
@@ -15,6 +16,14 @@ export function useBlockDrag(blockId: string, containerRef: React.RefObject<HTML
   const placement = useAtomValue(blockPositionAtom(blockId));
   const setPlacement = useSetAtom(blockPositionAtom(blockId));
   const breakpoint = useAtomValue(editingBreakpointAtom);
+  /**
+   * A drag reads the cursor relative to the container and writes it into a
+   * block's coordinates. Once the canvas is scaled those are two different
+   * coordinate systems, and without dividing by the zoom every drag lands
+   * further from the cursor the further out you go -- which reads as "dragging
+   * is broken", not as "there is a zoom".
+   */
+  const zoom = useAtomValue(canvasZoomAtom);
 
   const resolved = resolveLayout(placement, breakpoint);
   const position = { x: resolved.x, y: resolved.y };
@@ -58,19 +67,21 @@ export function useBlockDrag(blockId: string, containerRef: React.RefObject<HTML
     if (!container) return;
 
     const containerRect = container.getBoundingClientRect();
-    const cursorXInContainer = e.clientX - containerRect.left;
-    const cursorYInContainer = e.clientY - containerRect.top;
+    const cursor = toCanvasPoint(
+      { x: e.clientX - containerRect.left, y: e.clientY - containerRect.top },
+      zoom
+    );
 
     dragState.current = {
-      grabOffsetX: cursorXInContainer - position.x,
-      grabOffsetY: cursorYInContainer - position.y,
+      grabOffsetX: cursor.x - position.x,
+      grabOffsetY: cursor.y - position.y,
       startClientX: e.clientX,
       startClientY: e.clientY,
       hasMoved: false,
     };
 
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
-  }, [position.x, position.y, containerRef, isPreviewMode]);
+  }, [position.x, position.y, containerRef, isPreviewMode, zoom]);
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
     if (isPreviewMode) return;
@@ -85,16 +96,18 @@ export function useBlockDrag(blockId: string, containerRef: React.RefObject<HTML
     if (distance > 5) {
       dragState.current.hasMoved = true;
       const containerRect = container.getBoundingClientRect();
-      const cursorXInContainer = e.clientX - containerRect.left;
-      const cursorYInContainer = e.clientY - containerRect.top;
+      const cursor = toCanvasPoint(
+        { x: e.clientX - containerRect.left, y: e.clientY - containerRect.top },
+        zoom
+      );
 
       setPosition({
-        x: cursorXInContainer - dragState.current.grabOffsetX,
-        y: cursorYInContainer - dragState.current.grabOffsetY,
+        x: cursor.x - dragState.current.grabOffsetX,
+        y: cursor.y - dragState.current.grabOffsetY,
       });
       triggerSave(prev => prev + 1);
     }
-  }, [setPosition, containerRef, triggerSave, isPreviewMode]);
+  }, [setPosition, containerRef, triggerSave, isPreviewMode, zoom]);
 
   const handlePointerUp = useCallback((e: React.PointerEvent) => {
     if (!dragState.current) return;
