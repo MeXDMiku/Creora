@@ -8,6 +8,7 @@ import { supabase } from '../lib/supabase';
 import { blockToCSS } from '../lib/renderBlockStyles';
 import { valueAtPath } from '../lib/jsonPaths';
 import { fetchDataSource } from '../lib/dataSource';
+import { runPageLoadWorkflows } from '../lib/bindingEngine';
 import { computeDatabaseOutput } from '../lib/databaseOutput';
 import { CustomHtmlView } from '../blocks/CustomHtmlBlock';
 import { RepeatView } from '../blocks/RepeatBlock';
@@ -1153,6 +1154,8 @@ export default function PublishedRenderer() {
   const [error, setError] = useState<string | null>(null);
   const [pageName, setPageName] = useState('Untitled');
   const [docItemsList, setDocItemsList] = useState<DocItem[]>([]);
+  /** Which page's onLoad workflows have already run in this component. */
+  const pageLoadRanFor = useRef<string | null>(null);
   const isNarrow = useIsNarrow(PHONE_MAX_WIDTH);
   const blocksOnPage = useMemo(
     () => docItemsList.flatMap((i) => (i.kind === 'block' ? [i.block] : [])),
@@ -1247,8 +1250,24 @@ export default function PublishedRenderer() {
           });
         }
 
-        // Recalculate initial values
+        // Recalculate initial values. Not propagating: a page settling on
+        // load is not an event, and the page-load workflows below are the
+        // deliberate version of "do something when this opens".
         recalculateAllFormulas(store);
+
+        /**
+         * Now the page exists, run whatever is wired to it opening.
+         *
+         * Guarded by a ref rather than by a flag inside the engine: this effect
+         * re-runs whenever pageId or the store identity changes, React mounts
+         * effects twice in development, and a page-load workflow that adds a row
+         * must add one row. The guard is keyed on the page so that navigating
+         * from one published page to another runs the new page's own.
+         */
+        if (pageLoadRanFor.current !== pageId) {
+          pageLoadRanFor.current = pageId ?? null;
+          runPageLoadWorkflows(store);
+        }
       } catch (err: any) {
         console.error('Failed to load published page:', err);
         setError(err.message || 'Failed to load page');

@@ -34,6 +34,7 @@ import type { PageRow } from './types/creora'
 import { AccountBadge } from './components/AccountBadge'
 import { PublishButton } from './components/PublishButton'
 import { recalculateAllFormulas } from './lib/bindingEngine'
+import { runPageLoadWorkflows } from './lib/bindingEngine'
 import { ANIMATION_PRESETS, animationClass } from './lib/animations'
 import { workflowRunsAtom, type WorkflowRun } from './state/atoms'
 import type { FormulaBinding, CreoraFile, Page, Block, BlockProps, StyleConfig, AnimationConfig, BlockType } from './types/creora'
@@ -336,6 +337,8 @@ function ConnectionPopup({ editor }: { editor: any }) {
   const [amount, setAmount] = useState<number>(1)
   const [value, setValue] = useState<string>('')
   const [timerEvent, setTimerEvent] = useState<'onTick' | 'onComplete'>('onTick')
+  // Any source block can instead be anchored to the page opening.
+  const [onPageLoad, setOnPageLoad] = useState(false)
 
   // Conditional state
   const [isConditional, setIsConditional] = useState(false)
@@ -662,8 +665,9 @@ function ConnectionPopup({ editor }: { editor: any }) {
     const newWorkflow = {
       id: wfId,
       sourceId: pending.sourceBlockId,
-      sourceEvent:
-        sourceNodeType === 'timerBlock'
+      sourceEvent: onPageLoad
+        ? ('onLoad' as const)
+        : sourceNodeType === 'timerBlock'
           ? timerEvent
           : sourceNodeType === 'databaseBlock'
             ? ('onChange' as const)
@@ -702,12 +706,29 @@ function ConnectionPopup({ editor }: { editor: any }) {
               : sourceNodeType === 'databaseBlock'
                 ? 'onChange'
                 : 'onClick',
+          pageLoad: onPageLoad,
           action,
           conditional: isConditional,
         })}
       </div>
       
-      {sourceNodeType === 'timerBlock' && (
+      {/*
+        The page opening is a trigger like any other, and it is the one thing
+        nothing on a page could react to. A checkbox rather than an entry in a
+        "when" dropdown, because most source blocks have exactly one natural
+        event and a dropdown of one is worse than a tick box.
+      */}
+      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontWeight: 500, color: '#475569', fontSize: '13px' }}>
+        <input
+          type="checkbox"
+          checked={onPageLoad}
+          onChange={(e) => setOnPageLoad(e.target.checked)}
+          style={{ cursor: 'pointer' }}
+        />
+        Do this when the page opens instead
+      </label>
+
+      {!onPageLoad && sourceNodeType === 'timerBlock' && (
         <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontWeight: 500, color: '#475569', fontSize: '13px' }}>
           Trigger Event
           <select 
@@ -1561,6 +1582,19 @@ function App() {
   const [isCrossfading, setIsCrossfading] = useState(false)
   const setSwitchPageFn = useSetAtom(switchPageFnAtom)
   const [isPreviewMode, setIsPreviewMode] = useAtom(isPreviewModeAtom)
+
+  /**
+   * Entering Preview runs the page-load workflows, so a builder can actually
+   * see what a visitor will see.
+   *
+   * It deliberately does NOT run while editing. A workflow wired to the page
+   * opening can add a row, and firing it on every reload of the editor would
+   * fill a builder's own table with rows they never asked for -- which is the
+   * shape of the bug that put `dsad` in front of every visitor.
+   */
+  useEffect(() => {
+    if (isPreviewMode) runPageLoadWorkflows(store)
+  }, [isPreviewMode, store])
   const [showRuns, setShowRuns] = useState(false)
   const runCount = useAtomValue(workflowRunsAtom).length
   const [canvasMode, setCanvasMode] = useAtom(canvasModeAtom)

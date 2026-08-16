@@ -114,6 +114,34 @@ export function conditionHolds(
 }
 
 /**
+ * Run everything wired to "when the page opens", once.
+ *
+ * WHY IT IS A SEPARATE ENTRY POINT
+ * Every other trigger is caused by a block: a press, a value moving, a tick.
+ * This one is caused by the page existing, so nothing would ever call
+ * executeWorkflow for it. Without this a page could not set itself up, greet a
+ * visitor, clear last session's numbers, or decide what to show before somebody
+ * touched it -- which is most of what "dynamic" means to whoever opens a link.
+ *
+ * ONCE, AND NOT ON EVERY RENDER
+ * The caller owns that. React mounts run more than once in development, a
+ * published page re-renders whenever a poll returns, and a page-load workflow
+ * that writes a row must not write one per render. Both call sites guard with a
+ * ref, and there is a check that this function is safe to call twice by making
+ * the guard the caller's job rather than hiding a module-level flag in here --
+ * a hidden flag would be shared between the editor and a published page in the
+ * same tab, and the second page to open would silently do nothing.
+ */
+export function runPageLoadWorkflows(store: ReturnType<typeof getDefaultStore>): number {
+  const workflows = store.get(workflowsAtom) || [];
+  const onLoad = workflows.filter((w: any) => w.sourceEvent === 'onLoad');
+  for (const workflow of onLoad) {
+    executeWorkflow(workflow.sourceId, 'onLoad', store);
+  }
+  return onLoad.length;
+}
+
+/**
  * Every block's current value, keyed by its id, ready for a formula.
  *
  * Extracted from recalculateAllFormulas the moment a second caller appeared.

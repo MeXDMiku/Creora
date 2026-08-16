@@ -42,7 +42,7 @@ import {
 import { withoutVisitorState, isBlockNodeType, BLOCK_NODE_TYPES, portableTypeFromNodeType, nodeTypeFromPortableType, nodeTypeFromBlockId } from '../src/lib/blockRegistry';
 import { remapBlockIds, shouldRemapOnImport, remapFormulaExpression } from '../src/lib/remapBlockIds';
 import { evaluateExpression, FORMULA_FUNCTION_NAMES } from '../src/lib/formula';
-import { stepConditionResult, formulaScope, recalculateAllFormulas } from '../src/lib/bindingEngine';
+import { stepConditionResult, formulaScope, recalculateAllFormulas, runPageLoadWorkflows } from '../src/lib/bindingEngine';
 import { safeUrl, isSafeUrlValue, schemeOf, stripIgnorable } from '../src/lib/urls';
 import { fillSlots, leadingSlotName, findSlots as findSlotsForCheck } from '../src/lib/sanitizeHtml';
 import { visibleRows, rowSlots, compareCells, slotNamesFor, rowMatchesSearch, MAX_RENDERED_ROWS } from '../src/lib/rows';
@@ -2908,6 +2908,104 @@ group('a formula is not a dead end in the chain');
   check('a loop terminates instead of hanging', typeof loop.get(blockRuntimeAtom(A)).value, 'number');
   check('and says so rather than stopping quietly',
     runs.some(r => (r.steps || []).some((st: any) => st.action === '(chain stopped)')), true);
+}
+
+group('a page can do something when it opens');
+{
+  /**
+   * The last of the four primitives the record named as missing. It was
+   * recorded as closed by the Live Data block, which was an overclaim: that
+   * block refreshes ITSELF on open and on a timer, and nothing else on the page
+   * could run when the page opened. So a page could not set itself up, clear
+   * last session's numbers, or decide what to show before being touched.
+   */
+  const ANCHOR = 'numberDisplayBlock__ld00000001';
+  const OUT = 'numberDisplayBlock__ld10000001';
+  const BTN = 'buttonBlock__ld20000001';
+  const base = { visible: true, disabled: false, loading: false, error: null };
+
+  const build = (workflows: any[]) => {
+    const store = createStore();
+    store.set(allBlockIdsAtom, [ANCHOR, OUT, BTN]);
+    for (const id of [ANCHOR, OUT, BTN]) store.set(blockRuntimeAtom(id), { ...base, value: 0 });
+    store.set(formulasAtom, []);
+    store.set(workflowsAtom, workflows as any);
+    return store;
+  };
+
+  const store = build([{ id: 'p1', sourceId: ANCHOR, sourceEvent: 'onLoad', steps: [{ targetId: OUT, action: 'set', value: 42 }] }]);
+  check('nothing has happened before the page opens', store.get(blockRuntimeAtom(OUT)).value, 0);
+  check('one page-load workflow is found', runPageLoadWorkflows(store), 1);
+  check('and it ran', store.get(blockRuntimeAtom(OUT)).value, 42);
+
+  // Only onLoad. A click workflow must not fire just because a page opened --
+  // that would press every button on the page for every visitor.
+  const mixed = build([
+    { id: 'p2', sourceId: ANCHOR, sourceEvent: 'onLoad', steps: [{ targetId: OUT, action: 'set', value: 7 }] },
+    { id: 'p3', sourceId: BTN, sourceEvent: 'onClick', steps: [{ targetId: OUT, action: 'set', value: 999 }] },
+  ]);
+  runPageLoadWorkflows(mixed);
+  check('a click workflow does not fire when the page opens', mixed.get(blockRuntimeAtom(OUT)).value, 7);
+
+  const none = build([{ id: 'p4', sourceId: BTN, sourceEvent: 'onClick', steps: [{ targetId: OUT, action: 'set', value: 1 }] }]);
+  check('a page with none of them runs nothing', runPageLoadWorkflows(none), 0);
+  check('and changes nothing', none.get(blockRuntimeAtom(OUT)).value, 0);
+  /**
+   * And says nothing.
+   *
+   * The negative control taught this one. Removing the onLoad filter turned
+   * only the count check red, because executeWorkflow filters by event again
+   * anyway -- so "a click workflow does not fire" was testing ITS filter, not
+   * this one. What this filter actually owns is not calling executeWorkflow for
+   * blocks that have nothing wired to the page opening: each of those calls
+   * records an amber "nothing wired to this" line, so an unfiltered version
+   * would fill the Runs panel with one per block on every single page load,
+   * burying the entries a builder is looking for.
+   */
+  check('and does not fill the run log with a line per block', (none.get(workflowRunsAtom) as any[]).length, 0);
+
+  /**
+   * Running twice is the caller's problem, not this function's, and that is
+   * deliberate: a module-level "already ran" flag would be shared between the
+   * editor and a published page in the same tab, and the second page to open
+   * would silently do nothing. So the function is honestly repeatable, and both
+   * call sites guard with a ref keyed on the page.
+   */
+  const twice = build([{ id: 'p5', sourceId: ANCHOR, sourceEvent: 'onLoad', steps: [{ targetId: OUT, action: 'increment', amount: 1 }] }]);
+  runPageLoadWorkflows(twice);
+  runPageLoadWorkflows(twice);
+  check('calling it twice really does run it twice, so the caller must guard', twice.get(blockRuntimeAtom(OUT)).value, 2);
+
+  // It is a trigger like any other, so conditions work on it.
+  const gated = build([{
+    id: 'p6', sourceId: ANCHOR, sourceEvent: 'onLoad',
+    steps: [{
+      targetId: OUT, action: 'set', value: 5,
+      condition: { fieldId: '', operator: 'equals', expression: '1 > 2' },
+      elseAction: 'set', elseTargetId: OUT, elseValue: 3,
+    }],
+  }]);
+  runPageLoadWorkflows(gated);
+  check('a page-load workflow obeys its conditions', gated.get(blockRuntimeAtom(OUT)).value, 3);
+}
+
+group('the wire sentence says what a page-load wire does');
+{
+  // "When Submit the page opens" is nonsense, and the source block genuinely
+  // does not matter for onLoad -- it only anchors the workflow.
+  check('a normal wire names its source',
+    wireSentence({ sourceName: 'Submit', targetName: 'Submissions', event: 'onClick', action: 'addRow' }),
+    'When Submit is pressed → add a row to Submissions');
+  check('a page-load wire drops it',
+    wireSentence({ sourceName: 'Submit', targetName: 'Total', event: 'onLoad', action: 'set' }),
+    'When the page opens → set Total');
+  // The popup builds its sentence before the workflow exists, from a checkbox.
+  check('the popup spelling agrees with the saved spelling',
+    wireSentence({ sourceName: 'Submit', targetName: 'Total', event: 'onClick', action: 'set', pageLoad: true }),
+    wireSentence({ sourceName: 'Submit', targetName: 'Total', event: 'onLoad', action: 'set' }));
+  check('and it still admits to being conditional',
+    wireSentence({ sourceName: 'x', targetName: 'Total', event: 'onLoad', action: 'set', conditional: true }),
+    'When the page opens → set Total, but only sometimes');
 }
 
 say(`\n${passed} passed, ${failed} failed`);

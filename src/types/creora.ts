@@ -109,7 +109,21 @@ export interface WorkflowStep {
   elseAmount?: number;
 }
 
-export type TriggerEvent = 'onClick' | 'onChange' | 'onTick' | 'onComplete';
+/**
+ * `onLoad` is the page opening, and it is the last of the four primitives the
+ * record named as missing -- `when a value changes`, `for each row`, `on page
+ * load`, `every N seconds`. The other three arrived; this one was recorded as
+ * closed by the Live Data block, which was an overclaim: that block refreshes
+ * ITSELF on open and on a timer. Nothing else on the page could run when the
+ * page opened, so a page could not set itself up, greet a visitor, or decide
+ * what to show before being touched.
+ *
+ * A workflow still hangs off a source block, because the whole engine is built
+ * that way and inventing a page-shaped trigger source would mean a second kind
+ * of workflow. The block simply anchors it: "when the page opens -> set Total
+ * to 0" is a workflow whose source happens to be Total.
+ */
+export type TriggerEvent = 'onClick' | 'onChange' | 'onTick' | 'onComplete' | 'onLoad';
 
 export interface Workflow {
   id: string;

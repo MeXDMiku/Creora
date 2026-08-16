@@ -56,6 +56,7 @@ const EVENT_WORDS: Record<string, string> = {
   onChange: 'changes',
   onTick: 'ticks',
   onComplete: 'reaches zero',
+  onLoad: 'the page opens',
 };
 
 /** "is pressed", "changes". Falls back to something readable rather than the raw name. */
@@ -97,6 +98,11 @@ export interface WireSentenceParts {
   action: string;
   /** Set when the action is only conditional, so the sentence can admit it. */
   conditional?: boolean;
+  /**
+   * The popup's live sentence is built before the workflow exists, so it has a
+   * checkbox rather than a saved `event`. Treated exactly as `event: 'onLoad'`.
+   */
+  pageLoad?: boolean;
 }
 
 /**
@@ -111,6 +117,11 @@ export function wireSentence(parts: WireSentenceParts): string {
   const source = (parts.sourceName || 'this').trim() || 'this';
   const target = (parts.targetName || 'that').trim() || 'that';
   const sentence =
-    'When ' + source + ' ' + eventWords(parts.event) + ' → ' + actionWords(parts.action) + ' ' + target;
+    // "When Submit the page opens" reads as nonsense, and the source block is
+    // genuinely irrelevant for onLoad -- it only anchors the workflow. So the
+    // sentence drops it rather than printing something no one would say.
+    parts.event === 'onLoad' || parts.pageLoad
+      ? 'When the page opens → ' + actionWords(parts.action) + ' ' + target
+      : 'When ' + source + ' ' + eventWords(parts.event) + ' → ' + actionWords(parts.action) + ' ' + target;
   return parts.conditional ? sentence + ', but only sometimes' : sentence;
 }
