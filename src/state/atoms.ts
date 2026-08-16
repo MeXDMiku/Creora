@@ -1,7 +1,7 @@
 import { atom } from 'jotai';
 import { atomFamily } from 'jotai/utils';
 import type { Workflow, FormulaBinding, PageSummary, BlockRuntimeState } from '../types/creora';
-import { nodeTypeFromBlockId, defaultValueForNodeType, defaultRuntimeForNodeType, shortBlockId, isBlockNodeType } from '../lib/blockRegistry';
+import { nodeTypeFromBlockId, defaultValueForNodeType, defaultRuntimeForNodeType, shortBlockId, isBlockNodeType, BLOCK_DISPLAY_NAMES, type BlockNodeType } from '../lib/blockRegistry';
 import type { BlockPlacement } from '../lib/layout';
 
 /**
@@ -15,25 +15,16 @@ export function getBlockDefaultValue(identifier: string): any {
 }
 
 export function getBlockTypeDisplayName(nodeType: string): string {
-  const type = nodeType.toLowerCase();
-  if (type.includes('button')) return 'Button';
-  if (type.includes('number')) return 'Number Display';
-  if (type.includes('toggle')) return 'Toggle';
-  if (type.includes('input')) return 'Input';
-  if (type.includes('text') || type.includes('label')) return 'Text Label';
-  if (type.includes('formula')) return 'Formula';
-  if (type.includes('timer')) return 'Timer';
-  if (type.includes('history') || type.includes('chart')) return 'History Chart';
-  if (type.includes('database')) return 'Database';
-  if (type.includes('list')) return 'List';
-  if (type.includes('visitor')) return 'Visitor';
-  if (type.includes('customhtml')) return 'My Design';
-  if (type.includes('datasource')) return 'Live Data';
-  if (type.includes('pagevalue')) return 'Page value';
-  if (type.includes('repeat')) return 'For each row';
-  if (type.includes('image')) return 'Image';
-  if (type.includes('shape')) return 'Shape';
-  return 'Block';
+  /**
+   * One table, in the registry. This was seventeen `type.includes(...)` tests
+   * ending in `return 'Block'` -- so a block type added without a line here was
+   * called "Block" everywhere, silently. Same shape as the .creora exporter
+   * that wrote six types as plain text.
+   *
+   * Still tolerant of an unknown string, because callers pass ids and legacy
+   * names through here; it just cannot be silently incomplete for a REAL type.
+   */
+  return BLOCK_DISPLAY_NAMES[nodeType as BlockNodeType] || 'Block';
 }
 
 export function isGarbageName(name: string | undefined | null): boolean {

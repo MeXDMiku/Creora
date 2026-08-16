@@ -413,3 +413,36 @@ export function nodeTypeFromPortableType(
   if (portableType === 'number' && hasFormula) return 'formulaDisplayBlock';
   return NODE_TYPE_BY_PORTABLE_TYPE[portableType] ?? null;
 }
+
+
+/**
+ * What a block is called on screen.
+ *
+ * Was a chain of seventeen `type.includes('button')` tests ending in
+ * `return 'Block'`, which is the same shape as the .creora exporter: a
+ * hand-written list of seventeen that a new block type silently falls out of.
+ * Add a type without a line here and every dropdown, label and inspector header
+ * called it "Block" -- no error, no clue, just a page full of blocks all named
+ * the same thing.
+ *
+ * Record<BlockNodeType, string> refuses to compile with one missing.
+ */
+export const BLOCK_DISPLAY_NAMES: Record<BlockNodeType, string> = {
+  buttonBlock: 'Button',
+  numberDisplayBlock: 'Number Display',
+  toggleBlock: 'Toggle',
+  inputBlock: 'Input',
+  textLabelBlock: 'Text Label',
+  formulaDisplayBlock: 'Formula',
+  timerBlock: 'Timer',
+  historyChartBlock: 'History Chart',
+  databaseBlock: 'Database',
+  listBlock: 'List',
+  shapeBlock: 'Shape',
+  dataSourceBlock: 'Live Data',
+  customHtmlBlock: 'My Design',
+  visitorBlock: 'Visitor',
+  imageBlock: 'Image',
+  repeatBlock: 'For each row',
+  pageValueBlock: 'Page value',
+};

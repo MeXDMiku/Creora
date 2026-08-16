@@ -6,6 +6,7 @@ import { computeDatabaseOutput } from './databaseOutput';
 import { validateValue } from './validation';
 // Re-exported so every existing import of evaluateCondition from this file
 // keeps working. The definition now lives in conditions.ts.
+import { nodeTypeFromBlockId } from './blockRegistry';
 import { evaluateCondition } from './conditions';
 import { evaluateExpression, truthy, type FormulaValue } from './formula';
 export { evaluateCondition };
@@ -1126,7 +1127,17 @@ export function recalculateAllFormulas(store: any, options?: { propagate?: boole
 
   // 3. Update all History Chart blocks
   for (const blockId of allBlockIds) {
-    if (blockId.toLowerCase().includes('chart') || blockId.toLowerCase().includes('history')) {
+    /**
+     * Through the registry, not by substring-matching the id.
+     *
+     * This is the bug the registry was created to kill, still living here:
+     * "block type was inferred by substring-matching the ID (id.includes('db')),
+     * so an ID was secretly carrying type information". A random suffix can
+     * contain letters -- the fallback id generator is base36 -- so a Button
+     * born as `buttonBlock__ch4rtx1a2b` was one unlucky draw away from having
+     * its history quietly rewritten by the chart code.
+     */
+    if (nodeTypeFromBlockId(blockId) === 'historyChartBlock') {
       const chartAtom = blockRuntimeAtom(blockId);
       const chartState = store.get(chartAtom);
       const trackedId = chartState?.trackedBlockId;
@@ -1189,7 +1200,9 @@ export function recalculateAllFormulas(store: any, options?: { propagate?: boole
 
   // 4. Update all List blocks from Supabase
   for (const blockId of allBlockIds) {
-    if (blockId.toLowerCase().includes('list')) {
+    // Same reason as above. `listBlock` is also the shortest of the words this
+    // used to match on, so it was the likeliest to be hit by accident.
+    if (nodeTypeFromBlockId(blockId) === 'listBlock') {
       const listAtom = blockRuntimeAtom(blockId);
       const listState = store.get(listAtom);
       const trackedId = listState?.trackedBlockId;

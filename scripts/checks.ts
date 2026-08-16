@@ -40,6 +40,7 @@ import {
   FIELD_TYPES,
 } from '../src/lib/fields';
 import { withoutVisitorState, isBlockNodeType, BLOCK_NODE_TYPES, portableTypeFromNodeType, nodeTypeFromPortableType, nodeTypeFromBlockId } from '../src/lib/blockRegistry';
+import { getBlockTypeDisplayName } from '../src/state/atoms';
 import { remapBlockIds, shouldRemapOnImport, remapFormulaExpression } from '../src/lib/remapBlockIds';
 import { evaluateExpression, FORMULA_FUNCTION_NAMES } from '../src/lib/formula';
 import { stepConditionResult, formulaScope, recalculateAllFormulas, runPageLoadWorkflows } from '../src/lib/bindingEngine';
@@ -2178,6 +2179,75 @@ group('nobody has hand-written the block list again');
   const appSource = readFileSync('src/App.tsx', 'utf8');
   check('the exporter asks the registry what to call a block', appSource.includes('portableTypeFromNodeType('), true);
   check('and the importer asks it back', appSource.includes('nodeTypeFromPortableType('), true);
+
+  /**
+   * No block type inferred by substring-matching an id.
+   *
+   * The registry's own header names this as the bug it was created to kill:
+   * "block type was inferred by substring-matching the ID (id.includes('db')),
+   * so an ID was secretly carrying type information". It capped every page at
+   * two blocks and turned a Button into a Database. It was still alive in
+   * recalculateAllFormulas on 16 Aug, matching `id.includes('list')` and
+   * `id.includes('chart')` -- and the fallback id generator is base36, so the
+   * letters really can turn up.
+   *
+   * Only block-type words count. `id.includes('__')` is checking an id's SHAPE,
+   * which is a different and legitimate thing, and diagnose.ts does exactly
+   * that.
+   */
+  const TYPE_WORDS = [
+    'button', 'btn', 'number', 'num', 'toggle', 'tgl', 'input', 'inp',
+    'label', 'lbl', 'formula', 'frm', 'timer', 'tmr', 'chart', 'history',
+    // 'list' and 'db' were left out of the first version of this list, which is
+    // almost funny: they are the exact two words the historical bugs used --
+    // `id.includes('db')` turned a Button into a Database, and
+    // `id.includes('list')` was still live in the engine this morning. The
+    // negative control put the substring back, the guard stayed green, and that
+    // is the only reason the hole was found.
+    'list', 'db', 'database', 'shape', 'shp', 'visitor', 'image', 'repeat',
+    'pagevalue', 'customhtml', 'datasource',
+  ];
+  /**
+   * Comments are stripped first.
+   *
+   * The first version flagged atoms.ts for the comment that DOCUMENTS this very
+   * bug -- "a random suffix can contain any letters, so `id.includes('db')`
+   * matched by accident". A guard that fires on the explanation of the thing it
+   * guards against is a guard somebody deletes, and today's other over-broad
+   * regex was reverted for the same reason.
+   */
+  const withoutComments = (text: string) =>
+    text
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      // Not after a colon, so an https:// inside a string does not eat the line.
+      .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+
+  const guessers: string[] = [];
+  for (const file of files) {
+    if (file.endsWith('lib/blockRegistry.ts')) continue; // the documented legacy fallback
+    const text = withoutComments(readFileSync(file, 'utf8'));
+    for (const word of TYPE_WORDS) {
+      // `.includes('list')` on its own is not enough -- 'list' appears in plenty
+      // of honest strings. It has to be applied to something id-shaped.
+      const pattern = new RegExp(`\\b(?:\\w*[iI]d|typeName|nodeType)\\b[^;\\n]{0,40}\\.includes\\(\\s*'${word}'`);
+      if (pattern.test(text)) { guessers.push(`${file} (${word})`); break; }
+    }
+  }
+  check('no block type is guessed from a substring of an id', guessers, []);
+
+  /**
+   * And every block type has a name on screen. This was a seventeen-branch
+   * includes() chain ending in 'Block', so a new type was called "Block"
+   * everywhere with no error.
+   */
+  const named = BLOCK_NODE_TYPES.filter(t => {
+    const shown = getBlockTypeDisplayName(t);
+    return shown && shown !== 'Block';
+  });
+  check('every block type has a display name', named.length, BLOCK_NODE_TYPES.length);
+  check('and no two blocks answer to the same name',
+    new Set(BLOCK_NODE_TYPES.map(t => getBlockTypeDisplayName(t))).size, BLOCK_NODE_TYPES.length);
+  check('something that is not a block type is still tolerated', getBlockTypeDisplayName('whatever'), 'Block');
 }
 
 
