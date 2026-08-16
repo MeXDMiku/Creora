@@ -7,6 +7,7 @@ import { validateValue } from './validation';
 // Re-exported so every existing import of evaluateCondition from this file
 // keeps working. The definition now lives in conditions.ts.
 import { nodeTypeFromBlockId } from './blockRegistry';
+import { rowIndexesForStep } from './rows';
 import { evaluateCondition } from './conditions';
 import { evaluateExpression, truthy, type FormulaValue } from './formula';
 export { evaluateCondition };
@@ -571,35 +572,29 @@ export function executeWorkflow(
             }
           }
 
-          const colDef = columns.find((c: any) => c.name === matchCol);
-          let parsedMatchVal = matchVal;
-          if (colDef) {
-            if (colDef.type === 'number') {
-              parsedMatchVal = Number(matchVal);
-            } else if (colDef.type === 'boolean') {
-              parsedMatchVal = matchVal === 'true' || matchVal === true;
-            } else {
-              parsedMatchVal = String(matchVal === undefined || matchVal === null ? '' : matchVal);
-            }
-          }
+          /**
+           * One matcher, in rows.ts. These thirty-five lines existed twice --
+           * once here and once in the other row action -- including the type
+           * coercion, which is the half that must not drift: get it wrong on
+           * one side and a delete removes nothing while an update changes the
+           * wrong row.
+           */
+          const matchedIndexes = rowIndexesForStep(
+            currentRows, columns, matchCol, matchVal, step.applyToAll
+          );
+          if (!matchedIndexes.length) break;
 
-          const matchedRowIndex = currentRows.findIndex((row: any) => {
-            let rowVal = row[matchCol];
-            if (colDef?.type === 'number') {
-              rowVal = Number(rowVal);
-            } else if (colDef?.type === 'boolean') {
-              rowVal = rowVal === 'true' || rowVal === true;
-            } else {
-              rowVal = String(rowVal === undefined || rowVal === null ? '' : rowVal);
-            }
-            return rowVal === parsedMatchVal;
-          });
-
-          if (matchedRowIndex === -1) break;
-
-          // Found row, let's construct updated row data
-          const matchedRow = currentRows[matchedRowIndex];
-          const updatedRowData = { ...matchedRow };
+          /**
+           * The mapped columns on their own, not merged onto a particular row.
+           *
+           * This used to start as `{ ...matchedRow }`, which was fine while only
+           * one row could ever change. Applying that to several rows would copy
+           * the FIRST match's untouched columns over all the others -- so
+           * "mark everything as read" would also overwrite every name with the
+           * first person's name. The changes have to be separable from the row
+           * they were first computed against.
+           */
+          const columnChanges: Record<string, any> = {};
 
           columns.forEach((col: any) => {
             const mapping = step.mappings?.[col.name];
@@ -634,11 +629,19 @@ export function executeWorkflow(
               evaluatedValue = String(evaluatedValue === undefined || evaluatedValue === null ? '' : evaluatedValue);
             }
 
-            updatedRowData[col.name] = evaluatedValue;
+            columnChanges[col.name] = evaluatedValue;
           });
 
+          /**
+           * The same mapping applied to every matched row when asked, so
+           * "mark everything as read" is one press instead of one per row.
+           * The mapping is worked out once above -- it does not depend on which
+           * row is being changed -- and only the merge is repeated.
+           */
           const updatedRows = [...currentRows];
-          updatedRows[matchedRowIndex] = updatedRowData;
+          for (const idx of matchedIndexes) {
+            updatedRows[idx] = { ...currentRows[idx], ...columnChanges };
+          }
 
           let nextValue = 0;
           nextValue = computeDatabaseOutput(updatedRows, targetState);
@@ -659,9 +662,13 @@ export function executeWorkflow(
                   return;
                 }
 
-                const matchedDbRow = dbRows?.find((r: any) => r.id === matchedRow.id);
-                const currentData = matchedDbRow?.row_data || {};
-                const mergedData = { ...currentData };
+                /**
+                 * Every row the step matched, each merged onto its OWN stored
+                 * data. Merging them all onto the first row's stored data would
+                 * copy that row's untouched columns across the rest.
+                 */
+                const wantedIds = matchedIndexes.map((i: number) => currentRows[i]?.id);
+                const serverChanges: Record<string, any> = {};
 
                 columns.forEach((col: any) => {
                   const mapping = step.mappings?.[col.name];
@@ -696,20 +703,25 @@ export function executeWorkflow(
                     evaluatedValue = String(evaluatedValue === undefined || evaluatedValue === null ? '' : evaluatedValue);
                   }
 
-                  mergedData[col.name] = evaluatedValue;
+                  serverChanges[col.name] = evaluatedValue;
                 });
 
-                // Write merged object back to Supabase using row ID
-                supabase
-                  .rpc('update_database_row', {
-                    p_id: matchedRow.id,
-                    p_row_data: mergedData
-                  })
-                  .then(({ error: updateError }: any) => {
-                    if (updateError) {
-                      console.warn('[Supabase execute info]: Could not update row via workflow action.', updateError.message);
-                    }
-                  });
+                // One write per matched row, each merged onto that row's own
+                // stored data so untouched columns keep their own values.
+                for (const rowId of wantedIds) {
+                  const dbRow = dbRows?.find((r: any) => r.id === rowId);
+                  const mergedData = { ...(dbRow?.row_data || {}), ...serverChanges };
+                  supabase
+                    .rpc('update_database_row', {
+                      p_id: rowId,
+                      p_row_data: mergedData
+                    })
+                    .then(({ error: updateError }: any) => {
+                      if (updateError) {
+                        console.warn('[Supabase execute info]: Could not update row via workflow action.', updateError.message);
+                      }
+                    });
+                }
               });
           } catch (err) {
             console.error('Error updating row in Supabase via workflow:', err);
@@ -735,34 +747,29 @@ export function executeWorkflow(
             }
           }
 
-          const colDef = columns.find((c: any) => c.name === matchCol);
-          let parsedMatchVal = matchVal;
-          if (colDef) {
-            if (colDef.type === 'number') {
-              parsedMatchVal = Number(matchVal);
-            } else if (colDef.type === 'boolean') {
-              parsedMatchVal = matchVal === 'true' || matchVal === true;
-            } else {
-              parsedMatchVal = String(matchVal === undefined || matchVal === null ? '' : matchVal);
-            }
-          }
+          /**
+           * One matcher, in rows.ts. These thirty-five lines existed twice --
+           * once here and once in the other row action -- including the type
+           * coercion, which is the half that must not drift: get it wrong on
+           * one side and a delete removes nothing while an update changes the
+           * wrong row.
+           */
+          const matchedIndexes = rowIndexesForStep(
+            currentRows, columns, matchCol, matchVal, step.applyToAll
+          );
+          if (!matchedIndexes.length) break;
 
-          const matchedRowIndex = currentRows.findIndex((row: any) => {
-            let rowVal = row[matchCol];
-            if (colDef?.type === 'number') {
-              rowVal = Number(rowVal);
-            } else if (colDef?.type === 'boolean') {
-              rowVal = rowVal === 'true' || rowVal === true;
-            } else {
-              rowVal = String(rowVal === undefined || rowVal === null ? '' : rowVal);
-            }
-            return rowVal === parsedMatchVal;
-          });
-
-          if (matchedRowIndex === -1) break;
-
-          const targetRow = currentRows[matchedRowIndex];
-          const updatedRows = currentRows.filter((_, idx) => idx !== matchedRowIndex);
+          /**
+           * Every matched row when the step says so, otherwise just the first.
+           *
+           * "Delete all completed", "clear the cart", "remove everything from
+           * this person" were not sayable at all: the action found one row with
+           * findIndex and stopped. Pressing the button ten times was the
+           * workaround, and it only worked if you knew to.
+           */
+          const doomed = new Set(matchedIndexes);
+          const targetRows = matchedIndexes.map(i => currentRows[i]);
+          const updatedRows = currentRows.filter((_: any, idx: number) => !doomed.has(idx));
 
           let nextValue = 0;
           nextValue = computeDatabaseOutput(updatedRows, targetState);
@@ -773,15 +780,19 @@ export function executeWorkflow(
             value: nextValue
           });
 
-          // Delete from Supabase
+          // Delete from Supabase. One call per row, because delete_database_row
+          // takes one id -- a failure on any of them leaves the others deleted,
+          // which is why each reports separately rather than as one outcome.
           try {
-            supabase
-              .rpc('delete_database_row', { p_id: targetRow.id })
-              .then(({ error }: any) => {
-                if (error) {
-                  console.warn('[Supabase execute info]: Could not delete row via workflow action, falling back to local state.', error.message);
-                }
-              });
+            for (const row of targetRows) {
+              supabase
+                .rpc('delete_database_row', { p_id: row.id })
+                .then(({ error }: any) => {
+                  if (error) {
+                    console.warn('[Supabase execute info]: Could not delete row via workflow action, falling back to local state.', error.message);
+                  }
+                });
+            }
           } catch (err) {
             console.error('Error deleting row in Supabase via workflow:', err);
           }

@@ -243,3 +243,81 @@ export function slotNamesFor(state?: BlockRuntimeState): string[] {
   const columns = (state?.columns || []).map((c) => c.name).filter(Boolean);
   return [...columns, 'Row number', 'Row id'];
 }
+
+/**
+ * Which rows a workflow step is talking about.
+ *
+ * WHY THIS IS HERE AND NOT WRITTEN TWICE
+ * `updateRow` and `deleteRow` each carried their own copy of this -- about
+ * thirty-five identical lines: read the match column, coerce the wanted value
+ * by that column's declared type, coerce each row's cell the same way, compare.
+ * Two copies of a comparison is how "equals" ends up meaning two different
+ * things, and this codebase has already paid for that: the editor and the
+ * published renderer drifted apart five separate times, every one of them a
+ * duplicated code path that got fixed on one side only.
+ *
+ * The coercion is the part that must not drift. A column declared `number`
+ * compares numerically, so row "10" matches a typed 10; a `boolean` column
+ * treats the string "true" as true, because that is what a fixed value from a
+ * text field arrives as. Get that wrong on one side and a delete silently
+ * removes nothing while an update silently changes the wrong row.
+ */
+export interface ColumnDef {
+  name: string;
+  type?: string;
+}
+
+/** Coerce one value the way this column's declared type says to. */
+export function coerceForColumn(value: any, column: ColumnDef | undefined): any {
+  if (!column) return value;
+  if (column.type === 'number') return Number(value);
+  if (column.type === 'boolean') return value === 'true' || value === true;
+  return String(value === undefined || value === null ? '' : value);
+}
+
+/**
+ * Every row whose match column equals the wanted value, in table order.
+ *
+ * Returns indexes rather than rows because both callers need to rebuild the
+ * array around them -- one replaces an entry, the other removes entries -- and
+ * an index is the only thing that identifies a row when two rows are identical.
+ *
+ * Order matters and is the table's own. A caller deleting several rows has to
+ * walk it backwards, and it can only do that safely if the order is defined.
+ */
+export function matchingRowIndexes(
+  rows: Record<string, any>[] | undefined | null,
+  columns: ColumnDef[] | undefined | null,
+  matchColumn: string | undefined | null,
+  wantedValue: any,
+): number[] {
+  if (!rows || !rows.length || !matchColumn) return [];
+  const column = (columns || []).find(c => c.name === matchColumn);
+  const wanted = coerceForColumn(wantedValue, column);
+
+  const out: number[] = [];
+  rows.forEach((row, index) => {
+    if (coerceForColumn(row[matchColumn], column) === wanted) out.push(index);
+  });
+  return out;
+}
+
+/**
+ * The indexes a step should act on: the first match, or all of them.
+ *
+ * Separate from the matching itself so the DEFAULT is visible and checkable.
+ * Acting on every row has to be opt-in -- a step built before this existed
+ * changed exactly one row, and quietly turning that into "all of them" would
+ * rewrite people's data the next time they pressed a button they had already
+ * been pressing for weeks.
+ */
+export function rowIndexesForStep(
+  rows: Record<string, any>[] | undefined | null,
+  columns: ColumnDef[] | undefined | null,
+  matchColumn: string | undefined | null,
+  wantedValue: any,
+  applyToAll?: boolean,
+): number[] {
+  const all = matchingRowIndexes(rows, columns, matchColumn, wantedValue);
+  return applyToAll ? all : all.slice(0, 1);
+}

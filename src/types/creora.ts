@@ -96,6 +96,20 @@ export interface WorkflowStep {
    * wants a draft row written from a half-filled form can have one.
    */
   requireValid?: boolean;
+  /**
+   * Act on every matching row rather than only the first.
+   *
+   * updateRow and deleteRow both found one row with findIndex and stopped, so
+   * "delete all completed", "clear the cart" and "mark everything as read" were
+   * not sayable -- pressing the button repeatedly was the workaround, and it
+   * only worked if you knew to.
+   *
+   * Off by default and it must stay that way: a step saved before this existed
+   * changed exactly one row, and turning that into "all of them" would rewrite
+   * data the next time somebody pressed a button they had been pressing for
+   * weeks.
+   */
+  applyToAll?: boolean;
   /** Where a sendWebhook step posts to. */
   webhookUrl?: string;
   // --- Otherwise: what to do when the conditions do NOT pass ---

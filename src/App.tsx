@@ -406,6 +406,8 @@ function ConnectionPopup({ editor }: { editor: any }) {
   const [matchColumn, setMatchColumn] = useState<string>('')
   const [matchValueSource, setMatchValueSource] = useState<'fixed' | 'block'>('fixed')
   const [matchValueVal, setMatchValueVal] = useState<string>('')
+  // Off by default, and it has to stay that way -- see WorkflowStep.applyToAll.
+  const [applyToAll, setApplyToAll] = useState(false)
 
   useEffect(() => {
     if (isDatabaseBlock && databaseColumns.length > 0) {
@@ -595,6 +597,7 @@ function ConnectionPopup({ editor }: { editor: any }) {
         // no mappings, no match column — it just takes the table as it stands
       } else if (action === 'updateRow' || action === 'deleteRow') {
         stepStep.matchColumn = matchColumn
+        if (applyToAll) stepStep.applyToAll = true
         stepStep.matchValue = {
           source: matchValueSource,
           value: matchValueVal || (canvasBlocks[0]?.id || '')
@@ -907,6 +910,22 @@ function ConnectionPopup({ editor }: { editor: any }) {
                 <option value="block">From block</option>
               </select>
             </div>
+
+            {/*
+              The whole reason "delete all completed" and "mark everything as
+              read" were impossible: the action found one row and stopped.
+              Worded as what it does rather than as a flag name, and it says how
+              many it currently matches so nobody finds out by pressing it.
+            */}
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: 500, color: '#475569', cursor: 'pointer', marginTop: '2px' }}>
+              <input
+                type="checkbox"
+                checked={applyToAll}
+                onChange={(e) => setApplyToAll(e.target.checked)}
+                style={{ cursor: 'pointer' }}
+              />
+              {action === 'deleteRow' ? 'Remove every matching row' : 'Change every matching row'}
+            </label>
 
             {matchValueSource === 'fixed' ? (
               <input

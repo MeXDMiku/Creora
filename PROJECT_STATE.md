@@ -1613,3 +1613,28 @@ d:/A/src/
 └── types/
     └── creora.ts           # Typescript interfaces defining Creora models (Blocks, Pages, Workflows, style attributes).
 ```
+
+## Driving the app from the browser console (16 Aug)
+
+Import the app's OWN jotai, not a bare specifier:
+
+    const res = performance.getEntriesByType('resource').map(e => e.name);
+    const jotai = await import([...new Set(res.filter(n => n.includes('jotai') && n.includes('deps')))][0]);
+
+Vite serves optimised deps with a `?v=<hash>` query. `import('/node_modules/.vite/deps/jotai.js')`
+without it loads a SECOND jotai, and a store made by that one is invisible to
+the engine -- `stepConditionResult` reported `actual 0` for a value just
+written. Half an hour was spent believing the product was broken.
+
+**Check the instrument before believing any result:**
+
+    const probe = jotai.createStore();
+    probe.set(atoms.allBlockIdsAtom, [ID]);
+    probe.set(atoms.blockRuntimeAtom(ID), { value: 7, visible: true, disabled: false, loading: false, error: null });
+    if (eng.formulaScope(probe)[ID] !== 7) throw new Error('INSTRUMENT BROKEN');
+
+Also: a tab left open across edits accumulates HMR module generations. When in
+doubt, open a fresh tab rather than reloading.
+
+This joins the `visibilityState` override and the 390px same-origin iframe as
+things that were previously "cannot be checked from here".

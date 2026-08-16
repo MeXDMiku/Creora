@@ -46,7 +46,7 @@ import { evaluateExpression, FORMULA_FUNCTION_NAMES } from '../src/lib/formula';
 import { stepConditionResult, formulaScope, recalculateAllFormulas, runPageLoadWorkflows, fetchListBlockRows, shouldFetchListRows } from '../src/lib/bindingEngine';
 import { safeUrl, isSafeUrlValue, schemeOf, stripIgnorable } from '../src/lib/urls';
 import { fillSlots, leadingSlotName, findSlots as findSlotsForCheck } from '../src/lib/sanitizeHtml';
-import { visibleRows, rowSlots, compareCells, slotNamesFor, rowMatchesSearch, MAX_RENDERED_ROWS } from '../src/lib/rows';
+import { visibleRows, rowSlots, compareCells, slotNamesFor, rowMatchesSearch, MAX_RENDERED_ROWS, rowIndexesForStep, coerceForColumn } from '../src/lib/rows';
 import {
   parseSlot,
   applyFilters,
@@ -3162,6 +3162,63 @@ group('one click does not cost one query per link of the chain');
   const engineSource = readFileSync('src/lib/bindingEngine.ts', 'utf8');
   check('and the call site actually asks the policy',
     /shouldFetchListRows\(chainDepth\)/.test(engineSource), true);
+}
+
+group('a row action can act on every matching row');
+{
+  /**
+   * updateRow and deleteRow both found ONE row with findIndex and stopped, so
+   * "delete all completed", "clear the cart" and "mark everything as read" were
+   * not sayable. Pressing the button repeatedly was the workaround, and it only
+   * worked if you knew to.
+   */
+  const columns = [{ name: 'Name', type: 'text' }, { name: 'Done', type: 'boolean' }, { name: 'Score', type: 'number' }];
+  const rows = [
+    { id: 'r1', Name: 'Ada', Done: true, Score: 10 },
+    { id: 'r2', Name: 'Grace', Done: false, Score: 20 },
+    { id: 'r3', Name: 'Katherine', Done: true, Score: 30 },
+  ];
+
+  check('the first match only, by default', rowIndexesForStep(rows, columns, 'Done', true), [0]);
+  check('every match when asked', rowIndexesForStep(rows, columns, 'Done', true, true), [0, 2]);
+  check('in the table`s own order', rowIndexesForStep(rows, columns, 'Done', true, true)[0] < rowIndexesForStep(rows, columns, 'Done', true, true)[1], true);
+  check('no match is no rows, not row zero', rowIndexesForStep(rows, columns, 'Name', 'Nobody', true), []);
+  check('and nothing at all without a match column', rowIndexesForStep(rows, columns, '', 'x', true), []);
+
+  /**
+   * The coercion is the half that must not drift, and it is why this is one
+   * function rather than the two identical copies it used to be. A fixed value
+   * typed into a text field arrives as the STRING "true"; a number column
+   * compares numerically so "20" finds 20.
+   */
+  check('a boolean column matches the string "true"', rowIndexesForStep(rows, columns, 'Done', 'true', true), [0, 2]);
+  check('a number column matches numeric text', rowIndexesForStep(rows, columns, 'Score', '20', true), [1]);
+  check('a text column compares as text', rowIndexesForStep(rows, columns, 'Name', 'Ada', true), [0]);
+  check('an unknown column matches nothing rather than everything', rowIndexesForStep(rows, columns, 'Nope', '', true), []);
+  check('coercion for a column nobody declared leaves the value alone', coerceForColumn('7', undefined), '7');
+
+  /**
+   * THE TRAP THIS NEARLY SHIPPED WITH.
+   *
+   * The mapped changes used to be built as `{ ...matchedRow }` and then merged,
+   * which is harmless while exactly one row can change. Applied to several rows
+   * it copies the FIRST match's untouched columns over all the others -- so
+   * "mark everything as read" would also have overwritten every name with the
+   * first person's name. The changes have to be separable from the row they
+   * were computed against, and this checks the shape that guarantees it.
+   */
+  const changes = { Done: true };
+  const applied = rows.map((r, i) => (rowIndexesForStep(rows, columns, 'Done', false, true).includes(i) ? { ...r, ...changes } : r));
+  check('updating by mapping keeps each row`s own other columns', applied.map(r => r.Name), ['Ada', 'Grace', 'Katherine']);
+  check('and changes only the mapped column', applied.map(r => r.Done), [true, true, true]);
+  check('and leaves unmapped values alone', applied.map(r => r.Score), [10, 20, 30]);
+
+  // Deleting several has to walk a defined order, or removing one shifts the next.
+  const doomed = new Set(rowIndexesForStep(rows, columns, 'Done', true, true));
+  const survivors = rows.filter((_, i) => !doomed.has(i));
+  check('deleting every match removes exactly those', survivors.map(r => r.id), ['r2']);
+  const oneOnly = new Set(rowIndexesForStep(rows, columns, 'Done', true));
+  check('and the default still removes exactly one', rows.filter((_, i) => !oneOnly.has(i)).map(r => r.id), ['r2', 'r3']);
 }
 
 say(`\n${passed} passed, ${failed} failed`);
