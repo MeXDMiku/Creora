@@ -3294,5 +3294,47 @@ group('the Health panel can see a broken formula condition');
     many.filter(p => p.title.includes('checks a block that is gone')).length, 1);
 }
 
+group('the Health panel does not cry wolf about every formula');
+{
+  /**
+   * referencedIds used to over-collect on purpose, and said so: a false "this
+   * refers to X" was checked against the block list and disappeared if X
+   * existed. That reasoning was sound while a formula could only be block ids,
+   * numbers and `+ - * /`. It stopped being sound the morning formulas got
+   * functions and text -- the same day, hours earlier.
+   *
+   *   if(Stock > 0, "In stock", "Sold out")  ->  if, Stock, In, stock, Sold, out
+   *
+   * Five of six are not blocks, so one good formula produced five "uses a block
+   * that is gone" problems. A guard that cries wolf gets ignored and then
+   * deleted, which costs more than the bug it was watching for.
+   */
+  check('a function name is not a block', referencedIds('round(Price * 0.18, 2)'), ['Price']);
+  check('nor words inside quoted text', referencedIds('if(Stock > 0, "In stock", "Sold out")'), ['Stock']);
+  check('nor a nested function', referencedIds('and(Agreed, not(isBlank(Email)))'), ['Agreed', 'Email']);
+  check('a quoted separator is not a reference', referencedIds('join(" ", First, Last)'), ['First', 'Last']);
+  check('true and blank are values, not blocks', referencedIds('if(true, Price, blank)'), ['Price']);
+  check('single quotes count as text too', referencedIds("if(S == 'paid', A, B)"), ['S', 'A', 'B']);
+
+  // The thing it is actually for still works.
+  check('a real block id is still found', referencedIds('numberDisplayBlock__abc123 + 1'), ['numberDisplayBlock__abc123']);
+  check('two of them', referencedIds('a1 + b2'), ['a1', 'b2']);
+  check('numbers are not references', referencedIds('1 + 2 * 3'), []);
+  check('nothing is nothing', referencedIds(''), []);
+  check('and null does not throw', referencedIds(null), []);
+
+  /**
+   * Callee names are excluded by SHAPE -- `name(` -- rather than by a list of
+   * the known functions. A list would need updating every time a function is
+   * added, and a list of seventeen that silently missed the eighteenth is the
+   * exact failure already paid for twice today. This checks a function that
+   * does not exist is still treated as a call.
+   */
+  check('an unknown function is still recognised as a call, not a block',
+    referencedIds('sparkline(Price)'), ['Price']);
+  check('and spacing before the bracket does not fool it',
+    referencedIds('round (Price)'), ['Price']);
+}
+
 say(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

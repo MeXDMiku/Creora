@@ -54,15 +54,49 @@ function exists(facts: PageFacts, blockId: string | undefined | null): boolean {
 /**
  * The identifiers a formula refers to.
  *
- * Formulas are written against block IDS, not names, so this is a plain scan
- * for anything that looks like a name and is not a number. It over-collects on
- * purpose: a false "this refers to X" is checked against the block list a line
- * later and disappears if X exists.
+ * Formulas are written against block IDS, not names, so this is a scan for
+ * anything that looks like a name and is not a number.
+ *
+ * WHY IT CAN NO LONGER JUST OVER-COLLECT
+ * It used to, deliberately: "a false 'this refers to X' is checked against the
+ * block list a line later and disappears if X exists". That reasoning was sound
+ * while a formula could only be block ids, numbers and `+ - * /`. It stopped
+ * being sound the day formulas got functions and text, which was this morning.
+ *
+ *   if(Stock > 0, "In stock", "Sold out")
+ *     -> if, Stock, In, stock, Sold, out
+ *
+ * Five of those six are not blocks, so the Health panel would report five
+ * "uses a block that is gone" problems for one perfectly good formula. A guard
+ * that cries wolf gets ignored and then deleted, which costs more than the bug
+ * it was watching for.
+ *
+ * So: quoted text is removed first, then anything being CALLED. Callee names
+ * are excluded by the shape `name(` rather than by a list of function names --
+ * a list would need updating every time a function is added, and a list of
+ * seventeen that silently missed the eighteenth is the exact failure this
+ * codebase has paid for twice today.
  */
+const CALLEE = /[A-Za-z_$][A-Za-z0-9_$]*\s*\(/g;
+const QUOTED = /'[^']*'|"[^"]*"/g;
+/** Words a formula understands as values rather than as blocks. */
+const FORMULA_WORDS = new Set(['true', 'false', 'blank', 'empty']);
+
 export function referencedIds(formula: string | null | undefined): string[] {
   const text = formula === null || formula === undefined ? '' : String(formula);
-  const found = text.match(IDENTIFIER) || [];
-  return Array.from(new Set(found));
+
+  // Quoted text is content, never a reference. Removed rather than skipped so
+  // an id appearing inside a string cannot be picked up either.
+  const withoutText = text.replace(QUOTED, ' ');
+
+  const callees = new Set(
+    (withoutText.match(CALLEE) || []).map(m => m.replace(/\s*\($/, '')),
+  );
+
+  const found = withoutText.match(IDENTIFIER) || [];
+  return Array.from(
+    new Set(found.filter(name => !callees.has(name) && !FORMULA_WORDS.has(name.toLowerCase()))),
+  );
 }
 
 export function diagnosePage(facts: PageFacts): Problem[] {
