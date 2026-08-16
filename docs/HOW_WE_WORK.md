@@ -162,6 +162,18 @@ disagree, the audit is right and the queue is stale.
                                       formula, which is what makes "only when
                                       Qty * Price > 500" sayable at all.
 
+    -- The four primitives            ALL FOUR NOW EXIST, 16 Aug.
+                                      `when a value changes` (cycle 12, plus
+                                      formulas today -- they were left out of
+                                      that fix and were a dead end in the chain),
+                                      `for each row` (cycle 3), `every N seconds`
+                                      (Timer + Live Data refresh), and
+                                      `on page load` (today). The last one had
+                                      been recorded as closed by the Live Data
+                                      block, which was an overclaim: that block
+                                      refreshes ITSELF. Nothing else on a page
+                                      could react to the page opening.
+
     1  Status dashboard (Layer 3)     The Operations layer: what exists, what is
                                       published, what is BROKEN and nobody has
                                       noticed. Fell out of this queue during a
