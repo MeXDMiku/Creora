@@ -2155,5 +2155,133 @@ group('nobody has hand-written the block list again');
   check('no second copy of the list as an array', listed, []);
 }
 
+
+// ------------------------------------------------------------ ports you see
+/**
+ * The node system was invisible.
+ *
+ * Every port set its own opacity to 0 unless the pointer happened to be over
+ * that exact block, so the answer to "how would anyone know you can wire these
+ * together?" was: they hover the right ten pixels by accident, or they never
+ * find out. A feature nobody can see is a feature nobody has.
+ *
+ * The floor is set once, in CSS, rather than in fourteen block files -- because
+ * "the same thing, written out by hand in n places" is precisely how three
+ * block types quietly stopped saving. But a shared rule reaching into fourteen
+ * blocks is its own hazard, and these checks are about that hazard: the shared
+ * rule may say how loud a port is and how big a target it is, and it may never
+ * say where a port sits. Ports are NOT positioned the same way -- the
+ * repeater's two are placed from the top with no transform at all, while the
+ * rest are centred with translateY(-50%) -- so one blanket `transform` here
+ * moves half of them sideways off their own edge.
+ *
+ * That was nearly shipped as `transform: scale(1.5)` on hover. It is caught
+ * here now instead of by a person noticing their repeater looks wrong.
+ */
+group('a port is visible before you touch it');
+{
+  /** Every rule in the file, descending into @media rather than tripping on it. */
+  const cssRules = (text: string): Array<{ selector: string; body: string }> => {
+    const src = text.replace(/\/\*[\s\S]*?\*\//g, '');
+    const out: Array<{ selector: string; body: string }> = [];
+    const walk = (s: string) => {
+      let i = 0;
+      let start = 0;
+      while (i < s.length) {
+        if (s[i] === '{') {
+          const selector = s.slice(start, i).trim().replace(/\s+/g, ' ');
+          let depth = 1;
+          let j = i + 1;
+          while (j < s.length && depth > 0) {
+            if (s[j] === '{') depth++;
+            else if (s[j] === '}') depth--;
+            j++;
+          }
+          const body = s.slice(i + 1, j - 1);
+          if (selector.startsWith('@')) walk(body);
+          else out.push({ selector, body });
+          i = j;
+          start = j;
+        } else i++;
+      }
+    };
+    walk(src);
+    return out;
+  };
+
+  const value = (body: string, prop: string): string => {
+    const m = new RegExp(`(?:^|;)\\s*${prop}\\s*:\\s*([^;]+)`).exec(body);
+    return m ? m[1].replace('!important', '').trim() : '';
+  };
+
+  const rules = cssRules(readFileSync('src/index.css', 'utf8')).filter((r) =>
+    /\[data-port-(output|input)\]/.test(r.selector)
+  );
+
+  const atRest = rules.find(
+    (r) => r.selector.includes(':not(.preview-mode)') && !r.selector.includes(':hover')
+  );
+  const hovered = rules.find((r) => r.selector.includes(':hover'));
+  const grabArea = rules.find((r) => r.selector.includes('::before'));
+  const inPreview = rules.find((r) => r.selector.includes('.preview-mode ['));
+  const inDesign = rules.find((r) => r.selector.includes('.design-mode ['));
+
+  check('there is a rule for a port nobody is touching', Boolean(atRest), true);
+  check('there is a rule for a port under the pointer', Boolean(hovered), true);
+  check('there is a rule making a port easier to hit', Boolean(grabArea), true);
+
+  const floor = Number(value(atRest?.body ?? '', 'opacity'));
+  check('ports are visible without hovering', floor > 0, true);
+  check('but quieter than the one being pointed at', floor < 1, true);
+  check('and they can be grabbed', value(atRest?.body ?? '', 'pointer-events'), 'all');
+
+  // Not decoration. A port shown on a published page is a control that does
+  // nothing, and design view is for arranging, not wiring.
+  check('a published page shows no ports', Number(value(inPreview?.body ?? '', 'opacity')), 0);
+  check('design view shows no ports', Number(value(inDesign?.body ?? '', 'opacity')), 0);
+  check('a hovered port says so', /box-shadow/.test(hovered?.body ?? ''), true);
+
+  // The load-bearing pair. Ports disagree about where they sit, so the shared
+  // rule may only ever change how a port LOOKS, never where it is.
+  const positions = /(?:^|;)\s*(top|left|right|bottom|transform|margin)\s*:/;
+  check('the shared rule never positions a port at rest', positions.test(atRest?.body ?? ''), false);
+  check('and hovering never moves it', positions.test(hovered?.body ?? ''), false);
+
+  // 14px of dot. The grab area is what your hand is actually aiming at, and it
+  // is sized here rather than with `inset`, which resolves against the padding
+  // box and so quietly loses the 2px border on every side.
+  check('the target is bigger than the dot', parseFloat(value(grabArea?.body ?? '', 'width')) >= 24, true);
+  check('the target is round, like the dot', value(grabArea?.body ?? '', 'border-radius'), '50%');
+  check('and centred on it', value(grabArea?.body ?? '', 'transform'), 'translate(-50%, -50%)');
+}
+
+group('ports do not agree on where they sit, which is why the rule above exists');
+{
+  const files = readdirSync('src/blocks')
+    .filter((f) => f.endsWith('.tsx'))
+    .map((f) => `src/blocks/${f}`)
+    .filter((f) => readFileSync(f, 'utf8').includes('data-port-'));
+
+  let ports = 0;
+  let centred = 0;
+  for (const file of files) {
+    const text = readFileSync(file, 'utf8');
+    for (const m of text.matchAll(/data-port-(?:output|input)=/g)) {
+      const after = text.slice(m.index ?? 0, (m.index ?? 0) + 900);
+      const style = after.slice(after.indexOf('style={{'));
+      const end = style.indexOf('}}');
+      if (end < 0) continue;
+      ports += 1;
+      if (style.slice(0, end).includes('translateY(-50%)')) centred += 1;
+    }
+  }
+
+  check('there are ports to find', ports > 0, true);
+  // Both sides non-zero is the whole point: the day this stops being true a
+  // transform in the shared rule becomes safe, and not before.
+  check('some ports are centred on their edge', centred > 0, true);
+  check('and some are placed from the top instead', ports - centred > 0, true);
+}
+
 say(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

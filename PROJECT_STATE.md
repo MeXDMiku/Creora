@@ -1511,6 +1511,73 @@ removed, and one port label deleted.
 
 ---
 
+## The ports were invisible — 15 Aug 2026
+
+**The whole node system was hidden behind a hover.**
+
+Every port drew itself at `opacity: 0` unless the pointer happened to be inside
+that particular block. So the answer to *"how does anyone find out these blocks
+can be wired together?"* was: they hover the right ten pixels by accident, or
+they never find out at all. This is the thing Cloudflare gets right and we did
+not — their ports are visible at rest, and that is why the node metaphor teaches
+itself. A feature nobody can see is a feature nobody has.
+
+**What changed**
+
+An opacity floor of `0.4` in action mode, `pointer-events: all`, a ring on
+hover, and a grab area larger than the dot. All of it in `src/index.css`,
+**not** in fourteen block files — the two rules that hide ports in preview and
+design mode already work exactly this way, and "the same thing written by hand
+in n places" is precisely how three block types quietly stopped saving in
+cycle 2.
+
+**Three things the browser said that reading the code did not**
+
+1. **The hit area was 23px, not 28px.** `inset: -7px` resolves against the
+   *padding* box, so the port's 2px border ate two of every seven pixels — and
+   it would have silently shrunk again the day someone thickened that border.
+   Measured with `elementFromPoint`, one pixel at a time, outward from each
+   edge. Now sized and centred explicitly: a real 28px circle on a 14px dot.
+2. **A `transform: scale(1.5)` on hover would have broken the repeater.** Ports
+   do not agree on where they sit — most are centred with `translateY(-50%)`,
+   but `RepeatBlock`'s two are placed from the top with no transform at all, so
+   a blanket transform would have shoved them sideways off their own edge. The
+   shared rule may say how loud a port is and how big a target it is. It may
+   never say where a port sits, and there is now a check saying so.
+3. **A screenshot showed the canvas tiled sixteen times over.** It was not a
+   bug: the tab was in the background and Chrome handed back a stale composite.
+   The DOM said one Button and one table. Worth writing down, because a
+   screenshot of a hidden tab is a convincing-looking lie and I nearly chased
+   it.
+
+**I had recorded the wrong three blocks.** Last cycle's note named
+`CustomHtmlBlock`, `HistoryChartBlock` and `ListBlock` as the ones positioned
+from the top. They have **no ports at all** — the earlier `grep -L` had swept
+in files that never render a port. The danger was real; the names were wrong.
+A comment stating a false constraint is worse than no comment, because the next
+person designs around a wall that is not there. It is corrected, and the fact
+now lives in a check that counts rather than in a sentence that can rot.
+
+**`npm run check` is 621.** Five negative controls, each one going red on
+exactly the check that names it:
+
+| what was broken | what went red |
+| :--- | :--- |
+| the opacity floor put back to `0` | *ports are visible without hovering* |
+| `transform: scale(1.5)` added to the hover rule | *and hovering never moves it* |
+| the grab area shrunk to the size of the dot | *the target is bigger than the dot* |
+| preview mode made to show ports | *a published page shows no ports* |
+| the repeater's ports centred like the rest | *and some are placed from the top instead* |
+
+The first attempt at those controls **reported nothing at all** — `subprocess`
+was given a list with `shell=True`, so it ran `npm` with no arguments and the
+suite never executed. It printed `NOTHING WENT RED -- the check is asleep`
+rather than a row of reassuring ticks, which is the only reason it was noticed.
+Every control asserts its anchor exists before breaking anything, and asserts
+the suite actually ran.
+
+---
+
 ## File Structure Summary
 
 ```

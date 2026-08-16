@@ -169,6 +169,71 @@ div[data-node-view-wrapper][class*="list-block-wrapper"] {
   pointer-events: none !important;
 }
 
+/* ---------------------------------------------------------------------------
+   Ports are visible while wiring, not only on hover.
+
+   They used to appear only when the pointer happened to be over the block, so
+   the entire node system was invisible until somebody hovered the right ten
+   pixels by accident. "How do you know you can drag from a block at all?" had
+   no answer on screen.
+
+   Raised here rather than in seventeen block files: every block sets its port
+   opacity inline, and the two rules above already override exactly that, the
+   same way, for preview and design mode. One more floor is consistent with how
+   this already works; seventeen edits to seventeen files is how three block
+   types went unsaveable.
+
+   Action mode only. In design mode ports are noise, and in preview they are a
+   lie -- neither shows them, which the rules above already handle.
+   --------------------------------------------------------------------------- */
+#editor-container:not(.preview-mode):not(.design-mode) [data-port-output],
+#editor-container:not(.preview-mode):not(.design-mode) [data-port-input] {
+  opacity: 0.4 !important;
+  pointer-events: all !important;
+  transition: opacity 0.15s, transform 0.15s;
+}
+
+#editor-container:not(.preview-mode):not(.design-mode) [data-port-output]:hover,
+#editor-container:not(.preview-mode):not(.design-mode) [data-port-input]:hover {
+  opacity: 1 !important;
+  /*
+     A ring rather than a scale. Ports do not agree on where they sit: most are
+     centred on the block's edge with translateY(-50%), but the repeater's two
+     are placed from the top with no transform at all. A blanket `transform`
+     here would therefore MOVE those, sideways, off the edge they belong to.
+
+     The first version of this rule was `transform: scale(1.5)`. It was caught
+     by counting the ports in every block rather than by assuming they were
+     written the same way -- and the count is now a check, so the next person
+     to reach for a transform here is told, instead of guessing.
+  */
+  box-shadow: 0 0 0 5px rgba(99, 102, 241, 0.28) !important;
+}
+
+/*
+   A fourteen-pixel dot is a hard thing to hit with a mouse and an impossible
+   thing to hit with a trackpad. The dot stays fourteen pixels; what you can
+   grab is twenty-eight. Invisible, and it is the difference between wiring
+   being fiddly and wiring being fine.
+
+   Sized and centred explicitly rather than with `inset: -7px`. Inset resolves
+   against the PADDING box, so the port's 2px border ate two of every seven and
+   the real target measured twenty-three, not twenty-eight -- and it would have
+   silently shrunk again the day someone thickened the border. Measured in the
+   browser with elementFromPoint, which is the only reason this is known at all.
+*/
+#editor-container [data-port-output]::before,
+#editor-container [data-port-input]::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 28px;
+  height: 28px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+}
+
 /* Hide floating metadata labels above blocks when editor-container is in preview-mode */
 #editor-container.preview-mode [class*="-block-wrapper"] > div:first-child {
   opacity: 0 !important;
