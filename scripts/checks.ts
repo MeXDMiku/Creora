@@ -39,7 +39,8 @@ import {
   fieldMeta,
   FIELD_TYPES,
 } from '../src/lib/fields';
-import { withoutVisitorState, isBlockNodeType, BLOCK_NODE_TYPES } from '../src/lib/blockRegistry';
+import { withoutVisitorState, isBlockNodeType, BLOCK_NODE_TYPES, portableTypeFromNodeType, nodeTypeFromPortableType, nodeTypeFromBlockId } from '../src/lib/blockRegistry';
+import { remapBlockIds, shouldRemapOnImport, remapFormulaExpression } from '../src/lib/remapBlockIds';
 import { safeUrl, isSafeUrlValue, schemeOf, stripIgnorable } from '../src/lib/urls';
 import { fillSlots, leadingSlotName, findSlots as findSlotsForCheck } from '../src/lib/sanitizeHtml';
 import { visibleRows, rowSlots, compareCells, slotNamesFor, rowMatchesSearch, MAX_RENDERED_ROWS } from '../src/lib/rows';
@@ -2153,6 +2154,28 @@ group('nobody has hand-written the block list again');
 
   check('no `type === X || type === Y` chains outside the registry', chained, []);
   check('no second copy of the list as an array', listed, []);
+
+  /**
+   * The two places that got away, guarded by name rather than by pattern.
+   *
+   * The .creora exporter and importer each held the list as an `else if` chain
+   * -- 11 of 17 types and 10 of 17 -- and the `||` regex above could not see
+   * either. The obvious repair was to widen the regex to `else if`. That was
+   * tried and reverted: it flagged the published renderer and the style
+   * builder, which branch per block type because rendering genuinely must,
+   * and it would have flagged the action and data-type chains too. A guard
+   * that cries wolf gets deleted, and the first version of the regex above was
+   * already corrected once for exactly this.
+   *
+   * So the real protection is structural and lives in the code, not here:
+   * PORTABLE_TYPE_BY_NODE_TYPE is a Record<BlockNodeType, string>, which
+   * refuses to compile if a block type has no name in the file. This check
+   * only holds the remaining gap -- that these two callers still go through
+   * that table instead of quietly growing a chain again beside it.
+   */
+  const appSource = readFileSync('src/App.tsx', 'utf8');
+  check('the exporter asks the registry what to call a block', appSource.includes('portableTypeFromNodeType('), true);
+  check('and the importer asks it back', appSource.includes('nodeTypeFromPortableType('), true);
 }
 
 
@@ -2281,6 +2304,189 @@ group('ports do not agree on where they sit, which is why the rule above exists'
   // transform in the shared rule becomes safe, and not before.
   check('some ports are centred on their edge', centred > 0, true);
   check('and some are placed from the top instead', ports - centred > 0, true);
+}
+
+
+// -------------------------------------------------- what a .creora file says
+/**
+ * The export format is the one thing a builder is promised is theirs. It was
+ * lossy for six of the seventeen block types and nothing said so.
+ */
+group('a .creora file names every block type');
+{
+  const portable = BLOCK_NODE_TYPES.map(t => portableTypeFromNodeType(t));
+
+  check('every block type has a name in the file', portable.filter(Boolean).length, BLOCK_NODE_TYPES.length);
+  check('and no two share one', new Set(portable).size, BLOCK_NODE_TYPES.length);
+
+  // The bug in one line: these six were all written as 'text'.
+  for (const nodeType of ['imageBlock', 'repeatBlock', 'customHtmlBlock', 'dataSourceBlock', 'pageValueBlock', 'visitorBlock'] as const) {
+    check(`${nodeType} is not exported as plain text`, portableTypeFromNodeType(nodeType) === 'text', false);
+  }
+
+  // A round trip is the only thing that actually matters to a backup.
+  const roundTripped = BLOCK_NODE_TYPES.filter(
+    t => nodeTypeFromPortableType(portableTypeFromNodeType(t)) === t,
+  );
+  check('every block type survives export then import', roundTripped.length, BLOCK_NODE_TYPES.length);
+
+  // Files written before formulaDisplayBlock had a name of its own say
+  // 'number' for both, and only a formula pointing at the block tells them
+  // apart. New files say 'formula' and never take that branch.
+  check('an old file`s number block is a number', nodeTypeFromPortableType('number', false), 'numberDisplayBlock');
+  check('unless a formula targets it', nodeTypeFromPortableType('number', true), 'formulaDisplayBlock');
+  check('a name we do not know is refused, not guessed', nodeTypeFromPortableType('sparkline'), null);
+  check('and so is nothing at all', nodeTypeFromPortableType(undefined), null);
+}
+
+// ------------------------------------------------- an imported copy is a copy
+/**
+ * Rows are keyed by block id and by nothing else, so two pages holding the same
+ * block ids hold the same rows. Import used to keep the ids exactly as it found
+ * them, which made "use my export as a template" silently merge two pages.
+ */
+group('an imported copy does not share the original`s data');
+{
+  const OLD_BTN = 'buttonBlock__aaaaaaaaaa';
+  const OLD_DB = 'databaseBlock__bbbbbbbbbb';
+  const OLD_NUM = 'numberDisplayBlock__cccccccccc';
+  const OLD_INPUT = 'inputBlock__dddddddddd';
+
+  const page = () => ({
+    id: 'page-one',
+    documentContent: {
+      type: 'doc',
+      content: [
+        { type: 'buttonBlock', attrs: { blockId: OLD_BTN, label: 'Submit' } },
+        { type: 'paragraph', content: [{ type: 'text', text: 'hello' }] },
+        { type: 'databaseBlock', attrs: { blockId: OLD_DB } },
+      ],
+    },
+    positions: { [OLD_BTN]: { x: 10, y: 20 }, [OLD_DB]: { x: 30, y: 40 } },
+    runtimeStates: {
+      [OLD_BTN]: { value: 0, blockName: 'Submit' },
+      [OLD_DB]: { value: 0, columns: ['Name'] },
+      [OLD_NUM]: { value: 0, trackedBlockId: OLD_DB },
+      [OLD_INPUT]: { value: '', searchBlockId: OLD_INPUT, sortColumnBlockId: OLD_DB },
+    },
+    connections: [{ id: 'c1', sourceBlockId: OLD_BTN, targetBlockId: OLD_DB }],
+    workflows: [
+      {
+        id: 'w1',
+        sourceId: OLD_BTN,
+        sourceEvent: 'onClick',
+        steps: [
+          {
+            targetId: OLD_DB,
+            action: 'addRow',
+            elseTargetId: OLD_NUM,
+            condition: { fieldId: OLD_INPUT, operator: 'isNotEmpty' },
+            conditions: [{ fieldId: OLD_INPUT, operator: 'isNotEmpty' }],
+            mappings: {
+              Name: { source: 'block', value: OLD_INPUT },
+              Note: { source: 'fixed', value: OLD_INPUT },
+            },
+            matchValue: { source: 'block', value: OLD_INPUT },
+          },
+        ],
+      },
+    ],
+    formulas: [{ id: 'f1', targetBlockId: OLD_NUM, targetProperty: 'value', formula: `${OLD_DB} + 1`, pageId: 'page-one' }],
+    blocks: [{ id: OLD_BTN, type: 'button' }],
+  });
+
+  const { page: copy, idMap } = remapBlockIds(page());
+  const at = (id: string) => idMap[id];
+
+  check('every block got a new identity', Object.keys(idMap).length, 4);
+  check('and none of them kept the old one', Object.values(idMap).some(v => v in idMap), false);
+
+  // The prefix carries the type. Lose it and every block becomes unknown.
+  check('a new id still says what kind of block it is', nodeTypeFromBlockId(at(OLD_BTN)), 'buttonBlock');
+  check('for a database too', nodeTypeFromBlockId(at(OLD_DB)), 'databaseBlock');
+
+  const step = (copy.workflows as any[])[0].steps[0];
+  check('the document node points at the new id', (copy.documentContent as any).content[0].attrs.blockId, at(OLD_BTN));
+  check('and keeps its other attrs', (copy.documentContent as any).content[0].attrs.label, 'Submit');
+  check('text in the document is left alone', (copy.documentContent as any).content[1].content[0].text, 'hello');
+  check('positions are re-keyed', Object.keys(copy.positions as any).sort(), [at(OLD_BTN), at(OLD_DB)].sort());
+  check('runtime states are re-keyed', at(OLD_BTN) in (copy.runtimeStates as any), true);
+  check('a tracked block follows', (copy.runtimeStates as any)[at(OLD_NUM)].trackedBlockId, at(OLD_DB));
+  check('a search box follows', (copy.runtimeStates as any)[at(OLD_INPUT)].searchBlockId, at(OLD_INPUT));
+  check('a sort column follows', (copy.runtimeStates as any)[at(OLD_INPUT)].sortColumnBlockId, at(OLD_DB));
+  check('both ends of a wire follow', [(copy.connections as any)[0].sourceBlockId, (copy.connections as any)[0].targetBlockId], [at(OLD_BTN), at(OLD_DB)]);
+  check('a workflow`s trigger follows', (copy.workflows as any)[0].sourceId, at(OLD_BTN));
+  check('a step`s target follows', step.targetId, at(OLD_DB));
+  check('an otherwise branch follows', step.elseTargetId, at(OLD_NUM));
+  check('the old single condition follows', step.condition.fieldId, at(OLD_INPUT));
+  check('and every one in the list', step.conditions[0].fieldId, at(OLD_INPUT));
+  check('a column fed from a block follows', step.mappings.Name.value, at(OLD_INPUT));
+  check('a match value fed from a block follows', step.matchValue.value, at(OLD_INPUT));
+  check('a formula`s target follows', (copy.formulas as any)[0].targetBlockId, at(OLD_NUM));
+  check('and the ids inside the expression itself', (copy.formulas as any)[0].formula, `${at(OLD_DB)} + 1`);
+  check('the portable blocks array follows', (copy.blocks as any)[0].id, at(OLD_BTN));
+
+  // A fixed value that merely looks like an id is a VALUE. Rewriting it would
+  // corrupt the row a form writes, which is worse than the bug being fixed.
+  check('a fixed value is never mistaken for a reference', step.mappings.Note.value, OLD_INPUT);
+
+  /**
+   * Nothing anywhere in the copy still mentions an old id.
+   *
+   * This is the completeness sweep: the field-by-field checks above only prove
+   * the fields somebody thought of, and a reference missed is a wire pointing
+   * at nothing. Written as a text search rather than a field walk on purpose --
+   * it does not need to know the shape to find a survivor.
+   *
+   * Fixed mapping values are removed first, and only those, because the check
+   * directly above asserts that they are deliberately NOT rewritten. Two
+   * claims, two fixtures, rather than one check quietly loosened until it
+   * passes. This first run genuinely failed and found that survivor.
+   */
+  const sweepable = JSON.parse(JSON.stringify(copy));
+  for (const w of sweepable.workflows ?? []) {
+    for (const st of w.steps ?? []) {
+      for (const [column, m] of Object.entries<any>(st.mappings ?? {})) {
+        if (m?.source === 'fixed') delete st.mappings[column];
+      }
+    }
+  }
+  const asText = JSON.stringify(sweepable);
+  const leftovers = Object.keys(idMap).filter(old => asText.includes(old));
+  check('no old id survives anywhere in the copy', leftovers, []);
+
+  // The original is untouched -- the caller may still need it.
+  const original = page();
+  check('the file it read is not modified', (original.documentContent as any).content[0].attrs.blockId, OLD_BTN);
+
+  // Slots address blocks by NAME, so they keep working without rewriting.
+  const named = remapBlockIds({
+    runtimeStates: { [OLD_DB]: { value: 0, rowHtml: '<b>{{Name}}</b>' } },
+  });
+  check('slots are left alone, because they name blocks not id them', (named.page.runtimeStates as any)[named.idMap[OLD_DB]].rowHtml, '<b>{{Name}}</b>');
+}
+
+group('restoring a backup keeps its identities, copying does not');
+{
+  check('a different page is a copy', shouldRemapOnImport('page-one', 'page-two'), true);
+  check('the same page is a restore', shouldRemapOnImport('page-one', 'page-one'), false);
+  // A file that never recorded a page id is treated as a copy: a needless
+  // remap costs a link to rows it probably never had, while a needless keep
+  // welds two live pages together.
+  check('a file with no page id is a copy', shouldRemapOnImport(undefined, 'page-one'), true);
+  check('and so is an import with nowhere to land', shouldRemapOnImport('page-one', undefined), true);
+}
+
+group('one id is never rewritten inside another');
+{
+  // Ids share a prefix by design, so a naive replace can rewrite the short one
+  // inside the long one and produce an id that belongs to nothing.
+  const shortId = 'inputBlock__aaaa';
+  const longId = 'inputBlock__aaaabbbb';
+  const map = { [shortId]: 'inputBlock__1111', [longId]: 'inputBlock__2222' };
+  check('the longer id wins where they overlap', remapFormulaExpression(`${longId} + ${shortId}`, map), 'inputBlock__2222 + inputBlock__1111');
+  check('a bare word that merely starts the same is untouched', remapFormulaExpression(`${shortId}zzz + 1`, map), `${shortId}zzz + 1`);
+  check('an empty formula stays empty', remapFormulaExpression('', map), '');
 }
 
 say(`\n${passed} passed, ${failed} failed`);

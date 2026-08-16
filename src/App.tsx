@@ -3,7 +3,7 @@ import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { useSetAtom, useAtom, useAtomValue, useStore } from 'jotai'
 import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, getCanvasBlocks, shapeRoleDataType, currentPageIdAtom, currentPageIsPublishedAtom, pagesListAtom, switchPageFnAtom, isPreviewModeAtom, canvasModeAtom, editingBreakpointAtom, canvasZoomAtom } from './state/atoms'
-import { newBlockId, defaultRuntimeForNodeType, defaultAttrsForNodeType, BLOCK_FOOTPRINT, nodeTypeFromBlockId, shortBlockId, isBlockNodeType, withoutVisitorState, type BlockNodeType } from './lib/blockRegistry'
+import { newBlockId, defaultRuntimeForNodeType, defaultAttrsForNodeType, BLOCK_FOOTPRINT, nodeTypeFromBlockId, shortBlockId, isBlockNodeType, withoutVisitorState, portableTypeFromNodeType, nodeTypeFromPortableType, type BlockNodeType } from './lib/blockRegistry'
 import { ButtonBlock } from './blocks/ButtonBlock'
 import { NumberDisplayBlock } from './blocks/NumberDisplayBlock'
 import { TextLabelBlock } from './blocks/TextLabelBlock'
@@ -37,6 +37,7 @@ import { recalculateAllFormulas } from './lib/bindingEngine'
 import { ANIMATION_PRESETS, animationClass } from './lib/animations'
 import { workflowRunsAtom, type WorkflowRun } from './state/atoms'
 import type { FormulaBinding, CreoraFile, Page, Block, BlockProps, StyleConfig, AnimationConfig, BlockType } from './types/creora'
+import { remapBlockIds, shouldRemapOnImport } from './lib/remapBlockIds'
 import './App.css'
 
 const inspectorModules = import.meta.glob<{ default: React.ComponentType<{ blockId: string; editor: any }> }>('./blocks/*.inspector.tsx', { eager: true })
@@ -1703,6 +1704,7 @@ function App() {
   // Export and Import state/handlers
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [importError, setImportError] = useState<string | null>(null)
+  const [importNotice, setImportNotice] = useState<string | null>(null)
 
   const handleExport = useCallback(() => {
     if (!editor) return
@@ -1728,18 +1730,15 @@ function App() {
           positionsRecord[blockId] = pos
           runtimeStatesRecord[blockId] = withoutVisitorState(runtime, nodeTypeFromBlockId(blockId))
 
-          let type: BlockType = 'text'
-          if (typeName === 'buttonBlock') type = 'button'
-          else if (typeName === 'timerBlock') type = 'timer'
-          else if (typeName === 'numberDisplayBlock') type = 'number'
-          else if (typeName === 'formulaDisplayBlock') type = 'number'
-          else if (typeName === 'toggleBlock') type = 'toggle'
-          else if (typeName === 'inputBlock') type = 'input'
-          else if (typeName === 'textLabelBlock') type = 'text'
-          else if (typeName === 'historyChartBlock') type = 'chart'
-          else if (typeName === 'databaseBlock') type = 'database'
-          else if (typeName === 'listBlock') type = 'list'
-          else if (typeName === 'shapeBlock') type = 'shape'
+          /**
+           * One table, in the registry, read by the exporter and the importer
+           * alike. This was an else-if chain covering 11 of the 17 block types
+           * with `let type = 'text'` above it, so an Image, a For-each-row, a
+           * My Design, a Live Data, a Page value and a Visitor block were all
+           * written into the backup as `type: 'text'` -- in the one file a
+           * builder is promised is theirs.
+           */
+          const type = portableTypeFromNodeType(typeName) as BlockType
 
           const blockProps: BlockProps = {
             blockName: runtime.blockName,
@@ -1873,10 +1872,31 @@ function App() {
           throw new Error('Invalid CreoraFile. Missing pages data.')
         }
 
-        const importedPage = parsed.pages[0]
-        if (!importedPage || typeof importedPage !== 'object') {
+        const filePage = parsed.pages[0]
+        if (!filePage || typeof filePage !== 'object') {
           throw new Error('Invalid page data inside CreoraFile.')
         }
+
+        /**
+         * A copy gets new block identities; a restore keeps the old ones.
+         *
+         * Keeping them unconditionally was the bug: rows are keyed by block id
+         * and by nothing else, so importing an export as a template gave two
+         * pages the same ids, and therefore the same rows -- reads bled both
+         * ways and a submission landed on whichever page Postgres returned
+         * first. Restoring a backup over the page it came from is the opposite
+         * case: there the ids ARE the link to rows that already exist, so they
+         * are left alone. See lib/remapBlockIds.ts.
+         */
+        const isCopy = shouldRemapOnImport(filePage.id, activePageIdRef.current)
+        const { page: importedPage } = isCopy
+          ? remapBlockIds(filePage)
+          : { page: filePage }
+        setImportNotice(
+          isCopy
+            ? 'Imported as a copy. Its blocks were given new identities, so this page collects its own data rather than sharing the original\u2019s.'
+            : 'Restored into this page. Block identities were kept, so the rows already on the server stay attached.'
+        )
 
         setIsLoading(true)
         setImportError(null)
@@ -1907,30 +1927,20 @@ function App() {
 
           const blocks = importedPage.blocks || []
           blocks.forEach((b: any) => {
-            let typeName = ''
+            /**
+             * Same table as the exporter reads, in the other direction. This
+             * was its own else-if chain covering 10 of 17 types, so the six it
+             * did not name were dropped from the page without a word.
+             *
+             * `hasFormula` is only consulted for files written before
+             * formulaDisplayBlock had a portable name of its own; those say
+             * `number` for both kinds.
+             */
+            const hasFormula = (importedPage.formulas || []).some((f: any) => f.targetBlockId === b.id)
+            const typeName = nodeTypeFromPortableType(b.type, hasFormula)
             const attrs: any = { blockId: b.id }
-            if (b.type === 'button') {
-              typeName = 'buttonBlock'
+            if (typeName === 'buttonBlock') {
               attrs.label = b.props?.label || 'Button'
-            } else if (b.type === 'timer') {
-              typeName = 'timerBlock'
-            } else if (b.type === 'toggle') {
-              typeName = 'toggleBlock'
-            } else if (b.type === 'input') {
-              typeName = 'inputBlock'
-            } else if (b.type === 'text') {
-              typeName = 'textLabelBlock'
-            } else if (b.type === 'chart') {
-              typeName = 'historyChartBlock'
-            } else if (b.type === 'database') {
-              typeName = 'databaseBlock'
-            } else if (b.type === 'list') {
-              typeName = 'listBlock'
-            } else if (b.type === 'shape') {
-              typeName = 'shapeBlock'
-            } else if (b.type === 'number') {
-              const hasFormula = (importedPage.formulas || []).some((f: any) => f.targetBlockId === b.id)
-              typeName = hasFormula ? 'formulaDisplayBlock' : 'numberDisplayBlock'
             }
 
             if (typeName) {
@@ -1985,6 +1995,7 @@ function App() {
         setIsLoading(false)
       } catch (err: any) {
         setIsLoading(false)
+        setImportNotice(null)
         setImportError(err?.message || 'Failed to import the file.')
       }
     }
@@ -3495,6 +3506,47 @@ function App() {
           </div>
         </div>
 
+        {/*
+          Which of the two imports just happened, said out loud.
+
+          The difference matters and is invisible otherwise: one copy collects
+          its own data, the other reattaches to rows already on the server. A
+          builder who is not told cannot know why their imported page is empty
+          -- or, worse, why it is showing somebody else's rows.
+        */}
+        {importNotice && !importError && (
+          <div style={{
+            background: '#ecfdf5',
+            color: '#065f46',
+            padding: '10px 16px',
+            borderRadius: '6px',
+            marginBottom: '16px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            fontSize: '14px',
+            fontWeight: 500,
+            border: '1px solid #6ee7b7'
+          }}>
+            <span>{importNotice}</span>
+            <button
+              onClick={() => setImportNotice(null)}
+              aria-label="Dismiss"
+              style={{
+                background: 'none',
+                border: 'none',
+                color: '#065f46',
+                cursor: 'pointer',
+                fontSize: '18px',
+                fontWeight: 'bold',
+                lineHeight: 1,
+                padding: '0 4px'
+              }}
+            >
+              ×
+            </button>
+          </div>
+        )}
         {importError && (
           <div style={{
             background: '#fee2e2',

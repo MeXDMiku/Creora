@@ -1,9 +1,19 @@
 import type { ValidationRule } from '../lib/validation';
 export type { ValidationRule };
 
-export type BlockType = 
+/**
+ * What a block is called inside a `.creora` file.
+ *
+ * This union stopped at ten while the product grew to seventeen block types,
+ * and the exporter quietly wrote every unlisted one as 'text'. The names live
+ * in PORTABLE_TYPE_BY_NODE_TYPE in lib/blockRegistry.ts, which is the single
+ * table both the exporter and the importer read; this union is that table's
+ * value type written out, and the two are held together by a check.
+ */
+export type BlockType =
   | 'button'
   | 'number'
+  | 'formula'
   | 'toggle'
   | 'input'
   | 'text'
@@ -11,7 +21,13 @@ export type BlockType =
   | 'chart'
   | 'database'
   | 'list'
-  | 'shape';
+  | 'shape'
+  | 'dataSource'
+  | 'customHtml'
+  | 'visitor'
+  | 'image'
+  | 'repeat'
+  | 'pageValue';
 
 export type ConditionOperator =
   | 'is ON' | 'is OFF' | 'is_ON' | 'is_OFF'

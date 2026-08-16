@@ -346,3 +346,70 @@ export function shortBlockId(blockId: string): string {
   if (sep > 0) return blockId.slice(-4);
   return blockId;
 }
+
+// ---------------------------------------------------------------- .creora I/O
+/**
+ * The name a block type goes by inside a `.creora` file.
+ *
+ * WHY THIS EXISTS
+ * The exporter and the importer each carried their own hand-written
+ * `if (typeName === 'buttonBlock') ... else if ...` chain. The exporter's
+ * covered 11 of the 17 block types and initialised its variable to `'text'`,
+ * so an Image, a For-each-row, a My Design, a Live Data, a Page value and a
+ * Visitor block were every one of them written into the backup file as
+ * `type: 'text'`. The importer's chain covered 10 and dropped the rest.
+ *
+ * That is the same bug as the nine `name === 'buttonBlock' || ...` chains this
+ * file was created to kill, wearing `else if` instead of `||` -- which is
+ * exactly why the guard in scripts/checks.ts could not see it. It sat in the
+ * export format, which is the one thing promised to a builder as theirs.
+ *
+ * One table. Both directions read it. A block type added to BLOCK_NODE_TYPES
+ * without a name here fails to compile, because Record<BlockNodeType, ...>
+ * demands every key.
+ */
+export const PORTABLE_TYPE_BY_NODE_TYPE: Record<BlockNodeType, string> = {
+  buttonBlock: 'button',
+  numberDisplayBlock: 'number',
+  toggleBlock: 'toggle',
+  inputBlock: 'input',
+  textLabelBlock: 'text',
+  formulaDisplayBlock: 'formula',
+  timerBlock: 'timer',
+  historyChartBlock: 'chart',
+  databaseBlock: 'database',
+  listBlock: 'list',
+  shapeBlock: 'shape',
+  dataSourceBlock: 'dataSource',
+  customHtmlBlock: 'customHtml',
+  visitorBlock: 'visitor',
+  imageBlock: 'image',
+  repeatBlock: 'repeat',
+  pageValueBlock: 'pageValue',
+};
+
+const NODE_TYPE_BY_PORTABLE_TYPE: Record<string, BlockNodeType> = Object.fromEntries(
+  Object.entries(PORTABLE_TYPE_BY_NODE_TYPE).map(([node, portable]) => [portable, node as BlockNodeType])
+) as Record<string, BlockNodeType>;
+
+/** What to call this block inside a `.creora` file. */
+export function portableTypeFromNodeType(nodeType: BlockNodeType): string {
+  return PORTABLE_TYPE_BY_NODE_TYPE[nodeType];
+}
+
+/**
+ * Read a `.creora` type name back.
+ *
+ * `hasFormula` exists for files written before formulaDisplayBlock had a name
+ * of its own: every one of them says `number` for both, and the only way to
+ * tell them apart is whether a formula targets the block. Files written from
+ * now on say `formula` outright and never reach that branch.
+ */
+export function nodeTypeFromPortableType(
+  portableType: string | undefined | null,
+  hasFormula = false,
+): BlockNodeType | null {
+  if (!portableType) return null;
+  if (portableType === 'number' && hasFormula) return 'formulaDisplayBlock';
+  return NODE_TYPE_BY_PORTABLE_TYPE[portableType] ?? null;
+}
