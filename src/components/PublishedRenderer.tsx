@@ -30,6 +30,7 @@ import {
   connectionsAtom,
   allBlockIdsAtom,
   blockValuesByName,
+  switchPageFnAtom,
 } from '../state/atoms';
 
 // Document Item & Block extraction
@@ -1150,6 +1151,36 @@ export default function PublishedRenderer() {
   const { pageId } = useParams<{ pageId: string }>();
   const location = useLocation();
   const store = useStore();
+  const pageNavigate = useNavigate();
+
+  /**
+   * Tell the engine how to change page here.
+   *
+   * The editor has always filled this in; a published page never did, and
+   * navigated instead by calling react-router directly inside a block's click
+   * handler. Two mechanisms for one idea is the shape that has drifted five
+   * times in this codebase -- published tables, the count, form values, the
+   * XSS, the columns -- every one of them the editor and the published renderer
+   * doing the same thing two ways. `goToPage` uses this seam, so both sides
+   * navigate the same way or neither does.
+   */
+  useEffect(() => {
+    /**
+     * `() => fn`, not `fn`.
+     *
+     * jotai's primitive atoms treat a function passed to set() as an UPDATER --
+     * it gets called with the previous value and the RESULT is stored. Passing
+     * the navigator directly stores whatever calling it returned, and the next
+     * caller gets "go is not a function". The editor already knew this; this
+     * registration was written without it and a check caught it immediately.
+     */
+    store.set(switchPageFnAtom, () => async (targetPageId: string) => {
+      // The address is preserved, because a page opened WITH a value should be
+      // able to hand one on -- the detail-page chain depends on it.
+      pageNavigate(`/view/${targetPageId}${window.location.search || ''}`);
+    });
+    return () => store.set(switchPageFnAtom, null);
+  }, [store, pageNavigate]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pageName, setPageName] = useState('Untitled');

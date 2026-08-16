@@ -63,6 +63,17 @@ export interface WorkflowStep {
     | 'setVisible' | 'setHidden'
     | 'addRow' | 'updateRow' | 'deleteRow'
     | 'exportCsv' | 'sendWebhook'
+    // --- going somewhere ---
+    // Cut deliberately in cycle 8 with a condition written into BACKLOG.md:
+    // "worth doing only when something genuinely needs CONDITIONAL navigation".
+    // onLoad and formula conditions both landed today, so gating a page on who
+    // is looking at it, and redirecting after a form is submitted, are now
+    // ordinary things to want and impossible to say.
+    //
+    // As a STEP rather than a block setting, it also fixes the race recorded on
+    // 11 Aug: a Button with a target page navigated so fast that its own
+    // increment never saved. A step runs in order, after the row is written.
+    | 'goToPage' | 'openUrl'
     // --- Form states ---
     // `validate` shows the errors that were already true but hidden: a field is
     // only marked touched once, so a page does not shout at someone the moment

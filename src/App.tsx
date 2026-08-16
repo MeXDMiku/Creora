@@ -322,6 +322,9 @@ function guardDefaultFor(action: string): boolean {
 }
 
 function ConnectionPopup({ editor }: { editor: any }) {
+  // The page list lives on an atom, so the popup reads it rather than having it
+  // threaded down -- the same list the Button inspector's page picker uses.
+  const pagesList = useAtomValue(pagesListAtom)
   const store = useStore()
   const [pending, setPending] = useAtom(pendingConnectionAtom)
   const setConnections = useSetAtom(connectionsAtom)
@@ -339,6 +342,10 @@ function ConnectionPopup({ editor }: { editor: any }) {
   const [timerEvent, setTimerEvent] = useState<'onTick' | 'onComplete'>('onTick')
   // Any source block can instead be anchored to the page opening.
   const [onPageLoad, setOnPageLoad] = useState(false)
+  // Where goToPage sends you, and what openUrl opens. Both live in the step's
+  // `value` because navigation has no target block.
+  const [goToPageId, setGoToPageId] = useState('')
+  const [openUrlValue, setOpenUrlValue] = useState('')
 
   // Conditional state
   const [isConditional, setIsConditional] = useState(false)
@@ -638,6 +645,10 @@ function ConnectionPopup({ editor }: { editor: any }) {
       }
     }
 
+    // Navigation has no target block, so the destination rides in `value`.
+    if (action === 'goToPage') stepStep.value = goToPageId
+    if (action === 'openUrl') stepStep.value = openUrlValue.trim()
+
     if (isConditional) {
       const built = conds
         // An expression row has no field, so it must not be filtered out by the
@@ -766,6 +777,10 @@ function ConnectionPopup({ editor }: { editor: any }) {
               <option value="deleteRow">Remove a row</option>
               <option value="exportCsv">Download as CSV (opens in Excel)</option>
               <option value="sendWebhook">Send to another app</option>
+              <optgroup label="Going somewhere">
+                <option value="goToPage">Go to another page</option>
+                <option value="openUrl">Open a web address</option>
+              </optgroup>
             </>
           ) : (
             <>
@@ -783,10 +798,40 @@ function ConnectionPopup({ editor }: { editor: any }) {
                 <option value="setLoading">Show it as busy</option>
                 <option value="clearLoading">Stop showing it as busy</option>
               </optgroup>
+              <optgroup label="Going somewhere">
+                <option value="goToPage">Go to another page</option>
+                <option value="openUrl">Open a web address</option>
+              </optgroup>
             </>
           )}
         </select>
       </label>
+
+      {action === 'goToPage' && (
+        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontWeight: 500, color: '#475569', fontSize: '13px' }}>
+          Which page
+          <select value={goToPageId} onChange={(e) => setGoToPageId(e.target.value)} style={selectStyle}>
+            <option value="">Choose a page&hellip;</option>
+            {pagesList.map(pg => (<option key={pg.id} value={pg.id}>{pg.name}</option>))}
+          </select>
+          <span style={{ fontSize: '11px', color: '#64748b', lineHeight: 1.4 }}>
+            Runs in order like any other step, so &ldquo;add the row, then go to
+            Thank You&rdquo; happens in that order. A Button&rsquo;s own target page
+            does not: it navigates while the row is still being written.
+          </span>
+        </label>
+      )}
+
+      {action === 'openUrl' && (
+        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontWeight: 500, color: '#475569', fontSize: '13px' }}>
+          Web address
+          <input type="text" value={openUrlValue} onChange={(e) => setOpenUrlValue(e.target.value)}
+            placeholder="https://example.com" style={inputStyle} />
+          <span style={{ fontSize: '11px', color: '#64748b', lineHeight: 1.4 }}>
+            Opens in a new tab. Only real web addresses are allowed.
+          </span>
+        </label>
+      )}
 
       {action !== 'validate' && (
         <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '12px', color: '#475569', lineHeight: 1.4 }}>

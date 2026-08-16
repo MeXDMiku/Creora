@@ -80,6 +80,8 @@ const ACTION_WORDS: Record<string, string> = {
   deleteRow: 'remove a row from',
   exportCsv: 'download',
   sendWebhook: 'send',
+  goToPage: 'go to',
+  openUrl: 'open',
   validate: 'check the rules on',
   setLoading: 'show as busy',
   clearLoading: 'stop showing as busy',

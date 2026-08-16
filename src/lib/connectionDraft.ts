@@ -136,5 +136,14 @@ export function whyItCannotWork(draft: StepDraft): string | null {
     return 'There are no words to set it to.';
   }
 
+  // A step that goes nowhere looks identical to one that works until it is
+  // pressed, which is the whole reason this function exists.
+  if (draft.action === 'goToPage' && !String(draft.value ?? '').trim()) {
+    return 'No page is chosen, so this would go nowhere.';
+  }
+  if (draft.action === 'openUrl' && !String(draft.value ?? '').trim()) {
+    return 'There is no address to open.';
+  }
+
   return null;
 }

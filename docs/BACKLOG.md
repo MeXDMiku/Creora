@@ -564,11 +564,29 @@ file or opening the actual page.
 
 ## Added during cycle 8 (page parameters) — 13 Aug 2026
 
-- **`goToPage` as a workflow action.** Cut on purpose. A workflow step is built
-  by dragging a wire to a target block, and navigation has no target block, so
-  the action would ignore its own target. It also unblocks zero additional site
-  types — row-click and button parameters close the chain. Worth doing only when
-  something genuinely needs *conditional* navigation.
+- **`goToPage` as a workflow action.** ~~Cut on purpose.~~ **BUILT 16 Aug**, and
+  built because the condition written into this entry was met rather than
+  because it came up again. The entry said: *"worth doing only when something
+  genuinely needs conditional navigation"*. On 16 Aug `onLoad` and formula
+  conditions both landed, so **gating a page on who is looking at it** became an
+  ordinary thing to want and impossible to say.
+
+  Two things the original entry did not know:
+  - It also fixes the race recorded on 11 Aug — a Button with a target page
+    navigated so fast its own increment never saved. A *step* runs in order, so
+    "add the row, then go to Thank You" happens in that order.
+  - The editor and the published renderer were navigating by two different
+    mechanisms (`switchPageFnAtom` vs. calling react-router inside a block's
+    click handler). That is the shape that has drifted five times here. Both
+    now use the one seam.
+
+  The wart the entry named is real and remains: the destination rides in
+  `value` and the step's `targetId` is ignored. It is a smaller wart than not
+  being able to redirect after a form is submitted.
+- **`openUrl`.** Built alongside it, 16 Aug. Goes through `safeUrl`, the same
+  guard images and links use — a builder's address ends up on a published page,
+  so `javascript:` there would run in a visitor's browser on Creora's own
+  domain, which is the XSS that was live on 13 Aug wearing a different hat.
 - **Page values cannot be written, only read.** A page cannot change its own
   address, so "apply this filter and make the link shareable" is not possible.
   Wants `history.replaceState` and a decision about what belongs in an address.

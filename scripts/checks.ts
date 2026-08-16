@@ -12,7 +12,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { createStore } from 'jotai';
 import { validateValue, isValidPattern } from '../src/lib/validation';
 import type { ValidationRule } from '../src/lib/validation';
-import { blockRuntimeAtom, workflowsAtom, allBlockIdsAtom, workflowRunsAtom, formulasAtom } from '../src/state/atoms';
+import { blockRuntimeAtom, workflowsAtom, allBlockIdsAtom, workflowRunsAtom, formulasAtom, switchPageFnAtom } from '../src/state/atoms';
 import { executeWorkflow, validationErrorFor, markValidated } from '../src/lib/bindingEngine';
 import { evaluateCondition } from '../src/lib/conditions';
 import { describeCollectionError, MIGRATION_DOC } from '../src/lib/collections';
@@ -3334,6 +3334,146 @@ group('the Health panel does not cry wolf about every formula');
     referencedIds('sparkline(Price)'), ['Price']);
   check('and spacing before the bracket does not fool it',
     referencedIds('round (Price)'), ['Price']);
+}
+
+group('a step can go somewhere');
+{
+  /**
+   * Cut in cycle 8 with a condition written into BACKLOG.md: "worth doing only
+   * when something genuinely needs CONDITIONAL navigation". onLoad and formula
+   * conditions both landed today, so gating a page on who is looking at it, and
+   * redirecting after a form is submitted, became ordinary things to want and
+   * impossible to say. Built because the recorded condition was met, not
+   * because it came up.
+   */
+  const BTN = 'buttonBlock__nav00000001';
+  const OUT = 'numberDisplayBlock__nav1000001';
+  const VIS = 'visitorBlock__nav2000001';
+  const base = { visible: true, disabled: false, loading: false, error: null };
+
+  const build = (steps: any[], signedIn = false) => {
+    const store = createStore();
+    const went: string[] = [];
+    store.set(allBlockIdsAtom, [BTN, OUT, VIS]);
+    for (const id of [BTN, OUT]) store.set(blockRuntimeAtom(id), { ...base, value: 0 });
+    store.set(blockRuntimeAtom(VIS), { ...base, value: signedIn });
+    store.set(formulasAtom, []);
+    // `() => fn`, or jotai calls it as an updater and stores the result.
+    store.set(switchPageFnAtom, () => async (to: string) => { went.push(to); });
+    store.set(workflowsAtom, [{ id: 'w', sourceId: BTN, sourceEvent: 'onClick', steps }] as any);
+    return { store, went };
+  };
+
+  const simple = build([{ targetId: OUT, action: 'goToPage', value: 'page-two' }]);
+  executeWorkflow(BTN, 'onClick', simple.store);
+  check('it goes where it was told', simple.went, ['page-two']);
+
+  const nowhere = build([{ targetId: OUT, action: 'goToPage', value: '' }]);
+  executeWorkflow(BTN, 'onClick', nowhere.store);
+  check('with no destination it goes nowhere rather than somewhere odd', nowhere.went, []);
+
+  /**
+   * The ordering that was the point. A Button's own target page navigates while
+   * its workflow is still running -- recorded on 11 Aug as "it navigates so fast
+   * the counter's increment doesn't get a chance to save". A STEP runs in order.
+   */
+  const ordered = build([
+    { targetId: OUT, action: 'set', value: 42 },
+    { targetId: OUT, action: 'goToPage', value: 'thank-you' },
+  ]);
+  executeWorkflow(BTN, 'onClick', ordered.store);
+  check('the row is written before the redirect', ordered.store.get(blockRuntimeAtom(OUT)).value, 42);
+  check('and then it navigates', ordered.went, ['thank-you']);
+
+  // Gating: the thing onLoad made worth building.
+  const gate = (signedIn: boolean) => {
+    const b = build([{
+      targetId: OUT, action: 'goToPage', value: 'members',
+      condition: { fieldId: '', operator: 'equals', expression: `${VIS} == true` },
+      elseAction: 'set', elseTargetId: OUT, elseValue: 0,
+    }], signedIn);
+    executeWorkflow(BTN, 'onClick', b.store);
+    return b.went;
+  };
+  check('a signed-in visitor is let through', gate(true), ['members']);
+  check('and a stranger is not', gate(false), []);
+
+  /**
+   * When nothing knows how to change page it SAYS so. A navigation that
+   * silently does nothing is indistinguishable from a wire never connected,
+   * which is the class of thing the run log exists for.
+   */
+  const noNav = createStore();
+  noNav.set(allBlockIdsAtom, [BTN, OUT]);
+  for (const id of [BTN, OUT]) noNav.set(blockRuntimeAtom(id), { ...base, value: 0 });
+  noNav.set(formulasAtom, []);
+  noNav.set(switchPageFnAtom, null);
+  noNav.set(workflowsAtom, [{ id: 'w', sourceId: BTN, sourceEvent: 'onClick',
+    steps: [{ targetId: OUT, action: 'goToPage', value: 'somewhere' }] }] as any);
+  executeWorkflow(BTN, 'onClick', noNav);
+  const runs = noNav.get(workflowRunsAtom) as any[];
+  check('it records that it could not', runs[0]?.steps?.[0]?.reason, 'nothing here knows how to change page');
+}
+
+group('opening an address is not a way to run code');
+{
+  /**
+   * A builder's address ends up on a published page, so `javascript:` here
+   * would run in a visitor's browser on Creora's own domain -- the XSS that was
+   * live on 13 Aug, wearing a different hat. Same guard as images and links.
+   */
+  check('a normal address survives', safeUrl('https://example.com'), 'https://example.com');
+  check('javascript is refused', safeUrl('javascript:alert(1)'), null);
+  check('and the split-scheme trick', safeUrl('java\nscript:alert(1)'), null);
+  check('vbscript too', safeUrl('vbscript:msgbox(1)'), null);
+  check('a data html payload', safeUrl('data:text/html,<script>alert(1)</script>'), null);
+  /**
+   * Through the ACTION, not beside it.
+   *
+   * The first version of this group only called safeUrl directly, so removing
+   * safeUrl from the openUrl case turned nothing red -- the fifth time today a
+   * check sat next to the code instead of running through it. The run log is
+   * the observable behaviour in node: a refused address records a skipped step
+   * with a reason, and that is also what a builder sees in the Runs panel.
+   */
+  {
+    const B = 'buttonBlock__url00000001';
+    const T = 'numberDisplayBlock__url1000001';
+    const base = { visible: true, disabled: false, loading: false, error: null };
+    const tryOpen = (value: string) => {
+      const store = createStore();
+      store.set(allBlockIdsAtom, [B, T]);
+      for (const id of [B, T]) store.set(blockRuntimeAtom(id), { ...base, value: 0 });
+      store.set(formulasAtom, []);
+      store.set(workflowsAtom, [{ id: 'w', sourceId: B, sourceEvent: 'onClick',
+        steps: [{ targetId: T, action: 'openUrl', value }] }] as any);
+      executeWorkflow(B, 'onClick', store);
+      const steps = (store.get(workflowRunsAtom)[0] as any)?.steps || [];
+      return steps[0]?.reason ?? 'allowed';
+    };
+    const refused = 'that address is not one a page is allowed to open';
+    check('the action refuses javascript:', tryOpen('javascript:alert(1)'), refused);
+    check('the action refuses the split-scheme trick', tryOpen('java\nscript:alert(1)'), refused);
+    check('the action refuses a data html payload', tryOpen('data:text/html,<script>x</script>'), refused);
+    check('the action refuses an empty address', tryOpen('   '), refused);
+    check('and lets a real address through', tryOpen('https://example.com'), 'allowed');
+  }
+
+  // The words say what the sentence will read like on a wire.
+  check('the wire reads as going somewhere',
+    wireSentence({ sourceName: 'Submit', targetName: 'Thank You', event: 'onClick', action: 'goToPage' }),
+    'When Submit is pressed → go to Thank You');
+}
+
+group('a step that goes nowhere cannot be connected');
+{
+  // The Connect button exists to stop a step that looks fine and does nothing.
+  check('no page chosen', whyItCannotWork({ action: 'goToPage', value: '' } as any),
+    'No page is chosen, so this would go nowhere.');
+  check('a page chosen is fine', whyItCannotWork({ action: 'goToPage', value: 'p2' } as any), null);
+  check('no address', whyItCannotWork({ action: 'openUrl', value: '  ' } as any),
+    'There is no address to open.');
+  check('an address is fine', whyItCannotWork({ action: 'openUrl', value: 'https://x.com' } as any), null);
 }
 
 say(`\n${passed} passed, ${failed} failed`);

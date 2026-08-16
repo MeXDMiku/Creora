@@ -1,6 +1,6 @@
 import { getDefaultStore } from 'jotai';
 import type { TriggerEvent, StepCondition } from '../types/creora';
-import { blockRuntimeAtom, workflowsAtom, formulasAtom, allBlockIdsAtom, getBlockDefaultValue , recordRun, blockValuesByName, type RunStep } from '../state/atoms';
+import { blockRuntimeAtom, workflowsAtom, formulasAtom, allBlockIdsAtom, getBlockDefaultValue , recordRun, blockValuesByName, type RunStep, switchPageFnAtom } from '../state/atoms';
 import { sendWebhook } from './webhook';
 import { computeDatabaseOutput } from './databaseOutput';
 import { validateValue } from './validation';
@@ -8,6 +8,7 @@ import { validateValue } from './validation';
 // keeps working. The definition now lives in conditions.ts.
 import { nodeTypeFromBlockId } from './blockRegistry';
 import { rowIndexesForStep } from './rows';
+import { safeUrl } from './urls';
 import { evaluateCondition } from './conditions';
 import { evaluateExpression, truthy, type FormulaValue } from './formula';
 export { evaluateCondition };
@@ -798,6 +799,67 @@ export function executeWorkflow(
           }
           break;
         }
+        /**
+         * Go to another Creora page.
+         *
+         * Routed through switchPageFnAtom, which the editor already fills in
+         * and the published renderer now fills in too. Before this the two
+         * navigated by completely different mechanisms -- the editor through
+         * that atom, a published page by calling react-router directly inside a
+         * block's click handler -- which is the shape that has drifted five
+         * times in this codebase. One seam, both sides.
+         *
+         * The page id lives in `value` because navigation has no target block;
+         * the step's targetId is whatever the wire was dragged to and is
+         * deliberately ignored. That was the reason this was cut in cycle 8,
+         * and it is still a wart -- it is just a smaller one than not being
+         * able to redirect after a form is submitted.
+         */
+        case 'goToPage': {
+          const destination = String(step.value ?? '').trim();
+          if (!destination) break;
+          const go = store.get(switchPageFnAtom);
+          if (!go) {
+            // Said out loud. A navigation that silently does nothing is
+            // indistinguishable from a wire that was never connected.
+            runSteps.push({
+              targetId: step.targetId,
+              action: 'goToPage',
+              status: 'skipped',
+              reason: 'nothing here knows how to change page',
+            });
+            break;
+          }
+          void go(destination);
+          break;
+        }
+
+        /**
+         * Open an address, in a new tab.
+         *
+         * Through safeUrl, the same guard images and links use. A builder's
+         * address ends up on a published page, so `javascript:` here would run
+         * in a visitor's browser on Creora's own domain -- which is the XSS
+         * that was live on 13 Aug, wearing a different hat.
+         */
+        case 'openUrl': {
+          const wanted = safeUrl(String(step.value ?? '').trim());
+          if (!wanted) {
+            runSteps.push({
+              targetId: step.targetId,
+              action: 'openUrl',
+              status: 'skipped',
+              reason: 'that address is not one a page is allowed to open',
+            });
+            break;
+          }
+          if (typeof window !== 'undefined') {
+            // noopener, or the opened page can reach back through window.opener.
+            window.open(wanted, '_blank', 'noopener,noreferrer');
+          }
+          break;
+        }
+
         case 'toggle': {
           store.set(targetAtom, {
             ...currentTargetState,
