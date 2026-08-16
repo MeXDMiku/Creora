@@ -346,11 +346,11 @@ function ConnectionPopup({ editor }: { editor: any }) {
   const [elseTargetId, setElseTargetId] = useState('')
   const [elseValue, setElseValue] = useState('')
   const [elseAmount, setElseAmount] = useState(1)
-  const [conds, setConds] = useState<{ fieldId: string; operator: string; value: string }[]>([
-    { fieldId: '', operator: 'equals', value: '' },
+  const [conds, setConds] = useState<{ fieldId: string; operator: string; value: string; expression?: string }[]>([
+    { fieldId: '', operator: 'equals', value: '', expression: '' },
   ])
   const [matchMode, setMatchMode] = useState<'all' | 'any'>('all')
-  const setCond = (i: number, patch: Partial<{ fieldId: string; operator: string; value: string }>) =>
+  const setCond = (i: number, patch: Partial<{ fieldId: string; operator: string; value: string; expression: string }>) =>
     setConds(prev => prev.map((c, n) => (n === i ? { ...c, ...patch } : c)))
 
   // Determine target block node type
@@ -634,8 +634,13 @@ function ConnectionPopup({ editor }: { editor: any }) {
 
     if (isConditional) {
       const built = conds
-        .filter(c => c.fieldId)
+        // An expression row has no field, so it must not be filtered out by the
+        // fieldId test that every other row relies on.
+        .filter(c => (c.fieldId === EXPRESSION_CONDITION ? (c.expression || '').trim() !== '' : !!c.fieldId))
         .map(c => {
+          if (c.fieldId === EXPRESSION_CONDITION) {
+            return { fieldId: '', operator: 'equals' as any, expression: (c.expression || '').trim() }
+          }
           let condVal: any = c.value
           const numeric = ['equals', 'notEquals', 'greaterThan', 'lessThan', 'greaterOrEqual', 'lessOrEqual']
           if (numeric.includes(c.operator)) {
@@ -1000,6 +1005,7 @@ function ConnectionPopup({ editor }: { editor: any }) {
           )}
 
           {conds.map((c, i) => {
+            const isExpression = c.fieldId === EXPRESSION_CONDITION
             const picked = canvasBlocks.find(b => b.id === c.fieldId)
             const dt = picked ? picked.dataType : 'unknown'
             const needsValue = c.operator !== 'is ON' && c.operator !== 'is OFF'
@@ -1028,8 +1034,28 @@ function ConnectionPopup({ editor }: { editor: any }) {
                   {canvasBlocks.map(b => (
                     <option key={b.id} value={b.id}>{b.label}</option>
                   ))}
+                  {/* A condition could only ever compare ONE block to ONE fixed
+                      value, so "only when the order is over 500" -- quantity
+                      times price -- was not sayable however many were added. */}
+                  <option value={EXPRESSION_CONDITION}>a formula&hellip;</option>
                 </select>
 
+                {isExpression ? (
+                  <>
+                    <input
+                      type="text"
+                      value={c.expression || ''}
+                      onChange={(e) => setCond(i, { expression: e.target.value })}
+                      placeholder='e.g. Qty * Price > 500'
+                      style={{ ...inputStyle, fontSize: '12px', fontFamily: 'ui-monospace, monospace' }}
+                    />
+                    <span style={{ fontSize: '11px', color: '#64748b', lineHeight: 1.4 }}>
+                      Runs the step when this comes out true. Use the block names from
+                      the list above. A formula that cannot be worked out counts as
+                      false, so a broken one stops the step rather than letting it run.
+                    </span>
+                  </>
+                ) : (
                 <select
                   value={c.operator}
                   onChange={(e) => setCond(i, { operator: e.target.value })}
@@ -1064,8 +1090,9 @@ function ConnectionPopup({ editor }: { editor: any }) {
                   <option value="isValid">passes its rules</option>
                   <option value="isInvalid">fails its rules</option>
                 </select>
+                )}
 
-                {needsValue && (
+                {!isExpression && needsValue && (
                   <input
                     type="text"
                     value={c.value}
@@ -1458,6 +1485,15 @@ function ConnectionContextMenu() {
 
 const PAGE_ID = '00000000-0000-0000-0000-000000000001'
 
+
+/**
+ * The field dropdown's stand-in for "this condition is a whole formula".
+ *
+ * A sentinel rather than a separate toggle because a condition row already has
+ * exactly one "what am I asking about" control, and adding a second one beside
+ * it would mean two places to look for the same answer.
+ */
+const EXPRESSION_CONDITION = '__expression__'
 
 function App() {
   const store = useStore()

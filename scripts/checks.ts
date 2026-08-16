@@ -12,7 +12,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { createStore } from 'jotai';
 import { validateValue, isValidPattern } from '../src/lib/validation';
 import type { ValidationRule } from '../src/lib/validation';
-import { blockRuntimeAtom, workflowsAtom, allBlockIdsAtom, workflowRunsAtom } from '../src/state/atoms';
+import { blockRuntimeAtom, workflowsAtom, allBlockIdsAtom, workflowRunsAtom, formulasAtom } from '../src/state/atoms';
 import { executeWorkflow, validationErrorFor, markValidated } from '../src/lib/bindingEngine';
 import { evaluateCondition } from '../src/lib/conditions';
 import { describeCollectionError, MIGRATION_DOC } from '../src/lib/collections';
@@ -42,6 +42,7 @@ import {
 import { withoutVisitorState, isBlockNodeType, BLOCK_NODE_TYPES, portableTypeFromNodeType, nodeTypeFromPortableType, nodeTypeFromBlockId } from '../src/lib/blockRegistry';
 import { remapBlockIds, shouldRemapOnImport, remapFormulaExpression } from '../src/lib/remapBlockIds';
 import { evaluateExpression, FORMULA_FUNCTION_NAMES } from '../src/lib/formula';
+import { stepConditionResult, formulaScope } from '../src/lib/bindingEngine';
 import { safeUrl, isSafeUrlValue, schemeOf, stripIgnorable } from '../src/lib/urls';
 import { fillSlots, leadingSlotName, findSlots as findSlotsForCheck } from '../src/lib/sanitizeHtml';
 import { visibleRows, rowSlots, compareCells, slotNamesFor, rowMatchesSearch, MAX_RENDERED_ROWS } from '../src/lib/rows';
@@ -2652,6 +2653,169 @@ group('formulas compose with everything already built');
 
   const stock = { Count: 0, Threshold: 5 };
   check('three-way stock label', evaluateExpression('if(Count == 0, "Sold out", if(Count < Threshold, "Low stock", "In stock"))', stock), 'Sold out');
+}
+
+
+// -------------------------------------------- a condition can be a whole formula
+/**
+ * A condition could only ever compare ONE block against ONE fixed value. So
+ * "only submit when the order is over 500" -- quantity times price -- was not
+ * sayable, however many conditions were added. Adding more rows cannot multiply.
+ */
+group('a condition can now be a whole formula');
+{
+  const mk = () => {
+    const store = createStore();
+    const QTY = 'numberDisplayBlock__qty0000001';
+    const PRICE = 'numberDisplayBlock__price00001';
+    const NAME = 'inputBlock__name000000001';
+    const AGREED = 'toggleBlock__agreed000001';
+    const base = { visible: true, disabled: false, loading: false, error: null };
+    store.set(allBlockIdsAtom, [QTY, PRICE, NAME, AGREED]);
+    store.set(blockRuntimeAtom(QTY), { ...base, value: 3 });
+    store.set(blockRuntimeAtom(PRICE), { ...base, value: 200 });
+    store.set(blockRuntimeAtom(NAME), { ...base, value: 'Ada' });
+    store.set(blockRuntimeAtom(AGREED), { ...base, value: true });
+    return { store, QTY, PRICE, NAME, AGREED };
+  };
+
+  const { store, QTY, PRICE, NAME, AGREED } = mk();
+  const ask = (expression: string) => stepConditionResult({ fieldId: '', operator: 'equals', expression } as any, store);
+
+  check('two blocks multiplied, over a threshold', ask(`${QTY} * ${PRICE} > 500`).pass, true);
+  check('and under it', ask(`${QTY} * ${PRICE} > 5000`).pass, false);
+  check('several things at once', ask(`and(${AGREED}, not(isBlank(${NAME})))`).pass, true);
+  check('text compared', ask(`${NAME} == "Ada"`).pass, true);
+  check('a function over a field', ask(`len(${NAME}) >= 3`).pass, true);
+
+  // The old shape still has to work, because every page saved so far uses it.
+  const plain = stepConditionResult({ fieldId: QTY, operator: 'greaterThan', value: 1 } as any, store);
+  check('a plain field condition still works', plain.pass, true);
+  check('and still explains itself', plain.describe.includes('actual 3'), true);
+
+  /**
+   * Failing closed is the safe direction. A broken condition guarding a row
+   * write should stop the write, not wave it through -- the opposite choice
+   * silently writes rows nobody asked for and looks like it worked.
+   */
+  const broken = ask('sparkline(1) > 0');
+  check('a formula that cannot be worked out is false, not true', broken.pass, false);
+  check('and the run log says why, by name', broken.describe.includes('There is no function called "sparkline"'), true);
+
+  const missing = ask('NoSuchBlock > 1');
+  check('a deleted block is false, not true', missing.pass, false);
+  check('and is named in the log', missing.describe.includes('does not exist'), true);
+
+  // Empty means "no expression", so the row falls back to the field comparison
+  // rather than becoming a condition that is always false.
+  const blankExpr = stepConditionResult({ fieldId: QTY, operator: 'greaterThan', value: 1, expression: '   ' } as any, store);
+  check('a blank expression falls back to the field row', blankExpr.pass, true);
+
+  // The description is what a builder reads in the Runs panel. An expression
+  // condition has no fieldId or operator to print, so it prints itself.
+  check('an expression describes itself rather than a blank id', ask(`${QTY} > 99`).describe.startsWith(QTY), true);
+  check('and reports what it answered', ask(`${QTY} > 99`).describe.includes('answered false'), true);
+}
+
+group('formulas and conditions look at the same values');
+{
+  // Two scope builders would drift, and the one that drifted would be whichever
+  // was edited second. There is one, and this is the check that says so.
+  const store = createStore();
+  const A = 'numberDisplayBlock__aaa0000001';
+  const B = 'inputBlock__bbb000000001';
+  store.set(allBlockIdsAtom, [A, B]);
+  store.set(blockRuntimeAtom(A), { value: 12, visible: true, disabled: false, loading: false, error: null });
+  store.set(blockRuntimeAtom(B), { value: 'paid', visible: true, disabled: false, loading: false, error: null });
+
+  const scope = formulaScope(store);
+  check('every block is in scope', Object.keys(scope).sort(), [A, B].sort());
+  check('a number arrives as a number', scope[A], 12);
+  // The old scope ran everything through Number(), so "paid" arrived as 0 --
+  // which is exactly why text could never be compared.
+  check('and text arrives as text, not as zero', scope[B], 'paid');
+  check('a condition sees what a formula sees', stepConditionResult({ fieldId: '', operator: 'equals', expression: `${B} == "paid"` } as any, store).pass, true);
+}
+
+group('an expression condition actually gates the step');
+{
+  /**
+   * Every check above calls stepConditionResult directly. Not one of them came
+   * through executeWorkflow, and the bug was in executeWorkflow: the gate
+   * decided "is this a real condition?" by looking for a fieldId, and an
+   * expression condition has none -- so it was dropped and the step ran with no
+   * condition at all. A discount guarded by "only over 500" was given on every
+   * order. Found by running a workflow in a browser.
+   *
+   * So these go through the engine, which is where the gate lives.
+   */
+  const BTN = 'buttonBlock__gate00000001';
+  const QTY = 'numberDisplayBlock__gq0000001';
+  const PRICE = 'numberDisplayBlock__gp0000001';
+  const OUT = 'numberDisplayBlock__go0000001';
+  const base = { visible: true, disabled: false, loading: false, error: null };
+
+  const run = (qty: number) => {
+    const store = createStore();
+    store.set(allBlockIdsAtom, [BTN, QTY, PRICE, OUT]);
+    store.set(blockRuntimeAtom(BTN), { ...base, value: 0 });
+    store.set(blockRuntimeAtom(QTY), { ...base, value: qty });
+    store.set(blockRuntimeAtom(PRICE), { ...base, value: 200 });
+    store.set(blockRuntimeAtom(OUT), { ...base, value: 0 });
+    store.set(formulasAtom, []);
+    store.set(workflowsAtom, [{
+      id: 'w', sourceId: BTN, sourceEvent: 'onClick',
+      steps: [{
+        targetId: OUT, action: 'set', value: 50,
+        condition: { fieldId: '', operator: 'equals', expression: `${QTY} * ${PRICE} > 500` },
+        elseAction: 'set', elseTargetId: OUT, elseValue: 0,
+      }],
+    }] as any);
+    executeWorkflow(BTN, 'onClick', store);
+    return {
+      out: store.get(blockRuntimeAtom(OUT)).value,
+      reason: (store.get(workflowRunsAtom)[0] as any)?.steps?.[0]?.reason || '',
+    };
+  };
+
+  const under = run(2);   // 400
+  const over = run(5);    // 1000
+  check('an order under the threshold does NOT get the discount', under.out, 0);
+  check('an order over it does', over.out, 50);
+  check('and the run log names the formula that failed', under.reason.includes(`${QTY} * ${PRICE} > 500`), true);
+  check('and what it answered', under.reason.includes('answered false'), true);
+
+  // The same guard in the many-conditions shape.
+  const store = createStore();
+  store.set(allBlockIdsAtom, [BTN, QTY, PRICE, OUT]);
+  store.set(blockRuntimeAtom(BTN), { ...base, value: 0 });
+  store.set(blockRuntimeAtom(QTY), { ...base, value: 2 });
+  store.set(blockRuntimeAtom(PRICE), { ...base, value: 200 });
+  store.set(blockRuntimeAtom(OUT), { ...base, value: 0 });
+  store.set(formulasAtom, []);
+  store.set(workflowsAtom, [{
+    id: 'w2', sourceId: BTN, sourceEvent: 'onClick', match: 'all',
+    steps: [{
+      targetId: OUT, action: 'set', value: 50,
+      conditions: [{ fieldId: '', operator: 'equals', expression: `${QTY} * ${PRICE} > 500` }],
+    }],
+  }] as any);
+  executeWorkflow(BTN, 'onClick', store);
+  check('the many-conditions shape gates too', store.get(blockRuntimeAtom(OUT)).value, 0);
+
+  // A condition row with neither a field nor an expression is not a condition,
+  // and must not turn into one that is always false.
+  const empty = createStore();
+  empty.set(allBlockIdsAtom, [BTN, OUT]);
+  empty.set(blockRuntimeAtom(BTN), { ...base, value: 0 });
+  empty.set(blockRuntimeAtom(OUT), { ...base, value: 0 });
+  empty.set(formulasAtom, []);
+  empty.set(workflowsAtom, [{
+    id: 'w3', sourceId: BTN, sourceEvent: 'onClick',
+    steps: [{ targetId: OUT, action: 'set', value: 9, condition: { fieldId: '', operator: 'equals', expression: '' } }],
+  }] as any);
+  executeWorkflow(BTN, 'onClick', store === empty ? store : empty);
+  check('an empty condition row is no condition, so the step still runs', empty.get(blockRuntimeAtom(OUT)).value, 9);
 }
 
 say(`\n${passed} passed, ${failed} failed`);

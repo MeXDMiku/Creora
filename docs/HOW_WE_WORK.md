@@ -144,6 +144,24 @@ disagree, the audit is right and the queue is stale.
                                       touched. NOT SEEN ON A SCREEN -- the rules
                                       are checked, the feel is not.
 
+    -- Status dashboard (Layer 3)     DONE, cycle 11, 14 Aug, as the Health
+                                      panel. It was still sitting at the top of
+                                      this queue on 16 Aug, three days after it
+                                      shipped -- the second time this list has
+                                      described finished work as the next thing
+                                      to do. Prose is the one thing in this repo
+                                      that nothing checks.
+
+    -- Formula language               DONE, 16 Aug. Was `+ - * / %` over a
+                                      `default: return 0`, so `if(...)` and
+                                      `Price > 100` both silently answered 0.
+                                      Now 30 functions, comparisons that hand
+                                      over to evaluateCondition rather than
+                                      being written twice, and errors that say
+                                      what is wrong. Conditions can be a whole
+                                      formula, which is what makes "only when
+                                      Qty * Price > 500" sayable at all.
+
     1  Status dashboard (Layer 3)     The Operations layer: what exists, what is
                                       published, what is BROKEN and nobody has
                                       noticed. Fell out of this queue during a

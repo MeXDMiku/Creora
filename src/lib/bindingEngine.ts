@@ -1,5 +1,5 @@
 import { getDefaultStore } from 'jotai';
-import type { TriggerEvent } from '../types/creora';
+import type { TriggerEvent, StepCondition } from '../types/creora';
 import { blockRuntimeAtom, workflowsAtom, formulasAtom, allBlockIdsAtom, getBlockDefaultValue , recordRun, blockValuesByName, type RunStep } from '../state/atoms';
 import { sendWebhook } from './webhook';
 import { computeDatabaseOutput } from './databaseOutput';
@@ -7,7 +7,7 @@ import { validateValue } from './validation';
 // Re-exported so every existing import of evaluateCondition from this file
 // keeps working. The definition now lives in conditions.ts.
 import { evaluateCondition } from './conditions';
-import { evaluateExpression, type FormulaValue } from './formula';
+import { evaluateExpression, truthy, type FormulaValue } from './formula';
 export { evaluateCondition };
 import { renderTemplate } from './format';
 import { supabase } from './supabase';
@@ -111,6 +111,66 @@ export function conditionHolds(
   if (operator === 'isInvalid') return validationErrorFor(fieldId, store) !== null;
   const state = store.get(blockRuntimeAtom(fieldId));
   return evaluateCondition(state?.value, operator, expected);
+}
+
+/**
+ * Every block's current value, keyed by its id, ready for a formula.
+ *
+ * Extracted from recalculateAllFormulas the moment a second caller appeared.
+ * A formula and a condition asking the same question of the same page have to
+ * be looking at the same values -- two scope builders would drift, and the one
+ * that drifted would be whichever was edited second.
+ *
+ * Values are RAW. Coercing to number here is what made text comparisons
+ * impossible; arithmetic coerces inside the operator instead.
+ */
+export function formulaScope(store: any): Record<string, any> {
+  const scope: Record<string, any> = {};
+  for (const blockId of store.get(allBlockIdsAtom)) {
+    scope[blockId] = store.get(blockRuntimeAtom(blockId))?.value ?? 0;
+  }
+  return scope;
+}
+
+/**
+ * One condition, answered, with the sentence explaining what happened.
+ *
+ * The sentence is returned rather than rebuilt by the caller because the run
+ * log used to print raw block ids and a JSON value, which told a builder
+ * nothing they could act on -- and an expression condition has no fieldId or
+ * operator to print at all.
+ *
+ * A formula that throws makes the condition FALSE and says why. Failing closed
+ * is the safe direction: a broken condition guarding a row write should stop
+ * the write, not wave it through.
+ */
+export function stepConditionResult(
+  condition: StepCondition,
+  store: ReturnType<typeof getDefaultStore>
+): { pass: boolean; describe: string } {
+  const expression = (condition.expression || '').trim();
+  if (expression) {
+    try {
+      const answer = evaluateExpression(expression, formulaScope(store));
+      const pass = truthy(answer);
+      return {
+        pass,
+        describe: `${expression} -> ${pass ? 'pass' : 'FAIL'} (answered ${JSON.stringify(answer)})`,
+      };
+    } catch (err: any) {
+      return {
+        pass: false,
+        describe: `${expression} -> FAIL (${err?.message || 'the formula could not be worked out'})`,
+      };
+    }
+  }
+
+  const pass = conditionHolds(condition.fieldId, condition.operator, condition.value, store);
+  const actual = store.get(blockRuntimeAtom(condition.fieldId))?.value;
+  return {
+    pass,
+    describe: `${condition.fieldId} ${condition.operator} ${JSON.stringify(condition.value)} -> ${pass ? 'pass' : 'FAIL'} (actual ${JSON.stringify(actual)})`,
+  };
 }
 
 /**
@@ -256,28 +316,37 @@ export function executeWorkflow(
       // A step can carry many conditions now. `conditions` wins when present;
       // `condition` (singular) is still read so every page saved before this
       // keeps behaving identically.
+      /**
+       * `fieldId` used to be the test for "is this a real condition", which was
+       * fine while every condition named a field. An expression condition names
+       * none -- so this guard silently dropped it and the step ran with NO
+       * condition at all, which is the worst possible direction to fail in: a
+       * step guarded by "only when the order is over 500" ran on every order.
+       *
+       * Found by running a workflow in the browser, not by the 784 checks, all
+       * of which called stepConditionResult directly and never came through
+       * here. A gate is exactly what the author of a condition does not think
+       * to test.
+       */
+      const isRealCondition = (c: StepCondition | null | undefined) =>
+        !!c && (!!c.fieldId || (c.expression || '').trim() !== '');
+
       const stepConditions =
-        step.conditions && step.conditions.length
-          ? step.conditions
-          : step.condition && step.condition.fieldId
-            ? [step.condition]
+        step.conditions && step.conditions.filter(isRealCondition).length
+          ? step.conditions.filter(isRealCondition)
+          : isRealCondition(step.condition)
+            ? [step.condition as StepCondition]
             : [];
 
       if (stepConditions.length) {
-        const results = stepConditions.map((c) =>
-          conditionHolds(c.fieldId, c.operator, c.value, store)
-        );
+        const outcomes = stepConditions.map((c) => stepConditionResult(c, store));
+        const results = outcomes.map((o) => o.pass);
         const matchMode = step.match === 'any' ? 'any' : 'all';
         const conditionPassed =
           matchMode === 'any' ? results.some(Boolean) : results.every(Boolean);
 
         if (!conditionPassed) {
-          const detail = stepConditions
-            .map((c, i) => {
-              const actual = store.get(blockRuntimeAtom(c.fieldId))?.value;
-              return `${c.fieldId} ${c.operator} ${JSON.stringify(c.value)} -> ${results[i] ? 'pass' : 'FAIL'} (actual ${JSON.stringify(actual)})`;
-            })
-            .join('; ');
+          const detail = outcomes.map((o) => o.describe).join('; ');
           if (step.elseAction) {
             const elseTarget = step.elseTargetId || step.targetId;
             const { before, after } = runElseAction(
@@ -960,20 +1029,8 @@ export function recalculateAllFormulas(store: any) {
   // Execute formula evaluation in 2 successive passes to resolve chained formula dependencies
   for (let pass = 1; pass <= 2; pass++) {
     // 1. Build variables scope
-    scope = {};
-    for (const blockId of allBlockIds) {
-      const runtimeState = store.get(blockRuntimeAtom(blockId));
-      /**
-       * The raw value, not a number.
-       *
-       * This used to coerce every block to a number before the formula saw it,
-       * which is why text could never be compared: a Status of "paid" arrived
-       * as 0, and so did "shipped". Arithmetic still coerces -- it does it
-       * inside the operator now, on exactly the same rules -- so `A + B` is
-       * unchanged, while `Status == "paid"` becomes sayable.
-       */
-      scope[blockId] = runtimeState?.value ?? 0;
-    }
+    scope = formulaScope(store);
+
 
     // 2. Evaluate all formula bindings
     for (const binding of formulas) {

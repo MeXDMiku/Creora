@@ -68,7 +68,7 @@ function text(v: any): string {
 }
 
 /** Truthiness, said the way a builder means it rather than the way JS means it. */
-function truthy(v: any): boolean {
+export function truthy(v: any): boolean {
   if (typeof v === 'boolean') return v;
   if (typeof v === 'number') return v !== 0;
   if (isBlankValue(v)) return false;

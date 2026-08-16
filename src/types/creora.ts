@@ -44,6 +44,16 @@ export interface StepCondition {
   fieldId: string;
   operator: ConditionOperator;
   value?: any;
+  /**
+   * A whole formula instead of one field-operator-value row.
+   *
+   * When this is set the other three are ignored. It exists because a condition
+   * could only ever compare ONE block against ONE fixed value, so "only submit
+   * when the order is over 500" -- Qty times Price -- was not sayable at all,
+   * no matter how many conditions were added. The formula language already
+   * knew how to say it; conditions just had no way to ask.
+   */
+  expression?: string;
 }
 
 export interface WorkflowStep {
