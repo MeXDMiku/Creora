@@ -1073,7 +1073,17 @@ export function evaluateFormula(formula: string, scope: Record<string, any>): Fo
  *   Only executeWorkflow turns it on, because only there is the recalculation
  *   the CONSEQUENCE of something a person or a poll just did.
  */
-export function recalculateAllFormulas(store: any, options?: { propagate?: boolean }) {
+export function recalculateAllFormulas(
+  /**
+   * Typed rather than `any` on purpose. `any` accepted `null`, and five call
+   * sites in the Database inspector passed exactly that for weeks -- every
+   * column edit threw, and no check could have caught it because nothing about
+   * it was wrong until it ran. A real type makes `null` a compile error, which
+   * is a guard that cannot be forgotten.
+   */
+  store: ReturnType<typeof getDefaultStore>,
+  options?: { propagate?: boolean },
+) {
   const allBlockIds = store.get(allBlockIdsAtom);
   const formulas = store.get(formulasAtom);
 

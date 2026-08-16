@@ -1,4 +1,4 @@
-import { useAtom, useSetAtom } from 'jotai';
+import { useAtom, useSetAtom, useStore } from 'jotai';
 import { useEffect, useState } from 'react';
 import { getCollectionPrivate, setCollectionPrivate } from '../lib/collections';
 import { computeDatabaseOutput } from '../lib/databaseOutput';
@@ -8,6 +8,16 @@ import { recalculateAllFormulas } from '../lib/bindingEngine';
 export default function DatabaseBlockInspector({ blockId }: { blockId: string; editor: any }) {
   const [runtimeState, setRuntimeState] = useAtom(blockRuntimeAtom(blockId));
   const triggerSave = useSetAtom(triggerSaveAtom);
+  /**
+   * The real store.
+   *
+   * All five column handlers called `recalculateAllFormulas(null)`, whose first
+   * line is `store.get(...)`. So every add, rename, retype, delete and output
+   * mode change threw `Cannot read properties of null` -- and, quietly worse,
+   * skipped the recalculation entirely, so a Number Display counting rows or
+   * summing a column did not move until something unrelated triggered one.
+   */
+  const store = useStore();
 
   /**
    * Per-visitor rows. The switch is NOT part of the page's saved state: it
@@ -85,7 +95,7 @@ export default function DatabaseBlockInspector({ blockId }: { blockId: string; e
       value: nextValue
     }));
     triggerSave(prev => prev + 1);
-    recalculateAllFormulas(null); // Recalculate bindings in background
+    recalculateAllFormulas(store); // Recalculate bindings in background
   };
 
   const handleAddColumn = () => {
@@ -136,7 +146,7 @@ export default function DatabaseBlockInspector({ blockId }: { blockId: string; e
       value: nextValue
     }));
     triggerSave(prev => prev + 1);
-    recalculateAllFormulas(null);
+    recalculateAllFormulas(store);
   };
 
   const handleChangeColumnType = (index: number, newType: 'text' | 'number' | 'boolean') => {
@@ -173,7 +183,7 @@ export default function DatabaseBlockInspector({ blockId }: { blockId: string; e
       value: nextValue
     }));
     triggerSave(prev => prev + 1);
-    recalculateAllFormulas(null);
+    recalculateAllFormulas(store);
   };
 
   const handleDeleteColumn = (index: number) => {
@@ -204,7 +214,7 @@ export default function DatabaseBlockInspector({ blockId }: { blockId: string; e
       value: nextValue
     }));
     triggerSave(prev => prev + 1);
-    recalculateAllFormulas(null);
+    recalculateAllFormulas(store);
   };
 
   const handleSelectOutputMode = (mode: string) => {
@@ -218,7 +228,7 @@ export default function DatabaseBlockInspector({ blockId }: { blockId: string; e
       value: nextValue
     }));
     triggerSave(prev => prev + 1);
-    recalculateAllFormulas(null);
+    recalculateAllFormulas(store);
   };
 
   const controlLabelStyle = { display: 'block', marginBottom: '8px', fontSize: '13px', fontWeight: 500, color: '#475569' };
