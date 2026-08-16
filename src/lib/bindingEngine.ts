@@ -1198,17 +1198,73 @@ export function recalculateAllFormulas(store: any, options?: { propagate?: boole
     }
   }
 
-  // 4. Update all List blocks from Supabase
+  /**
+   * 4. Update all List blocks from Supabase.
+   *
+   * HOW MANY QUERIES ONE CLICK COSTS
+   * This runs at the end of every executeWorkflow, and since chains propagate
+   * (a step firing its target's onChange, and as of today a formula firing its
+   * own), ONE click can execute several workflows one after another -- up to
+   * MAX_CHAIN_DEPTH. Each of those ended here and fired one query per List
+   * block. Two List blocks on a three-link chain was six queries for one press,
+   * and today's formula propagation made those chains longer.
+   *
+   * That is the 5 GB egress the free tier actually runs out of, spent on
+   * refetching rows nobody asked for.
+   *
+   * Only the OUTERMOST recalculation fetches now. Every inner link would fetch
+   * the same rows for the same blocks a few milliseconds apart, so the ones
+   * being skipped are duplicates by construction, not data that goes missing.
+   */
+  if (shouldFetchListRows(chainDepth)) fetchListBlockRows(allBlockIds, store);
+}
+
+/**
+ * Only the outermost recalculation fetches.
+ *
+ * A named function rather than `chainDepth === 0` written inline, because
+ * chainDepth is module-private and a guard nothing can reach is a guard nothing
+ * can prove. Removing the inline version turned zero checks red -- which is the
+ * definition of decoration -- so the policy is stated here where a check can
+ * ask it directly, and a second check asserts the call site still calls it.
+ *
+ * Inner links would fetch the same rows for the same blocks milliseconds apart,
+ * so what is skipped is duplicates by construction, not data going missing.
+ */
+export function shouldFetchListRows(depth: number): boolean {
+  return depth === 0;
+}
+
+/**
+ * Split out so the count is checkable.
+ *
+ * Living inline meant "how many queries does a click cost" could only be
+ * answered by watching a network tab, and the browser was not a reliable
+ * instrument. `fetchRows` is injectable for exactly that: a check can count
+ * calls without a network, which is the difference between knowing and
+ * assuming.
+ */
+export function fetchListBlockRows(
+  allBlockIds: string[],
+  store: any,
+  // Supabase's builder is thenable rather than a real Promise, so it is awaited
+  // into one here. Typing the parameter as the builder would tie every future
+  // caller -- and every check -- to Supabase's shape.
+  fetchRows: (trackedId: string) => Promise<{ data?: any; error?: any }> =
+    async (trackedId) => await supabase.rpc('list_database_rows', { p_block_id: trackedId }),
+): number {
+  let issued = 0;
   for (const blockId of allBlockIds) {
-    // Same reason as above. `listBlock` is also the shortest of the words this
-    // used to match on, so it was the likeliest to be hit by accident.
+    // Through the registry, not by substring-matching the id. `list` is also
+    // the shortest of the words the old check matched on, so it was the
+    // likeliest to be hit by accident.
     if (nodeTypeFromBlockId(blockId) === 'listBlock') {
       const listAtom = blockRuntimeAtom(blockId);
       const listState = store.get(listAtom);
       const trackedId = listState?.trackedBlockId;
       if (trackedId) {
-        supabase
-          .rpc('list_database_rows', { p_block_id: trackedId })
+        issued += 1;
+        fetchRows(trackedId)
           .then(({ data, error }: any) => {
             if (error) {
               console.warn('[ListBlock recalculate] Supabase fetch error:', error.message);
@@ -1228,9 +1284,11 @@ export function recalculateAllFormulas(store: any, options?: { propagate?: boole
                 });
               }
             }
-          });
+          })
+          .catch(() => { /* a refresh that fails must not take the page with it */ });
       }
     }
   }
+  return issued;
 }
 

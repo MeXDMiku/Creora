@@ -43,7 +43,7 @@ import { withoutVisitorState, isBlockNodeType, BLOCK_NODE_TYPES, portableTypeFro
 import { getBlockTypeDisplayName } from '../src/state/atoms';
 import { remapBlockIds, shouldRemapOnImport, remapFormulaExpression } from '../src/lib/remapBlockIds';
 import { evaluateExpression, FORMULA_FUNCTION_NAMES } from '../src/lib/formula';
-import { stepConditionResult, formulaScope, recalculateAllFormulas, runPageLoadWorkflows } from '../src/lib/bindingEngine';
+import { stepConditionResult, formulaScope, recalculateAllFormulas, runPageLoadWorkflows, fetchListBlockRows, shouldFetchListRows } from '../src/lib/bindingEngine';
 import { safeUrl, isSafeUrlValue, schemeOf, stripIgnorable } from '../src/lib/urls';
 import { fillSlots, leadingSlotName, findSlots as findSlotsForCheck } from '../src/lib/sanitizeHtml';
 import { visibleRows, rowSlots, compareCells, slotNamesFor, rowMatchesSearch, MAX_RENDERED_ROWS } from '../src/lib/rows';
@@ -3076,6 +3076,92 @@ group('the wire sentence says what a page-load wire does');
   check('and it still admits to being conditional',
     wireSentence({ sourceName: 'x', targetName: 'Total', event: 'onLoad', action: 'set', conditional: true }),
     'When the page opens → set Total, but only sometimes');
+}
+
+group('one click does not cost one query per link of the chain');
+{
+  /**
+   * The List refresh runs at the end of every executeWorkflow. Chains propagate
+   * -- a step fires its target's onChange, and as of today a formula fires its
+   * own -- so ONE press can execute several workflows in a row, and each one
+   * ended by firing a query per List block. Two List blocks on a three-link
+   * chain was six queries for one press, all fetching the same rows
+   * milliseconds apart. That is the 5 GB egress the free tier runs out of.
+   *
+   * It was extracted from inline precisely so this number could be counted
+   * without a network -- the browser turned out to be an unreliable instrument
+   * for it, and "I watched the network tab" is not a check that runs tomorrow.
+   */
+  const BTN = 'buttonBlock__q1000000001';
+  const A = 'numberDisplayBlock__q2000000001';
+  const F = 'formulaDisplayBlock__q3000000001';
+  const B = 'numberDisplayBlock__q4000000001';
+  const L1 = 'listBlock__q5000000001';
+  const L2 = 'listBlock__q6000000001';
+  const DB = 'databaseBlock__q7000000001';
+  const base = { visible: true, disabled: false, loading: false, error: null };
+
+  let queries = 0;
+  const countingFetch = async () => { queries += 1; return { data: [] }; };
+
+  const store = createStore();
+  store.set(allBlockIdsAtom, [BTN, A, F, B, L1, L2, DB]);
+  for (const id of [BTN, A, F, B, DB]) store.set(blockRuntimeAtom(id), { ...base, value: 0 });
+  for (const id of [L1, L2]) store.set(blockRuntimeAtom(id), { ...base, value: '', trackedBlockId: DB, rows: [] });
+
+  // Two List blocks, both tracking the same Database.
+  check('both List blocks are asked for rows', fetchListBlockRows(store.get(allBlockIdsAtom), store, countingFetch), 2);
+  check('and that is all that is asked', queries, 2);
+
+  // A block that is not a List is not asked, however its id reads.
+  queries = 0;
+  const notLists = createStore();
+  const decoy = 'buttonBlock__listy0000a1';
+  notLists.set(allBlockIdsAtom, [decoy]);
+  notLists.set(blockRuntimeAtom(decoy), { ...base, value: 0, trackedBlockId: DB });
+  check('a Button whose id happens to contain "list" is not fetched for', fetchListBlockRows(notLists.get(allBlockIdsAtom), notLists, countingFetch), 0);
+
+  // A List with nothing tracked has nothing to fetch.
+  queries = 0;
+  const untracked = createStore();
+  untracked.set(allBlockIdsAtom, [L1]);
+  untracked.set(blockRuntimeAtom(L1), { ...base, value: '', rows: [] });
+  check('a List tracking nothing costs no query', fetchListBlockRows(untracked.get(allBlockIdsAtom), untracked, countingFetch), 0);
+
+  /**
+   * And the whole point: running a three-link chain must not multiply it.
+   * Counted through executeWorkflow, because the multiplication happened there
+   * and not in the function being counted.
+   */
+  queries = 0;
+  const chained = createStore();
+  chained.set(allBlockIdsAtom, [BTN, A, F, B, L1, L2, DB]);
+  for (const id of [BTN, A, F, B, DB]) chained.set(blockRuntimeAtom(id), { ...base, value: 0 });
+  for (const id of [L1, L2]) chained.set(blockRuntimeAtom(id), { ...base, value: '', trackedBlockId: DB, rows: [] });
+  chained.set(formulasAtom, [{ id: 'f', targetBlockId: F, targetProperty: 'value', formula: `${A} * 2`, pageId: 'p' }] as any);
+  chained.set(workflowsAtom, [
+    { id: 'w1', sourceId: BTN, sourceEvent: 'onClick', steps: [{ targetId: A, action: 'set', value: 5 }] },
+    { id: 'w2', sourceId: F, sourceEvent: 'onChange', steps: [{ targetId: B, action: 'set', value: 1 }] },
+  ] as any);
+  executeWorkflow(BTN, 'onClick', chained);
+  check('the three-link chain still ran end to end', chained.get(blockRuntimeAtom(B)).value, 1);
+  check('and the formula still moved', chained.get(blockRuntimeAtom(F)).value, 10);
+
+  /**
+   * The policy itself, asked directly.
+   *
+   * The first version of this group checked only that the chain still worked,
+   * and deleting the depth guard turned nothing red -- chainDepth is
+   * module-private, so nothing could reach it. An unprovable guard is
+   * decoration. It is a named function now, and the call site is checked too,
+   * so sabotaging either end shows up.
+   */
+  check('the outermost recalculation fetches', shouldFetchListRows(0), true);
+  check('an inner link of a chain does not', shouldFetchListRows(1), false);
+  check('nor a deeper one', shouldFetchListRows(7), false);
+  const engineSource = readFileSync('src/lib/bindingEngine.ts', 'utf8');
+  check('and the call site actually asks the policy',
+    /shouldFetchListRows\(chainDepth\)/.test(engineSource), true);
 }
 
 say(`\n${passed} passed, ${failed} failed`);
