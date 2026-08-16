@@ -41,6 +41,7 @@ import {
 } from '../src/lib/fields';
 import { withoutVisitorState, isBlockNodeType, BLOCK_NODE_TYPES, portableTypeFromNodeType, nodeTypeFromPortableType, nodeTypeFromBlockId } from '../src/lib/blockRegistry';
 import { remapBlockIds, shouldRemapOnImport, remapFormulaExpression } from '../src/lib/remapBlockIds';
+import { evaluateExpression, FORMULA_FUNCTION_NAMES } from '../src/lib/formula';
 import { safeUrl, isSafeUrlValue, schemeOf, stripIgnorable } from '../src/lib/urls';
 import { fillSlots, leadingSlotName, findSlots as findSlotsForCheck } from '../src/lib/sanitizeHtml';
 import { visibleRows, rowSlots, compareCells, slotNamesFor, rowMatchesSearch, MAX_RENDERED_ROWS } from '../src/lib/rows';
@@ -2487,6 +2488,170 @@ group('one id is never rewritten inside another');
   check('the longer id wins where they overlap', remapFormulaExpression(`${longId} + ${shortId}`, map), 'inputBlock__2222 + inputBlock__1111');
   check('a bare word that merely starts the same is untouched', remapFormulaExpression(`${shortId}zzz + 1`, map), `${shortId}zzz + 1`);
   check('an empty formula stays empty', remapFormulaExpression('', map), '');
+}
+
+
+// ------------------------------------------------------ what a formula can say
+/**
+ * The old evaluator was `+ - * / %` over a `default: return 0`, so every
+ * function call and every comparison answered 0 in silence.
+ */
+group('formulas do arithmetic exactly as they always did');
+{
+  const s = { A: 10, B: 4, T: true, Blank: '', Txt: '7' };
+  check('add', evaluateExpression('A + B', s), 14);
+  check('subtract', evaluateExpression('A - B', s), 6);
+  check('multiply', evaluateExpression('A * B', s), 40);
+  check('divide', evaluateExpression('A / B', s), 2.5);
+  check('remainder', evaluateExpression('A % B', s), 2);
+  check('precedence is not invented here', evaluateExpression('A + B * 2', s), 18);
+  check('brackets still win', evaluateExpression('(A + B) * 2', s), 28);
+  check('negate', evaluateExpression('-A', s), -10);
+  // The old scope turned every block into a number before the formula saw it.
+  // Arithmetic must keep behaving that way or existing pages change under you.
+  check('a boolean is still 1', evaluateExpression('T + 1', s), 2);
+  check('numeric text is still a number', evaluateExpression('Txt + 1', s), 8);
+  check('a blank is still zero in arithmetic', evaluateExpression('Blank + 5', s), 5);
+  check('dividing by zero is still 0, not an error', evaluateExpression('A / 0', s), 0);
+  check('an empty formula is still 0', evaluateExpression('', s), 0);
+  check('a block that is not there still says so', (() => {
+    try { evaluateExpression('Nope + 1', s); return 'no error'; }
+    catch (e: any) { return e.message; }
+  })(), 'Referenced block "Nope" does not exist');
+}
+
+group('a formula can now ask a question');
+{
+  const s = { Price: 120, Zero: 0, Blank: '', Status: 'paid', Stock: 3 };
+  check('greater than', evaluateExpression('Price > 100', s), true);
+  check('less than', evaluateExpression('Price < 100', s), false);
+  check('at least', evaluateExpression('Price >= 120', s), true);
+  check('at most', evaluateExpression('Price <= 119', s), false);
+  check('equals a number', evaluateExpression('Stock == 3', s), true);
+  check('does not equal', evaluateExpression('Stock != 3', s), false);
+  check('equals text', evaluateExpression('Status == "paid"', s), true);
+  check('text that does not match', evaluateExpression('Status == "draft"', s), false);
+
+  /**
+   * The reason comparisons are not implemented in formula.ts at all: they hand
+   * over to evaluateCondition, so the blank-is-not-zero rule that cost cycle 5
+   * a day comes along for free. `Number('')` is 0, so a naive `Blank < 9` is
+   * true for every row nobody filled in.
+   */
+  check('a blank cannot be compared, so it is not less than 9', evaluateExpression('Blank < 9', s), false);
+  check('nor greater than -1', evaluateExpression('Blank > -1', s), false);
+  check('but a real zero compares normally', evaluateExpression('Zero < 9', s), true);
+}
+
+group('a formula can now choose');
+{
+  const s = { Stock: 3, Empty: 0, Subtotal: 600, Agreed: true, Email: '' };
+  check('if, taking the first branch', evaluateExpression('if(Stock > 0, "In stock", "Sold out")', s), 'In stock');
+  check('if, taking the second', evaluateExpression('if(Empty > 0, "In stock", "Sold out")', s), 'Sold out');
+  check('free delivery over 500', evaluateExpression('if(Subtotal >= 500, 0, 50)', s), 0);
+  check('and the other way', evaluateExpression('if(Subtotal >= 5000, 0, 50)', s), 50);
+  check('if with no else is blank, not zero', evaluateExpression('if(Empty > 0, "yes")', s), '');
+  check('the ternary spelling works too', evaluateExpression('Stock > 0 ? "yes" : "no"', s), 'yes');
+  check('and', evaluateExpression('and(Agreed, not(isBlank(Email)))', s), false);
+  check('and, both true', evaluateExpression('and(Agreed, isBlank(Email))', s), true);
+  check('or', evaluateExpression('or(Agreed, false)', s), true);
+  check('not', evaluateExpression('not(Agreed)', s), false);
+  check('&& spelling', evaluateExpression('Stock > 0 && Subtotal > 100', s), true);
+  check('|| spelling', evaluateExpression('Stock > 99 || Subtotal > 100', s), true);
+  check('! spelling', evaluateExpression('!Agreed', s), false);
+  // A word, not a block. Someone will write these before they write a block name.
+  check('true reads as a word', evaluateExpression('if(true, 1, 2)', {}), 1);
+  check('false reads as a word', evaluateExpression('if(false, 1, 2)', {}), 2);
+}
+
+group('the number functions');
+{
+  const s = { A: 10, B: 4, Neg: -7, Sub: 1000 };
+  check('min', evaluateExpression('min(A, B, 99)', s), 4);
+  check('max', evaluateExpression('max(A, B, 99)', s), 99);
+  check('sum', evaluateExpression('sum(A, B, 1)', s), 15);
+  check('avg', evaluateExpression('avg(A, B)', s), 7);
+  check('abs', evaluateExpression('abs(Neg)', s), 7);
+  check('floor', evaluateExpression('floor(2.9)', s), 2);
+  check('ceil', evaluateExpression('ceil(2.1)', s), 3);
+  check('round to whole', evaluateExpression('round(2.5)', s), 3);
+  check('round to places', evaluateExpression('round(Sub * 0.18, 2)', s), 180);
+  check('tax on an awkward number', evaluateExpression('round(19.99 * 0.2, 2)', s), 4);
+  // toFixed would hand back the string "1.50" and everything downstream would
+  // stop treating it as a number. There is a check because it is tempting.
+  check('rounding gives a number, not text', typeof evaluateExpression('round(1.5, 2)', s), 'number');
+  check('and the classic floating point case', evaluateExpression('round(1.005, 2)', s), 1.01);
+  check('pow', evaluateExpression('pow(2, 10)', s), 1024);
+  check('sqrt', evaluateExpression('sqrt(16)', s), 4);
+  check('sqrt of a negative is 0, not NaN', evaluateExpression('sqrt(0 - 4)', s), 0);
+  check('clamp inside', evaluateExpression('clamp(50, 0, 100)', s), 50);
+  check('clamp below', evaluateExpression('clamp(0 - 5, 0, 100)', s), 0);
+  check('clamp above', evaluateExpression('clamp(150, 0, 100)', s), 100);
+  // Swapped bounds should still land inside them rather than collapse.
+  check('clamp survives its bounds being the wrong way round', evaluateExpression('clamp(50, 100, 0)', s), 50);
+}
+
+group('the text functions');
+{
+  const s = { First: 'Ada', Last: 'Lovelace', Nothing: '', Msg: 'Hello World' };
+  check('len', evaluateExpression('len(First)', s), 3);
+  check('upper', evaluateExpression('upper(First)', s), 'ADA');
+  check('lower', evaluateExpression('lower(First)', s), 'ada');
+  check('trim', evaluateExpression('trim("  a  ")', s), 'a');
+  check('join', evaluateExpression('join(" ", First, Last)', s), 'Ada Lovelace');
+  // Otherwise a missing surname leaves a trailing space on every name.
+  check('join skips a blank instead of leaving a gap', evaluateExpression('join(" ", First, Nothing)', s), 'Ada');
+  check('concat', evaluateExpression('concat(First, "!")', s), 'Ada!');
+  check('contains', evaluateExpression('contains(Msg, "world")', s), true);
+  check('contains is not case fussy', evaluateExpression('contains(Msg, "WORLD")', s), true);
+  check('startsWith', evaluateExpression('startsWith(Msg, "hello")', s), true);
+  check('endsWith', evaluateExpression('endsWith(Msg, "rld")', s), true);
+  check('replace', evaluateExpression('replace(Msg, "World", "there")', s), 'Hello there');
+  check('replace changes every one', evaluateExpression('replace("a-a-a", "a", "b")', s), 'b-b-b');
+  check('left', evaluateExpression('left(Msg, 5)', s), 'Hello');
+  check('right', evaluateExpression('right(Msg, 5)', s), 'World');
+  check('right of nothing is nothing, not everything', evaluateExpression('right(Msg, 0)', s), '');
+  check('number()', evaluateExpression('number("12") + 1', s), 13);
+  check('text()', evaluateExpression('text(12)', s), '12');
+  check('isBlank on empty', evaluateExpression('isBlank(Nothing)', s), true);
+  check('isBlank on a space is still blank', evaluateExpression('isBlank("   ")', s), true);
+  check('isBlank on a real zero is false', evaluateExpression('isBlank(0)', s), false);
+}
+
+group('a formula that cannot be answered says so, instead of returning zero');
+{
+  const say = (f: string, s: any = {}) => {
+    try { return { ok: evaluateExpression(f, s) }; }
+    catch (e: any) { return { err: e.message }; }
+  };
+  // This is the whole point of the rewrite. Every one of these used to be 0.
+  check('an unknown function is named', say('sparkline(1)').err?.startsWith('There is no function called "sparkline"'), true);
+  check('and the real ones are listed', say('sparkline(1)').err?.includes('round'), true);
+  check('too few arguments', say('round()').err, 'round() needs 1 to 2 values, and was given 0');
+  check('too many arguments', say('abs(1, 2)').err, 'abs() needs 1 value, and was given 2');
+  check('if needs at least two', say('if(true)').err, 'if() needs 2 to 3 values, and was given 1');
+  check('a dot is explained rather than ignored', say('A.b', { A: 1 }).err, 'A formula refers to a block by its own name, not with a dot');
+  check('two formulas at once', say('1; 2').err, 'One formula at a time -- remove the comma or semicolon');
+  check('unreadable text', say('((((').err, 'That formula could not be read. Check the brackets and quotes.');
+  check('a function name is not case fussy', say('ROUND(2.5)').ok, 3);
+}
+
+group('formulas compose with everything already built');
+{
+  // The reason to add a language rather than a "tax block" or a "discount
+  // block": these are all one expression each, and none of them needed code.
+  const cart = { Qty: 3, UnitPrice: 19.99, Member: true, Country: 'IN' };
+  check('line total', evaluateExpression('round(Qty * UnitPrice, 2)', cart), 59.97);
+  check('member discount', evaluateExpression('round(Qty * UnitPrice * if(Member, 0.9, 1), 2)', cart), 53.97);
+  check('tax only in one country', evaluateExpression('if(Country == "IN", round(Qty * UnitPrice * 0.18, 2), 0)', cart), 10.79);
+  check('delivery banding', evaluateExpression('if(Qty * UnitPrice >= 500, 0, if(Qty * UnitPrice >= 100, 25, 50))', cart), 50);
+
+  const profile = { First: 'Ada', Last: '', Email: 'ada@example.com' };
+  check('a display name that survives a missing surname', evaluateExpression('join(" ", First, Last)', profile), 'Ada');
+  check('a status sentence', evaluateExpression('if(isBlank(Email), "No email yet", concat("Contact: ", Email))', profile), 'Contact: ada@example.com');
+
+  const stock = { Count: 0, Threshold: 5 };
+  check('three-way stock label', evaluateExpression('if(Count == 0, "Sold out", if(Count < Threshold, "Low stock", "In stock"))', stock), 'Sold out');
 }
 
 say(`\n${passed} passed, ${failed} failed`);

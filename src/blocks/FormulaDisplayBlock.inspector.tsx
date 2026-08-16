@@ -1,6 +1,7 @@
 import { useAtom, useSetAtom, useStore } from 'jotai'
 import { blockRuntimeAtom, triggerSaveAtom, formulasAtom, getBlockTypeDisplayName, getCanvasBlocks } from '../state/atoms'
 import { recalculateAllFormulas } from '../lib/bindingEngine'
+import { FORMULA_FUNCTION_NAMES } from '../lib/formula'
 import { useMemo, useState, useEffect } from 'react'
 
 const PAGE_ID = '00000000-0000-0000-0000-000000000001'
@@ -161,10 +162,62 @@ export default function FormulaDisplayBlockInspector({ blockId, editor }: { bloc
                 triggerSave(prev => prev + 1)
               }, 0)
             }}
-            placeholder="e.g. test_num_1 * 5"
+            placeholder='e.g. round(Price * 0.18, 2)' 
             style={{ display: 'block', marginTop: '4px', width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #ccc', boxSizing: 'border-box', background: '#f8fafc', color: '#0f172a', outline: 'none' }}
           />
         </label>
+
+        {/*
+          What this formula says right now, or why it does not.
+
+          A formula language nobody can see is not a language. The error text
+          comes from the block's own `error` field rather than being computed
+          again here, so the sentence a builder reads is the same one the engine
+          produced -- two evaluators would eventually disagree, and the one on
+          screen would be the wrong one.
+        */}
+        {formulaValue.trim() !== '' && (
+          <div style={{ marginTop: '6px', fontSize: '12px', lineHeight: 1.4 }}>
+            {runtimeState.error ? (
+              <span style={{ color: '#b91c1c' }}>{runtimeState.error}</span>
+            ) : (
+              <span style={{ color: '#475569' }}>
+                = <strong style={{ color: '#0f172a' }}>{String(runtimeState.value ?? '')}</strong>
+              </span>
+            )}
+          </div>
+        )}
+
+        {/*
+          The list exists because the tester's complaint was not "this is ugly",
+          it was "there is not much I can do" -- said about a product with
+          seventeen block types. Everything a formula can do was invisible.
+        */}
+        <details style={{ marginTop: '10px' }}>
+          <summary style={{ cursor: 'pointer', fontSize: '12px', color: '#475569', fontWeight: 500 }}>
+            What can I write here?
+          </summary>
+          <div style={{ marginTop: '6px', fontSize: '11.5px', color: '#475569', lineHeight: 1.5 }}>
+            <div style={{ marginBottom: '6px' }}>
+              Maths <code>+ - * / %</code> &middot; questions <code>&gt; &lt; &gt;= &lt;= == !=</code>
+            </div>
+            <div style={{ marginBottom: '6px' }}>
+              <strong>Choose:</strong> <code>if(Stock &gt; 0, "In stock", "Sold out")</code>
+            </div>
+            <div style={{ marginBottom: '6px' }}>
+              <strong>Round money:</strong> <code>round(Price * 0.18, 2)</code>
+            </div>
+            <div style={{ marginBottom: '6px' }}>
+              <strong>Join text:</strong> <code>join(" ", First, Last)</code>
+            </div>
+            <div style={{ marginTop: '8px', paddingTop: '6px', borderTop: '1px solid #e5e7eb' }}>
+              {FORMULA_FUNCTION_NAMES.join(' &middot; ').replace(/&middot;/g, '\u00b7')}
+            </div>
+            <div style={{ marginTop: '6px', color: '#64748b' }}>
+              Use the picker below to drop a block in by name.
+            </div>
+          </div>
+        </details>
 
         {canvasBlocks.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '8px' }}>

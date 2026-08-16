@@ -1,5 +1,4 @@
 import { getDefaultStore } from 'jotai';
-import jsep from 'jsep';
 import type { TriggerEvent } from '../types/creora';
 import { blockRuntimeAtom, workflowsAtom, formulasAtom, allBlockIdsAtom, getBlockDefaultValue , recordRun, blockValuesByName, type RunStep } from '../state/atoms';
 import { sendWebhook } from './webhook';
@@ -8,6 +7,7 @@ import { validateValue } from './validation';
 // Re-exported so every existing import of evaluateCondition from this file
 // keeps working. The definition now lives in conditions.ts.
 import { evaluateCondition } from './conditions';
+import { evaluateExpression, type FormulaValue } from './formula';
 export { evaluateCondition };
 import { renderTemplate } from './format';
 import { supabase } from './supabase';
@@ -938,51 +938,24 @@ export function executeWorkflow(
   recalculateAllFormulas(store);
 }
 
-export function evaluateFormula(formula: string, scope: Record<string, any>): number {
-  if (!formula || formula.trim() === '') return 0;
-  
-  const ast = jsep(formula);
-  const evalNode = (node: any): any => {
-    switch (node.type) {
-      case 'Literal':
-        return Number(node.value);
-      case 'Identifier':
-        if (!(node.name in scope)) {
-          throw new Error(`Referenced block "${node.name}" does not exist`);
-        }
-        const val = scope[node.name];
-        return val !== undefined ? Number(val) : 0;
-      case 'UnaryExpression': {
-        const arg = evalNode(node.argument);
-        if (node.operator === '-') return -arg;
-        if (node.operator === '+') return +arg;
-        return arg;
-      }
-      case 'BinaryExpression': {
-        const left = evalNode(node.left);
-        const right = evalNode(node.right);
-        switch (node.operator) {
-          case '+': return left + right;
-          case '-': return left - right;
-          case '*': return left * right;
-          case '/': return right !== 0 ? left / right : 0;
-          case '%': return right !== 0 ? left % right : 0;
-          default: return 0;
-        }
-      }
-      default:
-        return 0;
-    }
-  };
-  const result = evalNode(ast);
-  return isNaN(result) ? 0 : result;
+/**
+ * Kept as the name every call site already uses; the language itself now lives
+ * in lib/formula.ts.
+ *
+ * It used to be `+ - * / %` and a `default: return 0` that swallowed everything
+ * else -- so `if(...)` and `Price > 100` both quietly answered 0. Arithmetic is
+ * unchanged, and there is a check asserting that formulas saved before today
+ * still produce the same numbers.
+ */
+export function evaluateFormula(formula: string, scope: Record<string, any>): FormulaValue {
+  return evaluateExpression(formula, scope);
 }
 
 export function recalculateAllFormulas(store: any) {
   const allBlockIds = store.get(allBlockIdsAtom);
   const formulas = store.get(formulasAtom);
 
-  let scope: Record<string, number> = {};
+  let scope: Record<string, any> = {};
 
   // Execute formula evaluation in 2 successive passes to resolve chained formula dependencies
   for (let pass = 1; pass <= 2; pass++) {
@@ -990,14 +963,16 @@ export function recalculateAllFormulas(store: any) {
     scope = {};
     for (const blockId of allBlockIds) {
       const runtimeState = store.get(blockRuntimeAtom(blockId));
-      let val = runtimeState?.value;
-      if (typeof val === 'boolean') {
-        val = val ? 1 : 0;
-      } else if (typeof val === 'string') {
-        const num = Number(val);
-        val = isNaN(num) ? 0 : num;
-      }
-      scope[blockId] = val ?? 0;
+      /**
+       * The raw value, not a number.
+       *
+       * This used to coerce every block to a number before the formula saw it,
+       * which is why text could never be compared: a Status of "paid" arrived
+       * as 0, and so did "shipped". Arithmetic still coerces -- it does it
+       * inside the operator now, on exactly the same rules -- so `A + B` is
+       * unchanged, while `Status == "paid"` becomes sayable.
+       */
+      scope[blockId] = runtimeState?.value ?? 0;
     }
 
     // 2. Evaluate all formula bindings
