@@ -154,7 +154,7 @@ export function runPageLoadWorkflows(store: ReturnType<typeof getDefaultStore>):
  * Values are RAW. Coercing to number here is what made text comparisons
  * impossible; arithmetic coerces inside the operator instead.
  */
-export function formulaScope(store: any): Record<string, any> {
+export function formulaScope(store: ReturnType<typeof getDefaultStore>): Record<string, any> {
   const scope: Record<string, any> = {};
   for (const blockId of store.get(allBlockIdsAtom)) {
     scope[blockId] = store.get(blockRuntimeAtom(blockId))?.value ?? 0;
@@ -1267,7 +1267,9 @@ export function shouldFetchListRows(depth: number): boolean {
  */
 export function fetchListBlockRows(
   allBlockIds: string[],
-  store: any,
+  // Typed for the same reason recalculateAllFormulas is: `any` is what let a
+  // null store through six call sites for weeks.
+  store: ReturnType<typeof getDefaultStore>,
   // Supabase's builder is thenable rather than a real Promise, so it is awaited
   // into one here. Typing the parameter as the builder would tie every future
   // caller -- and every check -- to Supabase's shape.

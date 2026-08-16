@@ -90,20 +90,40 @@ export function diagnosePage(facts: PageFacts): Problem[] {
           blockId: workflow.sourceId,
         });
       }
-      // A condition can name a third block, and that one can vanish too.
+      /**
+       * A condition can name a third block, and that one can vanish too.
+       *
+       * The singular case used to be included only when it had a `fieldId`,
+       * which quietly excluded every condition that is a whole formula -- they
+       * have no field. That is the SAME guard that made executeWorkflow drop
+       * expression conditions and run guarded steps unconditionally, and it was
+       * here too: a step guarded by `Qty * Price > 500` with Price deleted is
+       * skipped every time, forever, and this panel exists precisely to notice
+       * that.
+       */
+      const isRealCondition = (c: any) =>
+        !!c && (!!c.fieldId || String(c.expression || '').trim() !== '');
       const conditions = [
-        ...(step.conditions || []),
-        ...(step.condition && step.condition.fieldId ? [step.condition] : []),
+        ...(step.conditions || []).filter(isRealCondition),
+        ...(isRealCondition(step.condition) ? [step.condition!] : []),
       ];
       for (const condition of conditions) {
-        if (!exists(facts, condition.fieldId)) {
-          problems.push({
-            severity: 'broken',
-            title: `A condition on "${nameOf(facts, workflow.sourceId)}" checks a block that is gone`,
-            detail:
-              'The condition can never be true, so this step is skipped every time and nothing says so.',
-            blockId: workflow.sourceId,
-          });
+        // A formula condition names its blocks inside the expression, so the
+        // ids have to be read out of the text -- the same scan formulas use.
+        const namedBlocks = String((condition as any).expression || '').trim()
+          ? referencedIds((condition as any).expression)
+          : [condition.fieldId];
+
+        for (const named of namedBlocks) {
+          if (!exists(facts, named)) {
+            problems.push({
+              severity: 'broken',
+              title: `A condition on "${nameOf(facts, workflow.sourceId)}" checks a block that is gone`,
+              detail:
+                'The condition can never be true, so this step is skipped every time and nothing says so.',
+              blockId: workflow.sourceId,
+            });
+          }
         }
       }
     }

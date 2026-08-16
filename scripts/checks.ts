@@ -3221,5 +3221,78 @@ group('a row action can act on every matching row');
   check('and the default still removes exactly one', rows.filter((_, i) => !oneOnly.has(i)).map(r => r.id), ['r2', 'r3']);
 }
 
+group('the Health panel can see a broken formula condition');
+{
+  /**
+   * The panel exists to find what "silently does less than it used to". A step
+   * guarded by `Qty * Price > 500` with Price deleted is skipped every time,
+   * forever, and nothing errors -- which is exactly its job.
+   *
+   * It could not see them. The singular condition was included only when it had
+   * a `fieldId`, and a formula condition has none: the SAME guard that made
+   * executeWorkflow drop expression conditions and run guarded steps
+   * unconditionally. Two places, one wrong assumption, found only because the
+   * first one had just been fixed.
+   */
+  const BTN = 'buttonBlock__hp00000001';
+  const QTY = 'numberDisplayBlock__hp10000001';
+  const GONE = 'numberDisplayBlock__hpdeleted1';
+  const OUT = 'numberDisplayBlock__hp20000001';
+
+  const st = (blockName: string) => ({ blockName, value: 0, visible: true, disabled: false, loading: false, error: null });
+  const facts = (steps: any[]) => ({
+    blockIds: [BTN, QTY, OUT],
+    states: { [BTN]: st('Submit'), [QTY]: st('Qty'), [OUT]: st('Total') },
+    workflows: [{ id: 'w', sourceId: BTN, sourceEvent: 'onClick', steps }] as any,
+    formulas: [] as any,
+    connections: [] as any,
+  });
+
+  const broken = diagnosePage(facts([
+    { targetId: OUT, action: 'set', value: 1, condition: { fieldId: '', operator: 'equals', expression: `${QTY} * ${GONE} > 500` } },
+  ]) as any);
+  check('a formula condition naming a deleted block is reported',
+    broken.filter(p => p.title.includes('checks a block that is gone')).length, 1);
+  check('and it is called broken, not a warning',
+    broken.find(p => p.title.includes('checks a block that is gone'))?.severity, 'broken');
+
+  const fine = diagnosePage(facts([
+    { targetId: OUT, action: 'set', value: 1, condition: { fieldId: '', operator: 'equals', expression: `${QTY} > 5` } },
+  ]) as any);
+  check('a formula condition naming only live blocks is not reported',
+    fine.filter(p => p.title.includes('checks a block that is gone')).length, 0);
+
+  // Numbers and quoted text inside an expression are not blocks.
+  const literals = diagnosePage(facts([
+    { targetId: OUT, action: 'set', value: 1, condition: { fieldId: '', operator: 'equals', expression: `${QTY} > 500` } },
+  ]) as any);
+  check('a bare number in an expression is not mistaken for a block',
+    literals.filter(p => p.title.includes('checks a block that is gone')).length, 0);
+
+  // The old field-shaped condition must keep working exactly as before.
+  const fieldGone = diagnosePage(facts([
+    { targetId: OUT, action: 'set', value: 1, condition: { fieldId: GONE, operator: 'equals', value: 1 } },
+  ]) as any);
+  check('a plain field condition on a deleted block is still reported',
+    fieldGone.filter(p => p.title.includes('checks a block that is gone')).length, 1);
+
+  // And an empty condition row is not a condition, so it is not a problem.
+  const empty = diagnosePage(facts([
+    { targetId: OUT, action: 'set', value: 1, condition: { fieldId: '', operator: 'equals', expression: '' } },
+  ]) as any);
+  check('an empty condition row is not reported as broken',
+    empty.filter(p => p.title.includes('checks a block that is gone')).length, 0);
+
+  // The many-conditions shape too.
+  const many = diagnosePage(facts([
+    { targetId: OUT, action: 'set', value: 1, conditions: [
+      { fieldId: QTY, operator: 'greaterThan', value: 1 },
+      { fieldId: '', operator: 'equals', expression: `${GONE} > 1` },
+    ] },
+  ]) as any);
+  check('and a formula among several conditions is caught',
+    many.filter(p => p.title.includes('checks a block that is gone')).length, 1);
+}
+
 say(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
