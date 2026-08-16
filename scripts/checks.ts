@@ -42,7 +42,7 @@ import {
 import { withoutVisitorState, isBlockNodeType, BLOCK_NODE_TYPES, portableTypeFromNodeType, nodeTypeFromPortableType, nodeTypeFromBlockId } from '../src/lib/blockRegistry';
 import { remapBlockIds, shouldRemapOnImport, remapFormulaExpression } from '../src/lib/remapBlockIds';
 import { evaluateExpression, FORMULA_FUNCTION_NAMES } from '../src/lib/formula';
-import { stepConditionResult, formulaScope } from '../src/lib/bindingEngine';
+import { stepConditionResult, formulaScope, recalculateAllFormulas } from '../src/lib/bindingEngine';
 import { safeUrl, isSafeUrlValue, schemeOf, stripIgnorable } from '../src/lib/urls';
 import { fillSlots, leadingSlotName, findSlots as findSlotsForCheck } from '../src/lib/sanitizeHtml';
 import { visibleRows, rowSlots, compareCells, slotNamesFor, rowMatchesSearch, MAX_RENDERED_ROWS } from '../src/lib/rows';
@@ -2816,6 +2816,98 @@ group('an expression condition actually gates the step');
   }] as any);
   executeWorkflow(BTN, 'onClick', store === empty ? store : empty);
   check('an empty condition row is no condition, so the step still runs', empty.get(blockRuntimeAtom(OUT)).value, 9);
+}
+
+group('a formula is not a dead end in the chain');
+{
+  /**
+   * Cycle 12 made a workflow step that changes a block fire that block's own
+   * onChange, and called every two-step chain fixed. Formulas were not part of
+   * that fix: they write their answers with store.set, so anything wired OUT of
+   * a Formula block never heard that it had changed.
+   *
+   * Button -> Count -> Total worked. Total -> anything did not. Found by
+   * driving it in a browser and reading the number that did not move.
+   */
+  const BTN = 'buttonBlock__ch000000001';
+  const COUNT = 'numberDisplayBlock__ch10000001';
+  const TOTAL = 'formulaDisplayBlock__ch20000001';
+  const FLAG = 'numberDisplayBlock__ch30000001';
+  const base = { visible: true, disabled: false, loading: false, error: null };
+
+  const build = () => {
+    const store = createStore();
+    store.set(allBlockIdsAtom, [BTN, COUNT, TOTAL, FLAG]);
+    for (const [id, v] of [[BTN, 0], [COUNT, 0], [TOTAL, 0], [FLAG, 0]] as [string, number][]) {
+      store.set(blockRuntimeAtom(id), { ...base, value: v });
+    }
+    store.set(formulasAtom, [
+      { id: 'f', targetBlockId: TOTAL, targetProperty: 'value', formula: `${COUNT} * 2`, pageId: 'p' },
+    ] as any);
+    store.set(workflowsAtom, [
+      { id: 'w1', sourceId: BTN, sourceEvent: 'onClick', steps: [{ targetId: COUNT, action: 'set', value: 10 }] },
+      { id: 'w2', sourceId: TOTAL, sourceEvent: 'onChange', steps: [{ targetId: FLAG, action: 'set', value: 99 }] },
+    ] as any);
+    return store;
+  };
+
+  const store = build();
+  executeWorkflow(BTN, 'onClick', store);
+  check('the step still sets its own target', store.get(blockRuntimeAtom(COUNT)).value, 10);
+  check('the formula still recalculates', store.get(blockRuntimeAtom(TOTAL)).value, 20);
+  check('and now a block wired OUT of the formula hears about it', store.get(blockRuntimeAtom(FLAG)).value, 99);
+
+  /**
+   * The other half, and the reason propagation is off by default: a page
+   * settling on load is not an event. If it were, every visitor opening a page
+   * would fire whatever is wired to a formula -- including a row write.
+   */
+  const quiet = build();
+  /**
+   * Count starts at 5 with Total stored as 0, so loading the page genuinely
+   * CHANGES Total from 0 to 10. That matters: the first version of this check
+   * left Count at 0, so the formula settled on the value it already had, and
+   * the check passed whether propagation was guarded or not. The negative
+   * control caught it -- turning the guard off changed nothing, which looks
+   * exactly like a control that failed to apply. A check that cannot fail is
+   * decoration, and this one could not.
+   */
+  quiet.set(blockRuntimeAtom(COUNT), { ...base, value: 5 });
+  recalculateAllFormulas(quiet);
+  check('loading a page does recalculate the formula', quiet.get(blockRuntimeAtom(TOTAL)).value, 10);
+  check('and that is a real change from what was stored', quiet.get(blockRuntimeAtom(TOTAL)).value !== 0, true);
+  check('but it fires nothing, because settling is not an event', quiet.get(blockRuntimeAtom(FLAG)).value, 0);
+
+  // A formula whose answer did not move must not fire either, or a page with a
+  // stable formula would run its workflow on every single click anywhere.
+  const stable = build();
+  stable.set(workflowsAtom, [
+    { id: 'w1', sourceId: BTN, sourceEvent: 'onClick', steps: [{ targetId: COUNT, action: 'set', value: 0 }] },
+    { id: 'w2', sourceId: TOTAL, sourceEvent: 'onChange', steps: [{ targetId: FLAG, action: 'set', value: 99 }] },
+  ] as any);
+  executeWorkflow(BTN, 'onClick', stable);
+  check('an answer that did not change fires nothing', stable.get(blockRuntimeAtom(FLAG)).value, 0);
+
+  /**
+   * A formula that feeds a block that feeds the formula is a loop. It has to
+   * stop, and it has to say it stopped -- a chain that quietly gives up looks
+   * exactly like a broken wire.
+   */
+  const loop = createStore();
+  const A = 'numberDisplayBlock__lp00000001';
+  const F = 'formulaDisplayBlock__lp10000001';
+  loop.set(allBlockIdsAtom, [BTN, A, F]);
+  for (const id of [BTN, A, F]) loop.set(blockRuntimeAtom(id), { ...base, value: 0 });
+  loop.set(formulasAtom, [{ id: 'fl', targetBlockId: F, targetProperty: 'value', formula: `${A} + 1`, pageId: 'p' }] as any);
+  loop.set(workflowsAtom, [
+    { id: 'l1', sourceId: BTN, sourceEvent: 'onClick', steps: [{ targetId: A, action: 'increment', amount: 1 }] },
+    { id: 'l2', sourceId: F, sourceEvent: 'onChange', steps: [{ targetId: A, action: 'increment', amount: 1 }] },
+  ] as any);
+  executeWorkflow(BTN, 'onClick', loop);
+  const runs = loop.get(workflowRunsAtom) as any[];
+  check('a loop terminates instead of hanging', typeof loop.get(blockRuntimeAtom(A)).value, 'number');
+  check('and says so rather than stopping quietly',
+    runs.some(r => (r.steps || []).some((st: any) => st.action === '(chain stopped)')), true);
 }
 
 say(`\n${passed} passed, ${failed} failed`);

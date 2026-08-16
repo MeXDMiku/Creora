@@ -1003,8 +1003,10 @@ export function executeWorkflow(
     });
   }
 
-  // Live recalculate all formulas
-  recalculateAllFormulas(store);
+  // Live recalculate all formulas. The one call site that propagates: a
+  // recalculation here is the consequence of something that just happened,
+  // rather than a page settling on load.
+  recalculateAllFormulas(store, { propagate: true });
 }
 
 /**
@@ -1020,9 +1022,40 @@ export function evaluateFormula(formula: string, scope: Record<string, any>): Fo
   return evaluateExpression(formula, scope);
 }
 
-export function recalculateAllFormulas(store: any) {
+/**
+ * @param propagate  Whether a formula whose answer CHANGED should fire its own
+ *   onChange, so anything wired out of it hears about it.
+ *
+ *   Off by default, and that default is the whole safety of it. This runs on
+ *   page load, on import, and on every keystroke in the formula box, and a
+ *   formula settling to its first value on load is not an event -- firing
+ *   workflows there would write a row every time a visitor opened a page.
+ *   Only executeWorkflow turns it on, because only there is the recalculation
+ *   the CONSEQUENCE of something a person or a poll just did.
+ */
+export function recalculateAllFormulas(store: any, options?: { propagate?: boolean }) {
   const allBlockIds = store.get(allBlockIdsAtom);
   const formulas = store.get(formulasAtom);
+
+  /**
+   * THE SECOND HALF OF THE LINK THAT WAS MISSING.
+   *
+   * Cycle 12 made a workflow step that changes a block fire that block's own
+   * onChange, which turned every two-step chain from broken into working.
+   * Formulas were not part of that fix, and they write their answers through
+   * store.set directly -- so a Formula block was a dead end in the reactive
+   * graph. Button -> Count -> Total worked; anything wired OUT of Total never
+   * heard a thing.
+   *
+   * Measured in a browser before a line of this was written: Count went to 10,
+   * Total recalculated to 20, and the block wired to Total stayed at 0.
+   */
+  const valuesBefore: Record<string, any> = {};
+  if (options?.propagate) {
+    for (const binding of formulas) {
+      valuesBefore[binding.targetBlockId] = store.get(blockRuntimeAtom(binding.targetBlockId))?.value;
+    }
+  }
 
   let scope: Record<string, any> = {};
 
@@ -1084,6 +1117,44 @@ export function recalculateAllFormulas(store: any) {
             history: newHistory,
           });
         }
+      }
+    }
+  }
+
+  /**
+   * Guarded the same three ways as the step version: only when the answer
+   * actually changed, only when asked to propagate, and never deeper than
+   * MAX_CHAIN_DEPTH -- a formula feeding a block that feeds the formula is a
+   * loop, and it is bounded rather than trusted.
+   */
+  if (options?.propagate) {
+    for (const binding of formulas) {
+      const id = binding.targetBlockId;
+      if (!allBlockIds.includes(id)) continue;
+      const after = store.get(blockRuntimeAtom(id))?.value;
+      if (JSON.stringify(valuesBefore[id]) === JSON.stringify(after)) continue;
+
+      if (chainDepth < MAX_CHAIN_DEPTH) {
+        chainDepth += 1;
+        try {
+          executeWorkflow(id, 'onChange', store);
+        } finally {
+          chainDepth -= 1;
+        }
+      } else {
+        // Said out loud. A chain that quietly gives up looks like a broken wire.
+        recordRun(store, {
+          sourceId: id,
+          event: 'onChange',
+          workflowId: null,
+          matched: 0,
+          steps: [{
+            targetId: id,
+            action: '(chain stopped)',
+            status: 'skipped',
+            reason: `more than ${MAX_CHAIN_DEPTH} blocks changed one after another — check for a formula that leads back to where it started`,
+          }],
+        });
       }
     }
   }
