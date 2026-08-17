@@ -44,7 +44,7 @@ import { getBlockTypeDisplayName } from '../src/state/atoms';
 import { remapBlockIds, shouldRemapOnImport, remapFormulaExpression } from '../src/lib/remapBlockIds';
 import { summarisePageData, describeWhatWillBeLost, describeDeleteError } from '../src/lib/pageDelete';
 import { toCsv, csvCell, csvFileName } from '../src/lib/csv';
-import { evaluateExpression, FORMULA_FUNCTION_NAMES } from '../src/lib/formula';
+import { evaluateExpression, FORMULA_FUNCTION_NAMES, explainUnreadableFormula } from '../src/lib/formula';
 import { stepConditionResult, formulaScope, recalculateAllFormulas, runPageLoadWorkflows, fetchListBlockRows, shouldFetchListRows } from '../src/lib/bindingEngine';
 import { safeUrl, isSafeUrlValue, schemeOf, stripIgnorable } from '../src/lib/urls';
 import { fillSlots, leadingSlotName, findSlots as findSlotsForCheck } from '../src/lib/sanitizeHtml';
@@ -2783,6 +2783,18 @@ group('a condition can now be a whole formula');
   check('text compared', ask(`${NAME} == "Ada"`).pass, true);
   check('a function over a field', ask(`len(${NAME}) >= 3`).pass, true);
 
+  /**
+   * Braces here are a step condition written in the repeater's spelling. It
+   * fails closed either way; the point is that the run log says which spelling
+   * this box takes instead of sending somebody to check their brackets.
+   */
+  const braced = ask(`{{${QTY}}} > 1`);
+  check('braces in a step condition fail closed', braced.pass, false);
+  check('AND THE RUN LOG SAYS WHICH SPELLING THIS BOX TAKES',
+    braced.describe.includes('without the braces'), true);
+  check('a correct expression is not lectured',
+    ask(`${QTY} > 1`).describe.includes('braces'), false);
+
   // The old shape still has to work, because every page saved so far uses it.
   const plain = stepConditionResult({ fieldId: QTY, operator: 'greaterThan', value: 1 } as any, store);
   check('a plain field condition still works', plain.pass, true);
@@ -4248,6 +4260,51 @@ group('markup naming something the page does not have is reported');
     workflows: [], formulas: [], connections: [], pages: [{ id: 'page-1' }],
   } as any;
   check('A BLOCK NOBODY RENAMED STILL ANSWERS TO ITS TYPE NAME', any(diagnosePage(unnamed)).length, 0);
+}
+
+
+// ------------------------------------------- the two spellings, told apart
+group('a formula written in the wrong spelling says which one');
+{
+  /**
+   * `{{Price}}` in a repeater's filter. `Price` in a step condition. Both
+   * right, in their own place, and a builder moving between the two panels
+   * used to get "That formula could not be read. Check the brackets and
+   * quotes." -- true, useless, and pointing at brackets that are fine.
+   *
+   * `{{Price | money: $}}` is the sharpest case: it is copied out of the row
+   * markup on the same panel, where it works. It has to be refused rather than
+   * accommodated, because "£600.00" is text and comparing text to 100 asks
+   * whether "£" sorts after "1".
+   */
+  const withFilter = rowMatchesFormula({ Price: 600 }, '{{Price | money: £}} > 100');
+  check('a display filter in a row filter is kept, not silently answered', withFilter.pass, true);
+  check('and it says to drop the filter', (withFilter.error || '').includes('{{Price}}'), true);
+  check('and why: the comparison would be against text',
+    (withFilter.error || '').includes('comparing text to a number'), true);
+
+  check('a plain {{column}} still works, so the message only appears when it is wanted',
+    rowMatchesFormula({ Price: 600 }, '{{Price}} > 100'), { pass: true, error: null });
+  check('and a real comparison can still be false',
+    rowMatchesFormula({ Price: 6 }, '{{Price}} > 100').pass, false);
+
+  // A bare name in a row filter already had its own message and keeps it.
+  const bare = rowMatchesFormula({ Price: 600 }, 'Price > 100');
+  check('a bare name in a row filter still says to use braces',
+    (bare.error || '').includes('{{Price}}'), true);
+
+  // The rule on its own, both directions.
+  check('braces with a filter, in a place that takes braces',
+    (explainUnreadableFormula('{{Price | money: £}} > 100', 'slots') || '').includes('{{Price}}'), true);
+  check('braces, in a place that takes bare names',
+    (explainUnreadableFormula('{{Price}} > 100', 'names') || '').includes('Write Price without the braces'), true);
+  check('a column with a space cannot be un-braced, so it is not suggested',
+    (explainUnreadableFormula('{{Total price}} > 100', 'names') || '').includes('Remove the braces'), true);
+  check('a formula with nothing recognisably wrong gets no invented advice',
+    explainUnreadableFormula('Price >> 100', 'names'), null);
+  check('and neither does an empty one', explainUnreadableFormula('', 'slots'), null);
+  check('a correct row filter is not second-guessed',
+    explainUnreadableFormula('{{Price}} > 100', 'slots'), null);
 }
 
 say(`\n${passed} passed, ${failed} failed`);

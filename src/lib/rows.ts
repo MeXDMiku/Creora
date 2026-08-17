@@ -1,6 +1,6 @@
 import type { BlockRuntimeState } from '../types/creora';
 import { evaluateCondition } from './conditions';
-import { evaluateExpression, truthy } from './formula';
+import { evaluateExpression, truthy, explainUnreadableFormula } from './formula';
 
 /**
  * Which rows a repeater shows, and in what order.
@@ -415,6 +415,13 @@ export function rowMatchesFormula(
     return { pass: truthy(evaluateExpression(rewritten, scope)), error: null };
   } catch (err: any) {
     const message = String(err?.message || 'that formula could not be worked out');
+    /**
+     * A spelling mix-up first, because it is the likeliest cause and the
+     * generic message points at the wrong thing. `{{Price | money: $}}` is
+     * copied out of the row markup on the same panel, where it is correct.
+     */
+    const spelling = explainUnreadableFormula(text, 'slots');
+    if (spelling) return { pass: true, error: spelling };
     /**
      * A bare name in a row formula is almost always somebody writing `Price`
      * where they meant `{{Price}}`, and "Referenced block Price does not exist"

@@ -11,7 +11,7 @@ import { rowIndexesForStep } from './rows';
 import { safeUrl } from './urls';
 import { toCsv, csvFileName, downloadCsv } from './csv';
 import { evaluateCondition } from './conditions';
-import { evaluateExpression, truthy, type FormulaValue } from './formula';
+import { evaluateExpression, truthy, type FormulaValue, explainUnreadableFormula } from './formula';
 export { evaluateCondition };
 import { renderTemplate } from './format';
 import { supabase } from './supabase';
@@ -192,7 +192,9 @@ export function stepConditionResult(
     } catch (err: any) {
       return {
         pass: false,
-        describe: `${expression} -> FAIL (${err?.message || 'the formula could not be worked out'})`,
+        // The braces-in-the-wrong-place case gets named, since the generic
+        // message sends somebody to check brackets that are perfectly fine.
+        describe: `${expression} -> FAIL (${explainUnreadableFormula(expression, 'names') || err?.message || 'the formula could not be worked out'})`,
       };
     }
   }

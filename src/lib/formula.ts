@@ -486,3 +486,66 @@ export function identifiersIn(formula: string | undefined | null): string[] {
   walk(ast);
   return found;
 }
+
+/**
+ * Why a formula could not be read, when the reason is a spelling mix-up.
+ *
+ * THE TWO SPELLINGS, AND WHY THIS EXISTS
+ * A column in a repeater's filter is `{{Price}}`. A block in a step condition
+ * or a Formula block is `Price`. That is not an inconsistency to apologise for
+ * -- a column name can contain a space and a bare identifier cannot -- but it
+ * does mean somebody who has just written one and then writes the other gets
+ *
+ *     That formula could not be read. Check the brackets and quotes.
+ *
+ * which is true, useless, and points at the wrong thing entirely. The brackets
+ * are fine. They are the wrong KIND of brackets for where they are.
+ *
+ * The filter case is the sharper one: `{{Price | money: $}}` is copied
+ * straight out of the row markup sitting six inches away on the same panel,
+ * where it is exactly right. It has to be refused rather than accommodated,
+ * because `| money` produces "$600.00" -- text -- and comparing text to 100
+ * asks whether "$" sorts after "1". A filter that silently answered that
+ * question would be worse than one that will not run.
+ *
+ * Returns null when nothing recognisable is wrong, and the caller keeps its own
+ * message. Guessing badly here is worse than not guessing.
+ */
+export function explainUnreadableFormula(
+  text: string | undefined | null,
+  spelling: 'slots' | 'names',
+): string | null {
+  const s = String(text ?? '');
+  if (!s.trim()) return null;
+
+  const slot = /\{\{\s*([^}]*?)\s*\}\}/.exec(s);
+
+  if (spelling === 'slots') {
+    // `{{Price | money: $}}` -- right in markup, wrong in a filter.
+    const filtered = /\{\{\s*([^}|]+?)\s*\|[^}]*\}\}/.exec(s);
+    if (filtered) {
+      const name = filtered[1].trim();
+      return `Write {{${name}}} on its own here. A filter like "| money" formats a value for showing on the page, and this compares the value itself — "£600.00" is text, and comparing text to a number does not mean what it looks like.`;
+    }
+    /**
+     * A BARE name in a row filter is deliberately NOT handled here. It is
+     * already answered, further along, by the thing that actually knows which
+     * name it was -- "Use {{Prcie}} to mean a column" beats any sentence this
+     * function could write, because this one only has the raw text and would
+     * have to pick an example. The first version did exactly that, printed
+     * `{{Price}}` at somebody whose column was called something else, and
+     * turned an existing check red on the way in.
+     */
+    return null;
+  }
+
+  // spelling === 'names': braces belong to markup and to row filters.
+  if (slot) {
+    const name = slot[1].trim().replace(/\s*\|.*$/, '');
+    const usable = /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name);
+    return usable
+      ? `Write ${name} without the braces here. Braces are for markup and for a repeater's row filter; this reads a block by its name.`
+      : 'Remove the braces here. Braces are for markup and for a repeater\'s row filter; this reads a block by its name.';
+  }
+  return null;
+}
