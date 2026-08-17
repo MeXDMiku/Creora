@@ -203,6 +203,39 @@ export function findSlots(html: string | undefined | null): string[] {
 }
 
 /**
+ * The values a calculation can see: what is on the page, plus `now` and
+ * `today`.
+ *
+ * WHY A PROXY AND NOT A COPY
+ * Without this, `{{today}}` answers and `{{calc: today}}` says the block does
+ * not exist -- the same word meaning two different things one bracket apart,
+ * which nobody could be expected to guess. A copy would mean deciding up front
+ * which built-ins to include, and doing it per row: a repeater showing 200 rows
+ * builds this 200 times. Answering on demand costs nothing until something asks.
+ *
+ * A block on the page always wins, exactly as it does for a plain slot -- the
+ * page's own names are consulted first, and merely OWNING the name is enough,
+ * so a block called `now` holding nothing still beats the clock.
+ *
+ * The precedence lives entirely in `get`. Swapping the two halves of `has`
+ * changes nothing -- both orders answer true when either side has the name --
+ * and a negative control that broke `has` stayed green while the rule was
+ * intact underneath. If you are testing this, break `get`.
+ */
+function withBuiltIns(values: Record<string, any>, options: FilterOptions): Record<string, any> {
+  return new Proxy(values, {
+    has: (target, prop) =>
+      prop in target || (typeof prop === 'string' && builtInSlotValue(prop, options) !== undefined),
+    get: (target, prop) =>
+      prop in target
+        ? (target as any)[prop]
+        : typeof prop === 'string'
+          ? builtInSlotValue(prop, options)
+          : undefined,
+  });
+}
+
+/**
  * Fill {{Name}} slots with values, escaped, AFTER the markup has been cleaned.
  *
  * `urlSlots` is not optional in spirit. Pass the list sanitizeHtml handed back,
@@ -266,7 +299,7 @@ export function fillSlots(
     let value: any;
     if (calcMatch) {
       try {
-        value = evaluateExpression(calcMatch[1], values);
+        value = evaluateExpression(calcMatch[1], withBuiltIns(values, options));
       } catch {
         // Empty, not an error message. A visitor reading somebody's published
         // page must never be shown "Referenced block Prcie does not exist" --

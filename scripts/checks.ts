@@ -48,6 +48,7 @@ import { evaluateExpression, FORMULA_FUNCTION_NAMES } from '../src/lib/formula';
 import { stepConditionResult, formulaScope, recalculateAllFormulas, runPageLoadWorkflows, fetchListBlockRows, shouldFetchListRows } from '../src/lib/bindingEngine';
 import { safeUrl, isSafeUrlValue, schemeOf, stripIgnorable } from '../src/lib/urls';
 import { fillSlots, leadingSlotName, findSlots as findSlotsForCheck } from '../src/lib/sanitizeHtml';
+import { slotValuesFrom } from '../src/lib/useSlotValues';
 import { visibleRows, rowSlots, compareCells, slotNamesFor, rowMatchesSearch, MAX_RENDERED_ROWS, rowIndexesForStep, coerceForColumn, rowMatchesFormula, columnsUsedByFormula } from '../src/lib/rows';
 import {
   parseSlot,
@@ -4086,6 +4087,73 @@ group('computed slots: {{calc: ...}}');
     findSlotsForCheck('<p>{{calc}}</p>'), ['calc']);
   check('spelling is forgiving about case and spaces',
     fillSlots('<p>{{ CALC :  Price*Qty }}</p>', row), '<p>600</p>');
+}
+
+
+// ------------------------------------------- built-in slots, in real markup
+/**
+ * `{{now}}` and `{{today}}` rendered EMPTY on every page.
+ *
+ * They were checked through renderTemplate, which a workflow's text step uses.
+ * Markup goes a different way: something resolves the names FIRST and hands
+ * fillSlots a set of values, and it copied every name it was asked about --
+ * including the ones no block owned, as a key holding undefined. fillSlots
+ * reads a present key as "a block answered this", so the fallback that knows
+ * about `now` was never reached.
+ *
+ * A check that exercises the path a builder does not use is not a check of the
+ * feature. This group goes through the resolving layer, the way a page does.
+ */
+group('built-in slots survive the layer that resolves names');
+{
+  const NOW_B = new Date(2026, 7, 17, 9, 30);
+  // What the page has on it: nothing called `now`.
+  const onPage = { Title: 'Orders', Empty: '' };
+
+  // sanitizeHtml needs a DOM and is not part of what is being checked here, so
+  // the markup is already clean. Everything after it is the real path: find the
+  // names, resolve them, fill.
+  const resolve = (markup: string, byName: Record<string, any>) =>
+    fillSlots(markup, slotValuesFrom(byName, findSlotsForCheck(markup)), [], { now: NOW_B });
+
+  check(
+    'THE BUG: a date in markup, resolved the way a page resolves it',
+    resolve('<p>{{now | date: D MMM YYYY}}</p>', onPage),
+    '<p>17 Aug 2026</p>'
+  );
+  check('today too', resolve('<p>{{today | date: D MMM YYYY}}</p>', onPage), '<p>17 Aug 2026</p>');
+  check('a name a block does owns still comes from the block',
+    resolve('<p>{{Title}}</p>', onPage), '<p>Orders</p>');
+  check('a name nothing owns is still nothing',
+    resolve('<p>[{{Nobody}}]</p>', onPage), '<p>[]</p>');
+
+  check(
+    'a block called now BEATS the built-in, which is the documented rule',
+    resolve('<p>{{now}}</p>', { ...onPage, now: 'mine' }),
+    '<p>mine</p>'
+  );
+  check(
+    'and it beats it even when the block is empty -- owning the name is the test, not having a value',
+    resolve('<p>[{{now}}]</p>', { ...onPage, now: '' }),
+    '<p>[]</p>'
+  );
+
+  // The resolving rule on its own, since it decides whether a fallback exists.
+  check('a name no block owns is left out, not set to undefined',
+    Object.keys(slotValuesFrom({ A: 1 }, ['A', 'B'])), ['A']);
+  check('a block whose value is undefined still owns its name',
+    'B' in slotValuesFrom({ A: 1, B: undefined }, ['A', 'B']), true);
+  check('asking for nothing gets nothing', Object.keys(slotValuesFrom({ A: 1 }, [])), []);
+
+  // And the same, inside a calculation -- the reason this was found at all.
+  /**
+   * A calculation gets the built-ins too. Without this `{{today}}` works and
+   * `{{calc: today}}` does not, which is the sort of split nobody can guess at.
+   */
+  check('a built-in reaches a calculation',
+    resolve('<p>{{calc: if(isBlank(today), "missing", "there")}}</p>', onPage), '<p>there</p>');
+  check('a block still beats a built-in inside a calculation',
+    resolve('<p>{{calc: upper(now)}}</p>', { ...onPage, now: 'mine' }), '<p>MINE</p>');
 }
 
 say(`\n${passed} passed, ${failed} failed`);
