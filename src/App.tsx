@@ -3,6 +3,7 @@ import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { useSetAtom, useAtom, useAtomValue, useStore } from 'jotai'
 import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, getCanvasBlocks, shapeRoleDataType, currentPageIdAtom, currentPageIsPublishedAtom, pagesListAtom, switchPageFnAtom, isPreviewModeAtom, canvasModeAtom, editingBreakpointAtom, canvasZoomAtom } from './state/atoms'
+import { summarisePageData, describeWhatWillBeLost, downloadPageData, deletePage } from './lib/pageDelete'
 import { newBlockId, defaultRuntimeForNodeType, defaultAttrsForNodeType, BLOCK_FOOTPRINT, nodeTypeFromBlockId, shortBlockId, isBlockNodeType, withoutVisitorState, portableTypeFromNodeType, nodeTypeFromPortableType, type BlockNodeType } from './lib/blockRegistry'
 import { ButtonBlock } from './blocks/ButtonBlock'
 import { NumberDisplayBlock } from './blocks/NumberDisplayBlock'
@@ -1734,6 +1735,16 @@ function App() {
   const [activePageId, setActivePageId] = useAtom(currentPageIdAtom)
   const [pagesList, setPagesList] = useAtom(pagesListAtom)
   /**
+   * Which page is being deleted, and what that costs.
+   *
+   * Held as state rather than a window.confirm because the warning has to show
+   * a count and offer to save the data first -- a browser confirm can do
+   * neither, and "are you sure" with no number is not a warning.
+   */
+  const [pageToDelete, setPageToDelete] = useState<{ id: string; name: string } | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
+  /**
    * The list, readable from inside the debounced save without making the save
    * depend on it. A stale closure here is how the name went missing in the
    * first place, so it is a ref rather than a captured value.
@@ -3166,6 +3177,43 @@ function App() {
     setSwitchPageFn(() => switchPage)
   }, [switchPage, setSwitchPageFn])
 
+  /**
+   * What deleting this page would cost, counted from what is loaded.
+   *
+   * Only the page currently open has its blocks in memory, so deleting the page
+   * you are looking at can be counted exactly. Another page cannot -- and the
+   * summary says so rather than reporting a confident zero, because "no data
+   * will be lost" is the one sentence here nobody may get wrong.
+   */
+  const summariseForDelete = (pageId: string) => {
+    if (pageId !== activePageIdRef.current) {
+      return { tables: [], tableCount: 0, rowCount: 0, countIsComplete: false }
+    }
+    return summarisePageData(
+      store.get(allBlockIdsAtom),
+      (id: string) => store.get(blockRuntimeAtom(id)),
+      (id: string) => nodeTypeFromBlockId(id) === 'databaseBlock',
+    )
+  }
+
+  const confirmDeletePage = async () => {
+    if (!pageToDelete) return
+    setDeleteBusy(true)
+    setDeleteError(null)
+    const result = await deletePage(pageToDelete.id)
+    setDeleteBusy(false)
+    if (!result.ok) { setDeleteError(result.error); return }
+
+    const remaining = pagesList.filter(p => p.id !== pageToDelete.id)
+    setPagesList(remaining)
+    setPageToDelete(null)
+    // Leaving the editor pointed at a page that no longer exists would show an
+    // empty canvas that saves itself over nothing.
+    if (pageToDelete.id === activePageIdRef.current && remaining[0]) {
+      await switchPage(remaining[0].id)
+    }
+  }
+
   const createNewPage = async () => {
     setIsLoading(true)
     setSaveStatus('Saving...')
@@ -3524,6 +3572,29 @@ function App() {
                   }}
                 >
                   {page.name}
+                  {/*
+                    A page could not be deleted at all -- there was no way to,
+                    anywhere. Six pages accumulated here, five called
+                    "Untitled", and once goToPage shipped with a page picker
+                    they became five identical entries in a dropdown.
+                    Only on the active tab: deleting a page you cannot see is
+                    a page whose data cannot be counted.
+                  */}
+                  {isActive && pagesList.length > 1 && (
+                    <span
+                      role="button"
+                      aria-label={`Delete ${page.name}`}
+                      title="Delete this page"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteError(null);
+                        setPageToDelete({ id: page.id, name: page.name });
+                      }}
+                      style={{ marginLeft: '8px', opacity: 0.7, cursor: 'pointer', fontWeight: 700 }}
+                    >
+                      &times;
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -3745,6 +3816,63 @@ function App() {
           builder who is not told cannot know why their imported page is empty
           -- or, worse, why it is showing somebody else's rows.
         */}
+        {/*
+          The warning IS the feature.
+          Deleting a page deletes the rows collected on it and there is no undo,
+          so this says how many, and offers to save them first. A browser
+          confirm could do neither, and "are you sure" with no number is not a
+          warning -- it is a formality people click through.
+        */}
+        {pageToDelete && (() => {
+          const summary = summariseForDelete(pageToDelete.id)
+          return (
+            <div style={{
+              background: '#fff', border: '1px solid #fca5a5', borderLeft: '4px solid #dc2626',
+              borderRadius: '6px', padding: '14px 16px', marginBottom: '16px',
+            }}>
+              <div style={{ fontWeight: 700, color: '#b91c1c', fontSize: '14px', marginBottom: '6px' }}>
+                Delete &ldquo;{pageToDelete.name}&rdquo;?
+              </div>
+              <div style={{ fontSize: '13px', color: '#334155', lineHeight: 1.5, marginBottom: '10px' }}>
+                {describeWhatWillBeLost(pageToDelete.name, summary)}
+              </div>
+              {!summary.countIsComplete && (
+                <div style={{ fontSize: '12px', color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '4px', padding: '6px 8px', marginBottom: '10px' }}>
+                  Open this page first if you want an exact count and the option to save its data — only the page you are looking at can be counted.
+                </div>
+              )}
+              {deleteError && (
+                <div style={{ fontSize: '12px', color: '#b91c1c', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '4px', padding: '6px 8px', marginBottom: '10px' }}>
+                  {deleteError}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {summary.tableCount > 0 && (
+                  <button
+                    onClick={() => downloadPageData(pageToDelete.name, summary)}
+                    style={{ padding: '6px 12px', borderRadius: '4px', border: '1px solid #cbd5e1', background: '#fff', color: '#334155', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}
+                  >
+                    Save the data first ({summary.tableCount === 1 ? '1 file' : `${summary.tableCount} files`})
+                  </button>
+                )}
+                <button
+                  onClick={confirmDeletePage}
+                  disabled={deleteBusy}
+                  style={{ padding: '6px 12px', borderRadius: '4px', border: 'none', background: deleteBusy ? '#fca5a5' : '#dc2626', color: '#fff', cursor: deleteBusy ? 'default' : 'pointer', fontSize: '13px', fontWeight: 600 }}
+                >
+                  {deleteBusy ? 'Deleting…' : 'Delete it anyway'}
+                </button>
+                <button
+                  onClick={() => { setPageToDelete(null); setDeleteError(null) }}
+                  style={{ padding: '6px 12px', borderRadius: '4px', border: '1px solid #cbd5e1', background: '#fff', color: '#475569', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}
+                >
+                  Keep it
+                </button>
+              </div>
+            </div>
+          )
+        })()}
+
         {importNotice && !importError && (
           <div style={{
             background: '#ecfdf5',

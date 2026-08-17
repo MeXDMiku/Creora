@@ -42,6 +42,8 @@ import {
 import { withoutVisitorState, isBlockNodeType, BLOCK_NODE_TYPES, portableTypeFromNodeType, nodeTypeFromPortableType, nodeTypeFromBlockId } from '../src/lib/blockRegistry';
 import { getBlockTypeDisplayName } from '../src/state/atoms';
 import { remapBlockIds, shouldRemapOnImport, remapFormulaExpression } from '../src/lib/remapBlockIds';
+import { summarisePageData, describeWhatWillBeLost, describeDeleteError } from '../src/lib/pageDelete';
+import { toCsv, csvCell, csvFileName } from '../src/lib/csv';
 import { evaluateExpression, FORMULA_FUNCTION_NAMES } from '../src/lib/formula';
 import { stepConditionResult, formulaScope, recalculateAllFormulas, runPageLoadWorkflows, fetchListBlockRows, shouldFetchListRows } from '../src/lib/bindingEngine';
 import { safeUrl, isSafeUrlValue, schemeOf, stripIgnorable } from '../src/lib/urls';
@@ -3664,6 +3666,96 @@ group('an existing wire can be read back into the popup');
   // A workflow with nothing in it must not throw.
   check('an empty workflow does not throw', draftFromWorkflow({}).action, 'increment');
   check('nor a null one', draftFromWorkflow(null as any).isConditional, false);
+}
+
+group('deleting a page says what it costs first');
+{
+  /**
+   * There was no way to delete a page at all -- the database had no such
+   * function. Reported by the builder. Deleting one also deletes the rows
+   * collected on it, and there is no undo, so the warning IS the feature: the
+   * count is the thing a person decides on.
+   *
+   * A count that quietly said 0 when it could not tell would be the worst
+   * failure available here -- somebody reads "no data will be lost" and presses
+   * the button. So an unknown is an unknown, never a zero.
+   */
+  const state: Record<string, any> = {
+    'databaseBlock__d1': { blockName: 'Orders', columns: [{ name: 'Name' }, { name: 'Total' }], rows: [{ Name: 'Ada', Total: 10 }, { Name: 'Grace', Total: 20 }] },
+    'databaseBlock__d2': { blockName: 'Signups', columns: [{ name: 'Email' }], rows: [{ Email: 'a@b.c' }] },
+    'buttonBlock__b1': { blockName: 'Submit' },
+    'databaseBlock__d3': { blockName: 'Never loaded', columns: [{ name: 'X' }] },
+  };
+  const stateOf = (id: string) => state[id];
+  const isDb = (id: string) => id.startsWith('databaseBlock');
+
+  const full = summarisePageData(['databaseBlock__d1', 'databaseBlock__d2', 'buttonBlock__b1'], stateOf, isDb);
+  check('only tables are counted', full.tableCount, 2);
+  check('and every row in them', full.rowCount, 3);
+  check('a button is not a table', full.tables.some(t => t.name === 'Submit'), false);
+  check('the count is complete', full.countIsComplete, true);
+
+  /**
+   * A table whose rows were never fetched must not contribute a confident zero.
+   * This is the check that stops "no data will be lost" being a lie.
+   */
+  const partial = summarisePageData(['databaseBlock__d1', 'databaseBlock__d3'], stateOf, isDb);
+  check('an unloaded table makes the count a floor, not a total', partial.countIsComplete, false);
+  check('and what IS known is still counted', partial.rowCount, 2);
+  check('the wording admits it', describeWhatWillBeLost('Shop', partial).includes('at least'), true);
+  check('a complete count does not say "at least"', describeWhatWillBeLost('Shop', full).includes('at least'), false);
+
+  check('the sentence names the page', describeWhatWillBeLost('Shop', full).includes('"Shop"'), true);
+  check('and the number of rows', describeWhatWillBeLost('Shop', full).includes('3 rows'), true);
+  check('and says it cannot be undone', describeWhatWillBeLost('Shop', full).toLowerCase().includes('cannot be undone'), true);
+
+  const empty = summarisePageData(['buttonBlock__b1'], stateOf, isDb);
+  check('a page with no tables says there is nothing to lose',
+    describeWhatWillBeLost('Blank', empty).includes('no tables'), true);
+  check('but still warns it cannot be undone',
+    describeWhatWillBeLost('Blank', empty).toLowerCase().includes('cannot be undone'), true);
+
+  const noRows = summarisePageData(['databaseBlock__d2'], (id: string) => ({ ...state[id], rows: [] }), isDb);
+  check('a table with no rows yet is said plainly',
+    describeWhatWillBeLost('Fresh', noRows).includes('no rows in them yet'), true);
+
+  // Singular and plural, because "1 rows" reads as a bug in the product.
+  const one = summarisePageData(['databaseBlock__d2'], stateOf, isDb);
+  check('one row is not "1 rows"', describeWhatWillBeLost('X', one).includes('1 row across 1 table'), true);
+}
+
+group('the data can be saved before it goes');
+{
+  // Same writer the exportCsv action uses. It was inline in that action until
+  // this second caller appeared -- copying it is how two code paths drift.
+  check('a header and rows', toCsv([{ name: 'Name' }, { name: 'Age' }], [{ Name: 'Ada', Age: 36 }]),
+    '\ufeffName,Age\r\nAda,36');
+  check('a comma in a field does not shift a column',
+    toCsv([{ name: 'Name' }], [{ Name: 'Lovelace, Ada' }]), '\ufeffName\r\n"Lovelace, Ada"');
+  check('a quote is doubled', csvCell('He said "hi"'), '"He said ""hi"""');
+  check('a newline keeps the row intact', csvCell('one\ntwo'), '"one\ntwo"');
+  check('an empty cell is empty, not the word undefined', csvCell(undefined), '');
+  check('a missing column reads as empty', toCsv([{ name: 'Nope' }], [{ Name: 'Ada' }]), '\ufeffNope\r\n');
+  // Excel needs both of these or it mangles accents / puts every row in one cell.
+  check('the BOM is there', toCsv([{ name: 'A' }], []).startsWith('\ufeff'), true);
+  check('and the line ending is CRLF', toCsv([{ name: 'A' }], [{ A: 1 }]).includes('\r\n'), true);
+  check('a filename is made safe', csvFileName('Orders / 2026!'), 'Orders  2026.csv');
+  check('and never empty', csvFileName('***'), 'data.csv');
+}
+
+group('a delete that cannot happen yet says why');
+{
+  // The migration has not been run, so the function does not exist. PostgREST
+  // answers PGRST202 with a message about schema cache, which tells a builder
+  // nothing about what to do -- the same shape collections.ts already handles.
+  check('the missing migration is named',
+    describeDeleteError({ code: 'PGRST202', message: 'Could not find the function' }).includes('0005_delete_page.sql'), true);
+  check('somebody else\'s page', describeDeleteError({ code: '42501', message: 'not your page' }),
+    'Only the person who owns this page can delete it.');
+  check('a network failure says nothing was deleted',
+    describeDeleteError({ message: 'Failed to fetch' }).includes('nothing was deleted'), true);
+  check('and an unknown failure does not pretend to know',
+    describeDeleteError({}).includes('did not say why'), true);
 }
 
 say(`\n${passed} passed, ${failed} failed`);

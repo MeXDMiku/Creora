@@ -606,7 +606,7 @@ file or opening the actual page.
   the only place this could have come from — 928 checks had nothing to say about
   a menu with one item on it.
 
-- `TODO` **Pages cannot be deleted.** There is no `delete_page` function in the
+- `DONE (needs the migration run)` **Pages cannot be deleted.** There is no `delete_page` function in the
   database at all — only `create_page`, `save_page`, `list_pages`, `get_page`
   and `set_page_published`. So a page made by accident is permanent. This
   project currently carries six pages, five of them called "Untitled", none of
@@ -632,3 +632,15 @@ file or opening the actual page.
   happens to wires on OTHER pages that pointed at it. The Health panel now
   reports those as "points at a page that is gone", so at least they stop being
   silent — but that only works if the page actually goes.
+
+- `TODO` **Keyboard shortcuts, starting with Ctrl+Z.** Asked for on 16 Aug,
+  explicitly for later. Worth writing down now because undo is not a shortcut —
+  it is a data model. Nothing in the editor records what changed, so there is
+  nothing to step back through: every edit writes straight into an atom and the
+  page is saved 500ms later. Undo needs a history of reversible actions before
+  it needs a key binding, and the key binding is the last hour of that work
+  rather than the first.
+
+  Cheap shortcuts that need no history and could come first: Delete to remove
+  the selected block, Escape to close the popup or the Health panel, Ctrl+S to
+  force a save, arrow keys to nudge a block.

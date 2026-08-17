@@ -9,6 +9,7 @@ import { validateValue } from './validation';
 import { nodeTypeFromBlockId } from './blockRegistry';
 import { rowIndexesForStep } from './rows';
 import { safeUrl } from './urls';
+import { toCsv, csvFileName, downloadCsv } from './csv';
 import { evaluateCondition } from './conditions';
 import { evaluateExpression, truthy, type FormulaValue } from './formula';
 export { evaluateCondition };
@@ -931,37 +932,18 @@ export function executeWorkflow(
           break;
         }
         case 'exportCsv': {
-          // "I want the data in my website to go into Excel, in the order I want."
-          // Column order is the Database block's own column order, so the order
-          // is something the builder controls rather than something we guess.
+          /**
+           * "I want the data in my website to go into Excel, in the order I
+           * want." Column order is the Database block's own, so the order is
+           * something the builder controls rather than something we guess.
+           *
+           * The writing itself lives in lib/csv.ts, shared with the offer to
+           * save a page's data before the page is deleted. It was inline here
+           * until that second caller appeared.
+           */
           const cols = (currentTargetState?.columns || []) as { name: string }[];
           const rows = (currentTargetState?.rows || []) as Record<string, any>[];
-          const esc = (v: any) => {
-            const str = v === null || v === undefined ? '' : String(v);
-            // Excel needs quotes doubled, and any field holding a comma, quote or
-            // newline wrapped — otherwise one comma in a message shifts a column.
-            return /[",\n\r]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
-          };
-          const header = cols.map((c) => esc(c.name)).join(',');
-          const body = rows.map((r) => cols.map((c) => esc(r[c.name])).join(',')).join('\r\n');
-          // \r\n and a BOM: Excel needs both to open a UTF-8 CSV without mangling
-          // accents and without putting every row in one cell.
-          const csv = '\ufeff' + header + '\r\n' + body;
-
-          if (typeof document !== 'undefined') {
-            const name = (currentTargetState?.blockName || 'data')
-              .replace(/[^a-z0-9\-_ ]/gi, '')
-              .trim() || 'data';
-            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `${name}.csv`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            setTimeout(() => URL.revokeObjectURL(url), 1000);
-          }
+          downloadCsv(csvFileName(currentTargetState?.blockName), toCsv(cols, rows));
           break;
         }
         case 'setText': {
