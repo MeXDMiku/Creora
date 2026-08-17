@@ -32,6 +32,7 @@ them bugs in the new code:
 | `goToPage` | Health panel had no list of pages — a wire to a deleted page was invisible |
 | wire editing | the popup never reset — a new wire inherited the last one's whole config |
 | wire editing | the mapping guess overwrote saved mappings on open |
+| `and`/`or` as words | `referencedIds` reported them as blocks that are gone |
 
 **So: after shipping anything, grep for what used to be true.** It has found
 something every single time it was tried.

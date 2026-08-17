@@ -1,4 +1,5 @@
 import type { Workflow, FormulaBinding, BlockRuntimeState } from '../types/creora';
+import { columnsUsedByFormula } from './rows';
 import { nodeTypeFromBlockId } from './blockRegistry';
 
 /**
@@ -92,7 +93,17 @@ function pageExists(facts: PageFacts, pageId: string | undefined | null): boolea
 const CALLEE = /[A-Za-z_$][A-Za-z0-9_$]*\s*\(/g;
 const QUOTED = /'[^']*'|"[^"]*"/g;
 /** Words a formula understands as values rather than as blocks. */
-const FORMULA_WORDS = new Set(['true', 'false', 'blank', 'empty']);
+const FORMULA_WORDS = new Set([
+  'true', 'false', 'blank', 'empty',
+  /**
+   * `and` and `or` became infix operators the same day this scan was written,
+   * so `Stock > 0 and Total > 5` reported `and` as a block that is gone. Caught
+   * by sweeping for what the new spelling broke, twenty minutes after adding
+   * it -- the third time in one session that a new capability invalidated an
+   * assumption elsewhere that was correct when it was written.
+   */
+  'and', 'or',
+]);
 
 export function referencedIds(formula: string | null | undefined): string[] {
   const text = formula === null || formula === undefined ? '' : String(formula);
@@ -199,6 +210,43 @@ export function diagnosePage(facts: PageFacts): Problem[] {
             });
           }
         }
+      }
+    }
+  }
+
+  /**
+   * A repeater's row formula naming a column that is not there.
+   *
+   * This one hides rather than shouts. A missing column reads as blank, a blank
+   * fails every comparison, and every row is filtered out -- so a typo in
+   * `{{Prcie}} > 5` empties the list and looks exactly like a table with no
+   * data in it. The formula itself is deliberately forgiving of ERRORS for that
+   * reason; a name that simply is not there is not an error, so it needs saying
+   * here instead.
+   */
+  for (const blockId of facts.blockIds || []) {
+    const state = facts.states[blockId];
+    const formula = String((state as any)?.filterFormula || '').trim();
+    if (!formula) continue;
+
+    const trackedId = String((state as any)?.trackedBlockId || '');
+    const tracked = trackedId ? facts.states[trackedId] : undefined;
+    // Without a table to compare against there is nothing to be sure about,
+    // and guessing would mean accusing a correct formula.
+    if (!tracked) continue;
+
+    const known = new Set<string>(
+      ((tracked as any)?.columns || []).map((c: any) => String(c?.name)).concat(['Row id']),
+    );
+    for (const used of columnsUsedByFormula(formula)) {
+      if (!known.has(used)) {
+        problems.push({
+          severity: 'broken',
+          title: `"${nameOf(facts, blockId)}" filters on a column called "${used}", which is not there`,
+          detail:
+            'A column that is not there reads as blank, blank fails every comparison, and every row is hidden — so the list looks empty rather than wrong.',
+          blockId,
+        });
       }
     }
   }

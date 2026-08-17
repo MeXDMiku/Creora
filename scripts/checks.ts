@@ -3912,5 +3912,72 @@ group('a repeater can filter rows with a formula');
   check('and the count of what matched is what matched, not what was drawn', paged.matched, 2);
 }
 
+group('the words `and` and `or` are not blocks');
+{
+  /**
+   * They became infix operators the same day referencedIds was rewritten, so
+   * `Stock > 0 and Total > 5` reported `and` as a block that is gone -- every
+   * formula written the readable way would have produced a false problem.
+   * Caught by sweeping for what the new spelling broke, twenty minutes after
+   * adding it.
+   */
+  check('and is an operator, not a block', referencedIds('Stock > 0 and Total > 5'), ['Stock', 'Total']);
+  check('so is or', referencedIds('A or B'), ['A', 'B']);
+  check('and the symbol forms were always fine', referencedIds('A && B || C'), ['A', 'B', 'C']);
+  // A block genuinely called "and" is not something to design around, but a
+  // column or block whose name merely CONTAINS them must still be found.
+  check('a name containing "and" is still a block', referencedIds('Brand > 1'), ['Brand']);
+  check('and one containing "or"', referencedIds('Orders > 1'), ['Orders']);
+}
+
+group('a row formula naming a column that is not there is reported');
+{
+  /**
+   * This one hides rather than shouts. A missing column reads as blank, a blank
+   * fails every comparison, and every row is filtered out -- so `{{Prcie}} > 5`
+   * empties the list and looks exactly like a table with no data in it.
+   *
+   * The formula is deliberately forgiving of ERRORS, keeping rows when it
+   * cannot run. A name that simply is not there is not an error, so it needs
+   * saying here instead. The two halves together are what stop a filter failing
+   * invisibly in either direction.
+   */
+  const REPEAT = 'repeatBlock__rf00000001';
+  const DB = 'databaseBlock__rf10000001';
+  const base = { value: '', visible: true, disabled: false, loading: false, error: null };
+  const mk = (formula: string) => ({
+    blockIds: [REPEAT, DB],
+    states: {
+      [REPEAT]: { ...base, blockName: 'Orders list', filterFormula: formula, trackedBlockId: DB },
+      [DB]: { ...base, blockName: 'Orders', columns: [{ name: 'Price' }, { name: 'Qty' }] },
+    },
+    workflows: [], formulas: [], connections: [],
+    pages: [{ id: 'page-1', name: 'Home' }],
+  } as any);
+
+  const typo = diagnosePage(mk('{{Prcie}} * {{Qty}} > 500'));
+  check('a misspelled column is reported', typo.filter(p => p.title.includes('"Prcie"')).length, 1);
+  check('and it is broken, not a warning', typo.find(p => p.title.includes('"Prcie"'))?.severity, 'broken');
+  check('the message explains why the list looks empty',
+    typo.find(p => p.title.includes('"Prcie"'))?.detail.includes('every row is hidden'), true);
+
+  const fine = diagnosePage(mk('{{Price}} * {{Qty}} > 500'));
+  check('real columns are not accused', fine.filter(p => p.title.includes('filters on a column')).length, 0);
+  check('Row id counts as a real column', diagnosePage(mk('{{Row id}} == "r1"')).filter(p => p.title.includes('filters on a column')).length, 0);
+  check('no formula, nothing to say', diagnosePage(mk('')).filter(p => p.title.includes('filters on a column')).length, 0);
+
+  /**
+   * With no table tracked there is nothing to compare against, and guessing
+   * would mean accusing a formula that is probably correct.
+   */
+  const untracked = {
+    blockIds: [REPEAT],
+    states: { [REPEAT]: { ...base, blockName: 'Orders list', filterFormula: '{{Price}} > 1' } },
+    workflows: [], formulas: [], connections: [], pages: [{ id: 'page-1' }],
+  } as any;
+  check('a repeater tracking nothing is not accused',
+    diagnosePage(untracked).filter((p: any) => p.title.includes('filters on a column')).length, 0);
+}
+
 say(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
