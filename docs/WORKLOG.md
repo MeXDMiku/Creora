@@ -113,3 +113,32 @@ const jotai = await import([...new Set(res.filter(n => n.includes('jotai') && n.
 Vite serves optimised deps with `?v=<hash>`. Importing without it loads a second
 jotai whose stores are invisible to the engine — half an hour went on believing
 the product was broken. **Check the instrument before believing any result.**
+
+And a second, worse one, proven the same day:
+
+```js
+const a = await import('/src/state/atoms.ts');
+const b = await import('/src/state/atoms');
+a.allBlockIdsAtom === b.allBlockIdsAtom   // false
+```
+
+**Two specifiers for the same file are two module instances**, each with its own
+atoms. A store set through one is invisible to any module that imported the
+other, and the symptom is an engine that reads zeros for values just written —
+which reads exactly like a broken product.
+
+### The rule this produced
+
+**Do not verify pure logic through the browser.** Node checks import the real
+modules once and cannot drift; the browser adds a second module graph, a second
+jotai, and HMR generations, and every one of those has produced a false result
+today.
+
+Use the browser for what only it can do — the DOM, the editor, real clicks. That
+is where it earned its keep: the visible ports, the Health panel rendering, the
+action dropdown, and the wire sentence naming the wrong block, which **no check
+could ever have found**.
+
+Pure functions are the exception: `visibleRows`, `rowMatchesFormula` and
+`referencedIds` need no store, so running them in the page is honest and was how
+the row-formula filter was confirmed live.
