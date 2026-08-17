@@ -594,3 +594,41 @@ file or opening the actual page.
   value block, add a repeater, point its filter at the block, set the filter
   column to Row id. Every one is obvious in hindsight and none are discoverable.
   A "make a detail page for this list" button belongs in the arrangement phase.
+
+
+## Reported by the builder — 16 Aug 2026
+
+- `DONE` **A wire could only be deleted, never changed.** Its menu had exactly
+  one option. Changing "add a row" into "add a row, but only if the email is
+  filled in" meant removing the wire and retyping the action, every column
+  mapping, the match column and every condition from memory, because nothing on
+  screen still showed them. Reported by the person building with it, which is
+  the only place this could have come from — 928 checks had nothing to say about
+  a menu with one item on it.
+
+- `TODO` **Pages cannot be deleted.** There is no `delete_page` function in the
+  database at all — only `create_page`, `save_page`, `list_pages`, `get_page`
+  and `set_page_published`. So a page made by accident is permanent. This
+  project currently carries six pages, five of them called "Untitled", none of
+  which can be removed.
+
+  It is not only clutter now: `goToPage` shipped today with a page picker, and
+  that picker lists five identical "Untitled" entries, so the feature is close
+  to unusable here. Needs a migration:
+
+      create or replace function public.delete_page(p_id uuid)
+      returns void language plpgsql security definer set search_path to 'public' as $$
+      begin
+        if not public.can_edit_page(p_id) then
+          raise exception 'not your page' using errcode = '42501';
+        end if;
+        delete from public.database_rows where page_id = p_id;
+        delete from public.pages where id = p_id;
+      end; $$;
+
+  Two decisions belong to the builder before this is written, and neither should
+  be guessed: whether deleting a page also deletes the rows collected on it
+  (the sketch above says yes, which is destructive and unrecoverable), and what
+  happens to wires on OTHER pages that pointed at it. The Health panel now
+  reports those as "points at a page that is gone", so at least they stop being
+  silent — but that only works if the page actually goes.

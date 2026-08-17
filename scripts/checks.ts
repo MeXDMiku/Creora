@@ -19,7 +19,7 @@ import { describeCollectionError, MIGRATION_DOC } from '../src/lib/collections';
 import { parseParams, readParam, buildQuery, parseParamTemplate } from '../src/lib/pageParams';
 import { resolvePageValue, buildParamsFromTemplate } from '../src/lib/pageValue';
 import { diagnosePage, sortProblems, referencedIds } from '../src/lib/diagnose';
-import { guessMappings, matchScore, normaliseName, whyItCannotWork } from '../src/lib/connectionDraft';
+import { guessMappings, matchScore, normaliseName, whyItCannotWork, draftFromWorkflow } from '../src/lib/connectionDraft';
 import { clampZoom, stepZoom, zoomToFit, zoomLabel, contentExtent, toCanvasPoint, MIN_ZOOM, MAX_ZOOM } from '../src/lib/zoom';
 import { wireSentence, actionWords, eventWords, outputMeaning, PORT_OUT_HINT, PORT_IN_HINT } from '../src/lib/wireWords';
 import {
@@ -3566,6 +3566,104 @@ group('the Health panel can see a wire to a page that is gone');
   }));
   check('a block with no target page is not accused', 
     noTarget.filter(p => p.title.includes('points at a page')).length, 0);
+}
+
+group('an existing wire can be read back into the popup');
+{
+  /**
+   * A wire could only be DELETED -- one option on its menu -- so changing
+   * "add a row" into "add a row, but only if the email is filled in" meant
+   * removing it and retyping the action, every column mapping, the match
+   * column and every condition from memory.
+   *
+   * The dangerous failure is not a crash: it is one field quietly not coming
+   * back, so a builder opens a wire, changes the action, presses Connect, and
+   * last week's three conditions are gone with no warning. So this feeds it a
+   * step carrying EVERY field the popup can produce and asserts each one
+   * returns. A field added to the popup without a line in draftFromWorkflow
+   * fails here.
+   */
+  const everything = {
+    id: 'wf_conn_1',
+    sourceId: 'buttonBlock__src0000001',
+    sourceEvent: 'onLoad',
+    steps: [{
+      targetId: 'databaseBlock__tgt0000001',
+      action: 'updateRow',
+      amount: 7,
+      value: 'hello',
+      requireValid: false,
+      webhookUrl: 'https://hooks.example.com/x',
+      mappings: { Name: { source: 'block', value: 'inputBlock__n000000001' } },
+      matchColumn: 'Email',
+      matchValue: { source: 'block', value: 'inputBlock__e000000001' },
+      applyToAll: true,
+      match: 'any',
+      conditions: [
+        { fieldId: 'inputBlock__n000000001', operator: 'isNotEmpty', value: '' },
+        { fieldId: '', operator: 'equals', expression: 'numberDisplayBlock__q1 * 2 > 10' },
+      ],
+      elseAction: 'increment',
+      elseTargetId: 'numberDisplayBlock__else00001',
+      elseValue: 'nope',
+      elseAmount: 3,
+    }],
+  };
+  const d = draftFromWorkflow(everything);
+
+  check('the action comes back', d.action, 'updateRow');
+  check('the amount', d.amount, 7);
+  check('the value', d.value, 'hello');
+  check('requireValid, including a deliberate false', d.requireValid, false);
+  check('the webhook address', d.webhookUrl, 'https://hooks.example.com/x');
+  check('the column mappings', d.mappings, { Name: { source: 'block', value: 'inputBlock__n000000001' } });
+  check('the match column', d.matchColumn, 'Email');
+  check('where the match value comes from', d.matchValueSource, 'block');
+  check('and which block', d.matchValueVal, 'inputBlock__e000000001');
+  check('every matching row', d.applyToAll, true);
+  check('that it is conditional at all', d.isConditional, true);
+  check('all/any', d.matchMode, 'any');
+  check('both conditions', d.conds.length, 2);
+  check('the field one', d.conds[0], { fieldId: 'inputBlock__n000000001', operator: 'isNotEmpty', value: '', expression: '' });
+  /**
+   * The formula condition is the one most likely to be dropped: reading only
+   * `fieldId` loses it, which is exactly what executeWorkflow and the Health
+   * panel each did before today.
+   */
+  check('and the formula one, as a formula row', d.conds[1],
+    { fieldId: '__expression__', operator: 'equals', value: '', expression: 'numberDisplayBlock__q1 * 2 > 10' });
+  check('the otherwise branch is on', d.elseEnabled, true);
+  check('its action', d.elseAction, 'increment');
+  check('its target', d.elseTargetId, 'numberDisplayBlock__else00001');
+  check('its value', d.elseValue, 'nope');
+  check('its amount', d.elseAmount, 3);
+  check('that it runs when the page opens', d.onPageLoad, true);
+
+  // requireValid genuinely absent must stay undefined, not become a default --
+  // pre-filling it would freeze today's default onto the step for ever.
+  const bare = draftFromWorkflow({ id: 'w', sourceId: 'b', sourceEvent: 'onClick', steps: [{ targetId: 't', action: 'set' }] });
+  check('an unset requireValid stays unset', bare.requireValid, undefined);
+  check('an empty wire still offers one blank condition row', bare.conds.length, 1);
+  check('and is not marked conditional', bare.isConditional, false);
+  check('a timer wire remembers which tick', draftFromWorkflow({ sourceEvent: 'onComplete', steps: [{ action: 'set' }] }).timerEvent, 'onComplete');
+
+  // Navigation keeps its destination in `value`; it must land in the right box
+  // and not also show up in the "set to" field.
+  const nav = draftFromWorkflow({ sourceEvent: 'onClick', steps: [{ action: 'goToPage', value: 'page-7' }] });
+  check('a page destination lands in the page picker', nav.goToPageId, 'page-7');
+  check('and not in the value box', nav.value, '');
+  const url = draftFromWorkflow({ sourceEvent: 'onClick', steps: [{ action: 'openUrl', value: 'https://x.com' }] });
+  check('an address lands in the address box', url.openUrlValue, 'https://x.com');
+  check('and not in the value box either', url.value, '');
+
+  // The older single-condition shape still loads.
+  const single = draftFromWorkflow({ sourceEvent: 'onClick', steps: [{ action: 'set', condition: { fieldId: 'inputBlock__x', operator: 'equals', value: 5 } }] });
+  check('a page saved with one condition still loads it', single.conds[0].fieldId, 'inputBlock__x');
+  check('and is marked conditional', single.isConditional, true);
+
+  // A workflow with nothing in it must not throw.
+  check('an empty workflow does not throw', draftFromWorkflow({}).action, 'increment');
+  check('nor a null one', draftFromWorkflow(null as any).isConditional, false);
 }
 
 say(`\n${passed} passed, ${failed} failed`);

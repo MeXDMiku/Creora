@@ -23,7 +23,7 @@ import { RepeatBlock } from './blocks/RepeatBlock'
 import { PageValueBlock } from './blocks/PageValueBlock'
 import { PHONE_MAX_WIDTH } from './lib/layout'
 import { stepZoom, zoomToFit, zoomLabel, contentExtent, clampZoom } from './lib/zoom'
-import { guessMappings, whyItCannotWork } from './lib/connectionDraft'
+import { guessMappings, whyItCannotWork, draftFromWorkflow } from './lib/connectionDraft'
 import { wireSentence } from './lib/wireWords'
 import { PlacementControls } from './components/PlacementControls'
 import { HealthPanel } from './components/HealthPanel'
@@ -360,6 +360,46 @@ function ConnectionPopup({ editor }: { editor: any }) {
     { fieldId: '', operator: 'equals', value: '', expression: '' },
   ])
   const [matchMode, setMatchMode] = useState<'all' | 'any'>('all')
+
+  /**
+   * Load an existing wire into the fields, when one is being changed.
+   *
+   * Keyed on the connection id so it runs once per opening, not on every
+   * keystroke afterwards -- rehydrating while somebody types would undo what
+   * they were typing. Every field comes from one pure function so that a field
+   * silently failing to come back is a check failure rather than a builder
+   * losing three conditions without being told.
+   */
+  const editingId = pending?.editingConnectionId
+  useEffect(() => {
+    if (!editingId) return
+    const workflow = store.get(workflowsAtom).find(w => w.id === `wf_${editingId}`)
+    if (!workflow) return
+    const d = draftFromWorkflow(workflow)
+    setAction(d.action)
+    setAmount(d.amount)
+    setValue(d.value)
+    setRequireValid(d.requireValid)
+    setWebhookUrl(d.webhookUrl)
+    setMappings(d.mappings)
+    setMatchColumn(d.matchColumn)
+    setMatchValueSource(d.matchValueSource)
+    setMatchValueVal(d.matchValueVal)
+    setApplyToAll(d.applyToAll)
+    setIsConditional(d.isConditional)
+    setMatchMode(d.matchMode)
+    setConds(d.conds)
+    setElseEnabled(d.elseEnabled)
+    setElseAction(d.elseAction)
+    setElseTargetId(d.elseTargetId)
+    setElseValue(d.elseValue)
+    setElseAmount(d.elseAmount)
+    setOnPageLoad(d.onPageLoad)
+    setTimerEvent(d.timerEvent)
+    setGoToPageId(d.goToPageId)
+    setOpenUrlValue(d.openUrlValue)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingId])
   const setCond = (i: number, patch: Partial<{ fieldId: string; operator: string; value: string; expression: string }>) =>
     setConds(prev => prev.map((c, n) => (n === i ? { ...c, ...patch } : c)))
 
@@ -564,15 +604,25 @@ function ConnectionPopup({ editor }: { editor: any }) {
   }
 
   const handleConnect = () => {
-    const connId = `conn_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
+    /**
+     * Changing an existing wire keeps its id. A new id would draw a second wire
+     * between the same two blocks and leave the first one's workflow running,
+     * so one press would do the old thing AND the new thing.
+     */
+    const connId =
+      pending.editingConnectionId ||
+      `conn_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
     const wfId = `wf_${connId}`
 
-    // Create persistent connection for wire rendering
-    setConnections(prev => [...prev, {
-      id: connId,
-      sourceBlockId: pending.sourceBlockId,
-      targetBlockId: pending.targetBlockId,
-    }])
+    // Create persistent connection for wire rendering. Not when changing one --
+    // it is already drawn.
+    if (!pending.editingConnectionId) {
+      setConnections(prev => [...prev, {
+        id: connId,
+        sourceBlockId: pending.sourceBlockId,
+        targetBlockId: pending.targetBlockId,
+      }])
+    }
 
     let stepStep: any = {
       id: `step_${connId}`,
@@ -691,8 +741,18 @@ function ConnectionPopup({ editor }: { editor: any }) {
       steps: [stepStep],
     }
 
-    console.log('[DIAG] Successfully created connection. Adding new workflow to workflowsAtom:', JSON.stringify(newWorkflow, null, 2))
-    setWorkflows(prev => [...prev, newWorkflow])
+    /**
+     * Replace when changing, append when drawing.
+     *
+     * Appending while editing would leave the old step running beside the new
+     * one -- two rows written per press, and the run log showing both, which
+     * reads as the engine having gone mad rather than as a duplicate wire.
+     */
+    setWorkflows(prev =>
+      pending.editingConnectionId
+        ? prev.map(w => (w.id === wfId ? newWorkflow : w))
+        : [...prev, newWorkflow]
+    )
 
     // Clear pending connection
     setPending(null)
@@ -1510,11 +1570,32 @@ function ContextMenu({ editor, deleteBlock }: { editor: any; deleteBlock: (block
 
 function ConnectionContextMenu() {
   const [menu, setMenu] = useAtom(connectionContextMenuAtom)
+  const store = useStore()
+  const setPending = useSetAtom(pendingConnectionAtom)
   const setConnections = useSetAtom(connectionsAtom)
   const setWorkflows = useSetAtom(workflowsAtom)
   const triggerSave = useSetAtom(triggerSaveAtom)
 
   if (!menu || !menu.visible) return null
+
+  /**
+   * Open the popup on the wire that is already there.
+   *
+   * This menu had exactly one option and it was Delete, so every tweak meant
+   * rebuilding the step from memory -- the action, the mappings, the match
+   * column, every condition -- because nothing on screen still showed them.
+   */
+  const handleEdit = () => {
+    const connection = store.get(connectionsAtom).find(c => c.id === menu.connectionId)
+    if (!connection) { setMenu(null); return }
+    setPending({
+      sourceBlockId: connection.sourceBlockId,
+      targetBlockId: connection.targetBlockId,
+      editingConnectionId: menu.connectionId,
+      x1: menu.x, y1: menu.y, x2: menu.x, y2: menu.y,
+    })
+    setMenu(null)
+  }
 
   const handleDelete = () => {
     // Remove connection
@@ -1560,6 +1641,14 @@ function ConnectionContextMenu() {
 
   return (
     <div style={menuStyle} onPointerDown={(e) => e.stopPropagation()}>
+      <button
+        onClick={handleEdit}
+        style={{ ...optionStyle, color: '#334155' }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = '#f1f5f9' }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+      >
+        Change this connection
+      </button>
       <button 
         onClick={handleDelete}
         style={optionStyle}

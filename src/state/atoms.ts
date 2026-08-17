@@ -68,6 +68,15 @@ export const pendingConnectionAtom = atom<{
   sourceBlockId: string;
   targetBlockId: string;
   sourceEvent?: 'onClick' | 'onChange' | 'onTick' | 'onComplete';
+  /**
+   * Set when an EXISTING wire is being changed rather than a new one drawn.
+   *
+   * A wire could only be deleted -- one option on its menu, "Delete" -- so
+   * changing an action meant rebuilding every condition and column mapping from
+   * memory. With this set the popup loads what is already there and Connect
+   * replaces the workflow instead of adding a second one beside it.
+   */
+  editingConnectionId?: string;
   // Port coordinates, so WireOverlay can draw the dashed pending wire.
   x1: number;
   y1: number;

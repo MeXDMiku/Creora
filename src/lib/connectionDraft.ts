@@ -147,3 +147,114 @@ export function whyItCannotWork(draft: StepDraft): string | null {
 
   return null;
 }
+
+/**
+ * An existing wire, read back into the fields the popup shows.
+ *
+ * WHY THIS EXISTS
+ * A wire could only be deleted. There was one option on its menu and it was
+ * "Delete". So changing "add a row" into "add a row, but only if the email is
+ * filled in" meant removing the wire and rebuilding it: the action, every
+ * column mapping, the match column, every condition, the otherwise branch --
+ * all retyped from memory, because nothing on screen still showed them.
+ *
+ * WHY IT IS A PURE FUNCTION AND NOT A PILE OF SETTERS
+ * The dangerous failure here is not a crash. It is one field that quietly does
+ * not come back: a builder opens a wire, changes the action, presses Connect,
+ * and the three conditions they wrote last week are gone with no warning. That
+ * is unnoticeable until it has already happened, and it is the same shape as
+ * every silent-loss bug in this project's record.
+ *
+ * So the reading direction is one function with one job, and a check feeds it a
+ * step carrying EVERY field the popup can produce and asserts each one comes
+ * back. A field added to the popup without a line here fails that check.
+ */
+
+export interface WireDraft {
+  action: string;
+  amount: number;
+  /** Always the string form, because that is what the input holds. */
+  value: string;
+  requireValid: boolean | undefined;
+  webhookUrl: string;
+  mappings: Record<string, { source: 'fixed' | 'block'; value: string }>;
+  matchColumn: string;
+  matchValueSource: 'fixed' | 'block';
+  matchValueVal: string;
+  applyToAll: boolean;
+  isConditional: boolean;
+  matchMode: 'all' | 'any';
+  conds: { fieldId: string; operator: string; value: string; expression?: string }[];
+  elseEnabled: boolean;
+  elseAction: string;
+  elseTargetId: string;
+  elseValue: string;
+  elseAmount: number;
+  onPageLoad: boolean;
+  timerEvent: 'onTick' | 'onComplete';
+  goToPageId: string;
+  openUrlValue: string;
+}
+
+/** The sentinel the field dropdown uses to mean "this condition is a formula". */
+export const EXPRESSION_CONDITION = '__expression__';
+
+const str = (v: any) => (v === undefined || v === null ? '' : String(v));
+
+export function draftFromWorkflow(workflow: any): WireDraft {
+  const step = (workflow?.steps || [])[0] || {};
+  const action = str(step.action) || 'increment';
+  const event = str(workflow?.sourceEvent);
+
+  /**
+   * `conditions` wins when present, `condition` is the older single shape, and
+   * a row counts as real if it has EITHER a field or an expression -- the same
+   * test the engine and the Health panel use. Reading only `fieldId` here would
+   * drop every formula condition on load, which is exactly how two other places
+   * in this codebase lost them.
+   */
+  const isReal = (c: any) => !!c && (!!c.fieldId || str(c.expression).trim() !== '');
+  const rawConds: any[] =
+    Array.isArray(step.conditions) && step.conditions.filter(isReal).length
+      ? step.conditions.filter(isReal)
+      : isReal(step.condition)
+        ? [step.condition]
+        : [];
+
+  const conds = rawConds.map((c: any) =>
+    str(c.expression).trim() !== ''
+      ? { fieldId: EXPRESSION_CONDITION, operator: 'equals', value: '', expression: str(c.expression) }
+      : { fieldId: str(c.fieldId), operator: str(c.operator) || 'equals', value: str(c.value), expression: '' },
+  );
+
+  return {
+    action,
+    amount: typeof step.amount === 'number' ? step.amount : 1,
+    // Navigation keeps its destination in `value`, and those have their own
+    // fields below -- leaving it here too would show a page id in the "set to"
+    // box the moment somebody switched action.
+    value: action === 'goToPage' || action === 'openUrl' ? '' : str(step.value),
+    // undefined means "whatever this action defaults to", and that distinction
+    // has to survive: pre-filling it would freeze today's default onto a step
+    // for ever.
+    requireValid: typeof step.requireValid === 'boolean' ? step.requireValid : undefined,
+    webhookUrl: str(step.webhookUrl),
+    mappings: (step.mappings && typeof step.mappings === 'object' ? step.mappings : {}) as WireDraft['mappings'],
+    matchColumn: str(step.matchColumn),
+    matchValueSource: step.matchValue?.source === 'block' ? 'block' : 'fixed',
+    matchValueVal: str(step.matchValue?.value),
+    applyToAll: step.applyToAll === true,
+    isConditional: conds.length > 0,
+    matchMode: step.match === 'any' ? 'any' : 'all',
+    conds: conds.length ? conds : [{ fieldId: '', operator: 'equals', value: '', expression: '' }],
+    elseEnabled: !!step.elseAction,
+    elseAction: str(step.elseAction) || 'set',
+    elseTargetId: str(step.elseTargetId),
+    elseValue: str(step.elseValue),
+    elseAmount: typeof step.elseAmount === 'number' ? step.elseAmount : 1,
+    onPageLoad: event === 'onLoad',
+    timerEvent: event === 'onComplete' ? 'onComplete' : 'onTick',
+    goToPageId: action === 'goToPage' ? str(step.value) : '',
+    openUrlValue: action === 'openUrl' ? str(step.value) : '',
+  };
+}
