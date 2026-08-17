@@ -3469,9 +3469,29 @@ group('opening an address is not a way to run code');
   }
 
   // The words say what the sentence will read like on a wire.
-  check('the wire reads as going somewhere',
-    wireSentence({ sourceName: 'Submit', targetName: 'Thank You', event: 'onClick', action: 'goToPage' }),
+  /**
+   * The sentence has to name where it GOES, not what the wire was dragged to.
+   * Seen on screen: dragging Button 1 to a Submissions table and choosing
+   * "Go to another page" read "When Button 1 is pressed -> go to Submissions",
+   * naming a table it will never open, with total confidence. No check could
+   * have caught it -- every one of them passed the destination as targetName.
+   */
+  check('the wire names the page it goes to, not the block it was dragged to',
+    wireSentence({ sourceName: 'Submit', targetName: 'Submissions', event: 'onClick', action: 'goToPage', destinationName: 'Thank You' }),
     'When Submit is pressed → go to Thank You');
+  check('and says so plainly before one is chosen',
+    wireSentence({ sourceName: 'Submit', targetName: 'Submissions', event: 'onClick', action: 'goToPage' }),
+    'When Submit is pressed → go to no page yet');
+  check('an address is named too',
+    wireSentence({ sourceName: 'Submit', targetName: 'Submissions', event: 'onClick', action: 'openUrl', destinationName: 'https://example.com' }),
+    'When Submit is pressed → open https://example.com');
+  check('and before there is one',
+    wireSentence({ sourceName: 'Submit', targetName: 'Submissions', event: 'onClick', action: 'openUrl' }),
+    'When Submit is pressed → open no address yet');
+  // Every other action still names its target, which is correct for them.
+  check('an ordinary action still names its target',
+    wireSentence({ sourceName: 'Submit', targetName: 'Submissions', event: 'onClick', action: 'addRow', destinationName: 'ignored' }),
+    'When Submit is pressed → add a row to Submissions');
 }
 
 group('a step that goes nowhere cannot be connected');

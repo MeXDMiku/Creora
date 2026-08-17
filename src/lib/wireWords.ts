@@ -105,6 +105,17 @@ export interface WireSentenceParts {
    * checkbox rather than a saved `event`. Treated exactly as `event: 'onLoad'`.
    */
   pageLoad?: boolean;
+  /**
+   * Where a `goToPage` or `openUrl` step actually goes.
+   *
+   * Those two ignore their target block entirely -- the destination rides in
+   * the step's `value` -- so a sentence built from targetName says the wrong
+   * thing with total confidence. Seen on screen: dragging Button 1 to a
+   * Submissions table and choosing "Go to another page" read
+   * "When Button 1 is pressed -> go to Submissions", naming a table it will
+   * never open. Checks could not catch that; it took looking at it.
+   */
+  destinationName?: string;
 }
 
 /**
@@ -115,9 +126,15 @@ export interface WireSentenceParts {
  * Names, not ids. A sentence that says `buttonBlock__1426237deb` teaches
  * nothing, and the block names are right there.
  */
+/** Actions whose sentence must name where they GO, not what they were dragged to. */
+const GOES_SOMEWHERE = new Set(['goToPage', 'openUrl']);
+
 export function wireSentence(parts: WireSentenceParts): string {
   const source = (parts.sourceName || 'this').trim() || 'this';
-  const target = (parts.targetName || 'that').trim() || 'that';
+  const target = GOES_SOMEWHERE.has(parts.action)
+    ? (parts.destinationName || '').trim() ||
+      (parts.action === 'goToPage' ? 'no page yet' : 'no address yet')
+    : (parts.targetName || 'that').trim() || 'that';
   const sentence =
     // "When Submit the page opens" reads as nonsense, and the source block is
     // genuinely irrelevant for onLoad -- it only anchors the workflow. So the

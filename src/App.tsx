@@ -721,6 +721,14 @@ function ConnectionPopup({ editor }: { editor: any }) {
                 ? 'onChange'
                 : 'onClick',
           pageLoad: onPageLoad,
+          // goToPage and openUrl ignore the target block, so the sentence has
+          // to be told where the step actually goes.
+          destinationName:
+            action === 'goToPage'
+              ? pagesList.find(pg => pg.id === goToPageId)?.name
+              : action === 'openUrl'
+                ? openUrlValue.trim()
+                : undefined,
           action,
           conditional: isConditional,
         })}
