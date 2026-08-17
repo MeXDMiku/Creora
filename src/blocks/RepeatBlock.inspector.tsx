@@ -3,7 +3,7 @@ import { useMemo } from 'react'
 import { blockRuntimeAtom, triggerSaveAtom, getBlockTypeDisplayName, getCanvasBlocks } from '../state/atoms'
 import { useStore } from 'jotai'
 import { sanitizeHtml } from '../lib/sanitizeHtml'
-import { MAX_RENDERED_ROWS } from '../lib/rows'
+import { MAX_RENDERED_ROWS, calcExampleFor, calcExampleWithFilter } from '../lib/rows'
 import { FilterHelp } from '../components/FilterHelp'
 import { pagesListAtom, currentPageIdAtom } from '../state/atoms'
 
@@ -58,6 +58,10 @@ export default function RepeatBlockInspector({ blockId, editor }: { blockId: str
   const tracked = useAtomValue(blockRuntimeAtom(runtimeState.trackedBlockId || ''))
   const columns = (tracked?.columns || []).map(c => c.name).filter(Boolean)
   const slotNames = [...columns, 'Row number', 'Row id']
+
+  // Built out in rows.ts, where a check can render it and prove the example
+  // the panel prints is one that actually works.
+  const calcExample = calcExampleFor(columns)
 
   const set = (patch: Record<string, unknown>) => {
     setRuntimeState(prev => ({ ...prev, ...patch }))
@@ -141,6 +145,14 @@ export default function RepeatBlockInspector({ blockId, editor }: { blockId: str
             A slot that is not a column falls back to a block on this page with
             that name, so a card can show a heading or a search term too.
           </span>
+          {calcExample && (
+            <span style={hintStyle}>
+              To show what values come to rather than the values themselves, put
+              a sum in a slot: <code>{calcExample}</code>. It formats like any
+              other slot — <code>{calcExampleWithFilter(calcExample)}</code> —
+              and column names go in without braces there.
+            </span>
+          )}
         </div>
       )}
 

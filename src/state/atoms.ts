@@ -220,10 +220,23 @@ export function getPortBadge(dataType: BlockDataType): string {
  * something real has to apply this same rule or it will accuse a slot that
  * works perfectly.
  */
-export function slotNameOf(blockId: string, state: { blockName?: unknown } | undefined | null): string {
+export function slotNameForNodeType(
+  nodeType: string | null | undefined,
+  state: { blockName?: unknown } | undefined | null,
+): string {
   return isGarbageName(state?.blockName as string | undefined)
-    ? getBlockTypeDisplayName(nodeTypeFromBlockId(blockId) ?? '')
+    ? getBlockTypeDisplayName(nodeType ?? '')
     : String((state as any).blockName);
+}
+
+/**
+ * The same rule, for callers holding an id rather than a type. Both exist
+ * because the type is sometimes to hand from the document node and sometimes
+ * only derivable from the id, and making one of them do the other's job meant
+ * passing '' and getting the fallback name for every unnamed block.
+ */
+export function slotNameOf(blockId: string, state: { blockName?: unknown } | undefined | null): string {
+  return slotNameForNodeType(nodeTypeFromBlockId(blockId), state);
 }
 
 export function blockValuesByName(store: any): Record<string, any> {
@@ -247,9 +260,9 @@ export function getCanvasBlocks(editor: any, store: any, excludeBlockId?: string
       const dataType = typeName === 'shapeBlock'
         ? shapeRoleDataType(runtime?.role)
         : getBlockDataType(typeName);
-      const name = isGarbageName(runtime?.blockName)
-        ? getBlockTypeDisplayName(typeName)
-        : (runtime!.blockName as string);
+      // The document node knows its type, so it is passed rather than re-derived
+      // from the id -- but the rule itself is the shared one.
+      const name = slotNameForNodeType(typeName, runtime);
       list.push({ id: bId, type: typeName, label: name, dataType });
     }
   });

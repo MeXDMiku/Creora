@@ -49,7 +49,8 @@ import { stepConditionResult, formulaScope, recalculateAllFormulas, runPageLoadW
 import { safeUrl, isSafeUrlValue, schemeOf, stripIgnorable } from '../src/lib/urls';
 import { fillSlots, leadingSlotName, findSlots as findSlotsForCheck } from '../src/lib/sanitizeHtml';
 import { slotValuesFrom } from '../src/lib/useSlotValues';
-import { visibleRows, rowSlots, compareCells, slotNamesFor, rowMatchesSearch, MAX_RENDERED_ROWS, rowIndexesForStep, coerceForColumn, rowMatchesFormula, columnsUsedByFormula } from '../src/lib/rows';
+import { slotNameOf, slotNameForNodeType } from '../src/state/atoms';
+import { visibleRows, rowSlots, compareCells, slotNamesFor, rowMatchesSearch, MAX_RENDERED_ROWS, rowIndexesForStep, coerceForColumn, rowMatchesFormula, columnsUsedByFormula, calcExampleFor, calcExampleWithFilter } from '../src/lib/rows';
 import {
   parseSlot,
   applyFilters,
@@ -4305,6 +4306,72 @@ group('a formula written in the wrong spelling says which one');
   check('and neither does an empty one', explainUnreadableFormula('', 'slots'), null);
   check('a correct row filter is not second-guessed',
     explainUnreadableFormula('{{Price}} > 100', 'slots'), null);
+}
+
+
+// ------------------------------------- one rule for what a block answers to
+group('the name a block answers to is decided in one place');
+{
+  /**
+   * This rule was written out five times: the inspector header, the wire
+   * sentence, the block picker, the value resolver, and now the Health panel.
+   * They agreed by luck. The panel is the one that cannot afford to be wrong,
+   * because a disagreement there means accusing a page that works.
+   */
+  const named = { blockName: 'Total price' };
+  const unnamed = { blockName: '' };
+  const placeholder = { blockName: 'Button · a3f2' };
+
+  check('a name somebody chose is used as written', slotNameOf('buttonBlock__nm00000001', named), 'Total price');
+  check('a block nobody renamed answers to its type',
+    slotNameOf('buttonBlock__nm00000001', unnamed), 'Button');
+  check('and so does one still holding a generated placeholder',
+    slotNameOf('buttonBlock__nm00000001', placeholder), 'Button');
+  check('no state at all is still a type name, not a crash',
+    slotNameOf('buttonBlock__nm00000001', undefined), 'Button');
+
+  check('the id form and the type form agree, which is the whole point',
+    slotNameOf('repeatBlock__nm00000002', unnamed),
+    slotNameForNodeType('repeatBlock', unnamed));
+  check('a type the registry does not know falls back rather than throwing',
+    slotNameForNodeType(null, unnamed), 'Block');
+}
+
+
+// -------------------------------- the example the panel prints has to work
+group('the calculated-slot example is one that actually renders');
+{
+  /**
+   * The repeater's panel prints a worked example in the builder's own column
+   * names, and somebody copies it into the box above expecting it to work. So
+   * the example is built out here rather than in the component, and checked by
+   * being RUN -- an example that does not render is worse than no example,
+   * because it teaches that the syntax is broken.
+   */
+  const example = calcExampleFor(['Price', 'Qty']);
+  check('two columns make a product', example, '{{calc: Price * Qty}}');
+  check('AND IT RENDERS', fillSlots(`<p>${example}</p>`, { Price: 200, Qty: 3 }), '<p>600</p>');
+
+  const withFilter = calcExampleWithFilter(example);
+  check('the formatted version too', withFilter, '{{calc: Price * Qty | money: £}}');
+  check('AND SO DOES THAT', fillSlots(`<p>${withFilter}</p>`, { Price: 200, Qty: 3 }), '<p>£600.00</p>');
+
+  const one = calcExampleFor(['Total']);
+  check('one column doubles itself rather than naming a column that is not there', one, '{{calc: Total * 2}}');
+  check('and renders', fillSlots(`<p>${one}</p>`, { Total: 7 }), '<p>14</p>');
+
+  check('no columns, no example -- one naming nothing teaches nothing', calcExampleFor([]), null);
+  check('and neither does undefined', calcExampleFor(undefined), null);
+
+  /**
+   * A column with a space cannot go in a calculation at all: filters are split
+   * off the slot first, so a nested {{ }} would not survive being parsed twice.
+   * Offering it and letting it fail would be the worst of the options.
+   */
+  const spaced = calcExampleFor(['Your name', 'Total price', 'Qty']);
+  check('A COLUMN WITH A SPACE IS NOT OFFERED, BECAUSE IT WOULD NOT WORK', spaced, '{{calc: Qty * 2}}');
+  check('and the offered one renders', fillSlots(`<p>${spaced}</p>`, { Qty: 4 }), '<p>8</p>');
+  check('all of them spaced means no example at all', calcExampleFor(['Your name', 'Total price']), null);
 }
 
 say(`\n${passed} passed, ${failed} failed`);

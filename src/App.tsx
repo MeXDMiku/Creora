@@ -2,7 +2,7 @@ import { useEffect, useRef, useCallback, useState, useMemo } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { useSetAtom, useAtom, useAtomValue, useStore } from 'jotai'
-import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, getCanvasBlocks, shapeRoleDataType, currentPageIdAtom, currentPageIsPublishedAtom, pagesListAtom, switchPageFnAtom, isPreviewModeAtom, canvasModeAtom, editingBreakpointAtom, canvasZoomAtom } from './state/atoms'
+import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, slotNameOf, slotNameForNodeType, getCanvasBlocks, shapeRoleDataType, currentPageIdAtom, currentPageIsPublishedAtom, pagesListAtom, switchPageFnAtom, isPreviewModeAtom, canvasModeAtom, editingBreakpointAtom, canvasZoomAtom } from './state/atoms'
 import { summarisePageData, describeWhatWillBeLost, downloadPageData, deletePage } from './lib/pageDelete'
 import { newBlockId, defaultRuntimeForNodeType, defaultAttrsForNodeType, BLOCK_FOOTPRINT, nodeTypeFromBlockId, shortBlockId, isBlockNodeType, withoutVisitorState, portableTypeFromNodeType, nodeTypeFromPortableType, type BlockNodeType } from './lib/blockRegistry'
 import { ButtonBlock } from './blocks/ButtonBlock'
@@ -78,9 +78,10 @@ function InspectorControls({ blockId, editor }: { blockId: string; editor: any }
 /** The header said `Inspector (buttonBlock__jdzm71nxbk)`. Nobody knows which block that is. */
 function InspectorTitle({ blockId }: { blockId: string }) {
   const runtime = useAtomValue(blockRuntimeAtom(blockId))
-  const name = isGarbageName(runtime?.blockName)
-    ? getBlockTypeDisplayName(nodeTypeFromBlockId(blockId) ?? '')
-    : runtime.blockName
+  // The same rule markup and formulas use, so the header calls a block what a
+  // slot has to call it. It was written out separately here, and in four other
+  // places, until one of them disagreed and a Health check accused a working page.
+  const name = slotNameOf(blockId, runtime)
   return (
     <h3 style={{ margin: '0 0 12px 0' }}>
       {name}{' '}
@@ -460,9 +461,7 @@ function ConnectionPopup({ editor }: { editor: any }) {
 
   /** Names, not ids. A sentence saying buttonBlock__1426237deb teaches nothing. */
   const readableName = (state: any, nodeType: string | null) =>
-    isGarbageName(state?.blockName)
-      ? getBlockTypeDisplayName(nodeType ?? '')
-      : String(state.blockName)
+    slotNameForNodeType(nodeType, state)
   const databaseColumns = targetState?.columns || []
 
   // Get all OTHER blocks on the canvas

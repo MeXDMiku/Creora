@@ -436,3 +436,34 @@ export function rowMatchesFormula(
     };
   }
 }
+
+/**
+ * A worked example of a calculated slot, written in the builder's OWN columns.
+ *
+ * WHY THIS IS NOT IN THE COMPONENT
+ * It is a promise: the panel prints it and somebody copies it into the box
+ * above expecting it to work. A generic `{{calc: A * B}}` would have to be
+ * translated first, which is most of the reason a syntax goes untried -- but an
+ * example built from real column names is only useful if it is RIGHT, and the
+ * only way to know that is to run it. Out here, a check can render it and
+ * compare the answer.
+ *
+ * Returns null with no columns, because an example naming nothing teaches
+ * nothing.
+ */
+export function calcExampleFor(columns: string[] | undefined | null): string | null {
+  const usable = (columns || []).map(c => String(c ?? '').trim()).filter(Boolean);
+  // Bare names inside, deliberately: filters are split off the slot before the
+  // calculation is read, so a nested {{ }} cannot survive being parsed twice.
+  // A name with a space in it therefore cannot go in one -- so it is skipped
+  // here rather than offered and then failing.
+  const simple = usable.filter(c => /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(c));
+  if (simple.length >= 2) return `{{calc: ${simple[0]} * ${simple[1]}}}`;
+  if (simple.length === 1) return `{{calc: ${simple[0]} * 2}}`;
+  return null;
+}
+
+/** The same example with a formatting filter on it, to show they compose. */
+export function calcExampleWithFilter(example: string | null, symbol = '£'): string | null {
+  return example ? example.replace(/\}\}$/, ` | money: ${symbol}}}`) : null;
+}
