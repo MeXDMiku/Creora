@@ -258,3 +258,49 @@ export function draftFromWorkflow(workflow: any): WireDraft {
     openUrlValue: action === 'openUrl' ? str(step.value) : '',
   };
 }
+
+/**
+ * A popup showing nothing yet.
+ *
+ * WHY THIS EXISTS RATHER THAN LETTING THE FIELDS KEEP THEIR VALUES
+ * The popup returns null when there is no wire pending, and returning null does
+ * not unmount a component -- every useState survives. So the fields carried
+ * over from one opening to the next, and once an EXISTING wire could be loaded
+ * that stopped being untidy and became wrong: change a wire with three
+ * conditions, cancel, draw a fresh wire between two other blocks, and the popup
+ * opened already holding those three conditions and the old action.
+ *
+ * Both openings go through the same WireDraft now -- an existing wire through
+ * draftFromWorkflow, a new one through here -- so a field can never be
+ * hydrated-but-not-reset or the other way round. A check asserts the two
+ * produce the same set of keys, which is what makes that guarantee hold when
+ * somebody adds a field later.
+ */
+export function defaultWireDraft(): WireDraft {
+  return {
+    action: 'increment',
+    amount: 1,
+    value: '',
+    // undefined, not false: "whatever this action defaults to" is a real third
+    // state and flattening it here would freeze today's default onto new steps.
+    requireValid: undefined,
+    webhookUrl: '',
+    mappings: {},
+    matchColumn: '',
+    matchValueSource: 'fixed',
+    matchValueVal: '',
+    applyToAll: false,
+    isConditional: false,
+    matchMode: 'all',
+    conds: [{ fieldId: '', operator: 'equals', value: '', expression: '' }],
+    elseEnabled: false,
+    elseAction: 'set',
+    elseTargetId: '',
+    elseValue: '',
+    elseAmount: 1,
+    onPageLoad: false,
+    timerEvent: 'onTick',
+    goToPageId: '',
+    openUrlValue: '',
+  };
+}

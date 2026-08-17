@@ -19,7 +19,7 @@ import { describeCollectionError, MIGRATION_DOC } from '../src/lib/collections';
 import { parseParams, readParam, buildQuery, parseParamTemplate } from '../src/lib/pageParams';
 import { resolvePageValue, buildParamsFromTemplate } from '../src/lib/pageValue';
 import { diagnosePage, sortProblems, referencedIds } from '../src/lib/diagnose';
-import { guessMappings, matchScore, normaliseName, whyItCannotWork, draftFromWorkflow } from '../src/lib/connectionDraft';
+import { guessMappings, matchScore, normaliseName, whyItCannotWork, draftFromWorkflow, defaultWireDraft } from '../src/lib/connectionDraft';
 import { clampZoom, stepZoom, zoomToFit, zoomLabel, contentExtent, toCanvasPoint, MIN_ZOOM, MAX_ZOOM } from '../src/lib/zoom';
 import { wireSentence, actionWords, eventWords, outputMeaning, PORT_OUT_HINT, PORT_IN_HINT } from '../src/lib/wireWords';
 import {
@@ -3756,6 +3756,72 @@ group('a delete that cannot happen yet says why');
     describeDeleteError({ message: 'Failed to fetch' }).includes('nothing was deleted'), true);
   check('and an unknown failure does not pretend to know',
     describeDeleteError({}).includes('did not say why'), true);
+}
+
+group('the popup shows the wire it is open on, and nothing from the last one');
+{
+  /**
+   * The popup returns null when nothing is pending, and returning null does not
+   * unmount a component -- every useState survives. That was untidy while a
+   * popup could only ever be NEW. It became wrong the moment an existing wire
+   * could be loaded: change a wire with three conditions, cancel, draw a fresh
+   * wire between two other blocks, and it opened already holding them.
+   *
+   * Found by asking what else needed to know about wire editing, one cycle
+   * after building it.
+   */
+  const fresh = defaultWireDraft();
+  check('a new wire starts on the default action', fresh.action, 'increment');
+  check('with no conditions', fresh.isConditional, false);
+  check('one blank condition row, ready to fill', fresh.conds, [{ fieldId: '', operator: 'equals', value: '', expression: '' }]);
+  check('no otherwise branch', fresh.elseEnabled, false);
+  check('no column mappings', fresh.mappings, {});
+  check('not every-matching-row', fresh.applyToAll, false);
+  check('not on page load', fresh.onPageLoad, false);
+  check('no page chosen', fresh.goToPageId, '');
+  check('no address', fresh.openUrlValue, '');
+  // undefined is a real third state -- "whatever this action defaults to".
+  // Flattening it to false would freeze today's default onto every new step.
+  check('requireValid is unset, not false', fresh.requireValid, undefined);
+
+  /**
+   * THE STRUCTURAL GUARANTEE.
+   *
+   * Both openings go through the same WireDraft -- an existing wire through
+   * draftFromWorkflow, a new one through defaultWireDraft -- so a field can
+   * never be hydrated-but-not-reset, which is the shape that leaks one wire's
+   * settings onto the next. This is what keeps that true when somebody adds a
+   * field later: add it to one and not the other and this fails.
+   */
+  const loaded = draftFromWorkflow({
+    id: 'wf_x', sourceId: 'buttonBlock__s', sourceEvent: 'onClick',
+    steps: [{ targetId: 'databaseBlock__t', action: 'addRow' }],
+  });
+  check('both sources describe exactly the same fields',
+    Object.keys(fresh).sort(), Object.keys(loaded).sort());
+  check('and there are no extras on either side',
+    Object.keys(fresh).length, Object.keys(loaded).length);
+
+  /**
+   * A saved column mapping must survive being opened.
+   *
+   * The mapping guess used to run unconditionally, which was harmless while
+   * every popup was new and became data loss when an existing wire could be
+   * loaded: opening a wire that writes to a Database replaced the builder's
+   * saved mappings with fresh guesses, silently, before they touched anything.
+   * The rule is now "guess only into an empty set", so this asserts a saved one
+   * is not empty and therefore not guessed over.
+   */
+  const withMappings = draftFromWorkflow({
+    id: 'wf_y', sourceId: 'buttonBlock__s', sourceEvent: 'onClick',
+    steps: [{ targetId: 'databaseBlock__t', action: 'addRow',
+      mappings: { Message: { source: 'block', value: 'inputBlock__m' } } }],
+  });
+  check('a saved mapping comes back', withMappings.mappings, { Message: { source: 'block', value: 'inputBlock__m' } });
+  check('and is not an empty set, so the guess leaves it alone',
+    Object.keys(withMappings.mappings).length > 0, true);
+  check('while a wire with none is empty, so the guess fills it',
+    Object.keys(loaded.mappings).length, 0);
 }
 
 say(`\n${passed} passed, ${failed} failed`);

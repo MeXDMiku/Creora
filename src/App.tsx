@@ -24,7 +24,7 @@ import { RepeatBlock } from './blocks/RepeatBlock'
 import { PageValueBlock } from './blocks/PageValueBlock'
 import { PHONE_MAX_WIDTH } from './lib/layout'
 import { stepZoom, zoomToFit, zoomLabel, contentExtent, clampZoom } from './lib/zoom'
-import { guessMappings, whyItCannotWork, draftFromWorkflow } from './lib/connectionDraft'
+import { guessMappings, whyItCannotWork, draftFromWorkflow, defaultWireDraft } from './lib/connectionDraft'
 import { wireSentence } from './lib/wireWords'
 import { PlacementControls } from './components/PlacementControls'
 import { HealthPanel } from './components/HealthPanel'
@@ -371,12 +371,33 @@ function ConnectionPopup({ editor }: { editor: any }) {
    * silently failing to come back is a check failure rather than a builder
    * losing three conditions without being told.
    */
+  /**
+   * One identity per opening.
+   *
+   * Keyed on the wire being shown, so the fields load once when the popup opens
+   * and never again while somebody is typing into them -- rehydrating on every
+   * keystroke would undo the typing.
+   */
   const editingId = pending?.editingConnectionId
+  const openingId = pending
+    ? editingId || `new:${pending.sourceBlockId}>${pending.targetBlockId}`
+    : null
+
   useEffect(() => {
-    if (!editingId) return
-    const workflow = store.get(workflowsAtom).find(w => w.id === `wf_${editingId}`)
-    if (!workflow) return
-    const d = draftFromWorkflow(workflow)
+    if (!openingId) return
+    /**
+     * Existing wire -> what was saved. New wire -> nothing.
+     *
+     * The reset half matters as much as the load half. The popup returns null
+     * rather than unmounting, so every field survives between openings: change
+     * a wire with three conditions, cancel, draw a fresh wire elsewhere, and it
+     * opened still holding them. Both paths go through the same shape so a
+     * field cannot be loaded but not cleared.
+     */
+    const workflow = editingId
+      ? store.get(workflowsAtom).find(w => w.id === `wf_${editingId}`)
+      : null
+    const d = workflow ? draftFromWorkflow(workflow) : defaultWireDraft()
     setAction(d.action)
     setAmount(d.amount)
     setValue(d.value)
@@ -400,7 +421,7 @@ function ConnectionPopup({ editor }: { editor: any }) {
     setGoToPageId(d.goToPageId)
     setOpenUrlValue(d.openUrlValue)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editingId])
+  }, [openingId])
   const setCond = (i: number, patch: Partial<{ fieldId: string; operator: string; value: string; expression: string }>) =>
     setConds(prev => prev.map((c, n) => (n === i ? { ...c, ...patch } : c)))
 
@@ -466,7 +487,21 @@ function ConnectionPopup({ editor }: { editor: any }) {
        * pointed at the fields that obviously belong to them and the builder
        * corrects the ones that are wrong.
        */
-      setMappings(guessMappings(databaseColumns, canvasBlocks))
+      /**
+       * Guess only into an empty set.
+       *
+       * This used to overwrite unconditionally, which was harmless while a
+       * popup could only ever be new -- and became data loss the moment an
+       * existing wire could be loaded: opening a wire that writes to a Database
+       * replaced the builder's saved column mappings with fresh guesses,
+       * silently, before they had touched anything.
+       *
+       * Written as a functional update so it reads the current mappings rather
+       * than a stale closure, and needs no extra dependency to do it.
+       */
+      setMappings(prev =>
+        prev && Object.keys(prev).length > 0 ? prev : guessMappings(databaseColumns, canvasBlocks)
+      )
 
       if (!matchColumn || !databaseColumns.some((c: any) => c.name === matchColumn)) {
         setMatchColumn(databaseColumns[0].name)
