@@ -1,0 +1,6 @@
+import { slotNameOf, getBlockTypeDisplayName } from '../src/state/atoms';
+import { nodeTypeFromBlockId } from '../src/lib/blockRegistry';
+const id = 'textBlock__mk40000001';
+console.log('nodeType:', JSON.stringify(nodeTypeFromBlockId(id)));
+console.log('display :', JSON.stringify(getBlockTypeDisplayName('textBlock')));
+console.log('slotName:', JSON.stringify(slotNameOf(id, { blockName: '' })));

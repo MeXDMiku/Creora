@@ -4156,5 +4156,99 @@ group('built-in slots survive the layer that resolves names');
     resolve('<p>{{calc: upper(now)}}</p>', { ...onPage, now: 'mine' }), '<p>MINE</p>');
 }
 
+
+// ------------------------------ markup naming something that is not there
+group('markup naming something the page does not have is reported');
+{
+  /**
+   * A slot nothing answers renders as NOTHING -- not the braces, not a
+   * warning, just a gap in the middle of a card that otherwise looks finished.
+   * The usual cause is a column renamed long after the markup was written.
+   *
+   * The set of names a repeater can legitimately use is the interesting part:
+   * its own columns, `Row id` and `Row number`, every block on the page, and
+   * the built-in clock. Too narrow and this accuses working pages, which is how
+   * a panel gets ignored.
+   */
+  const REPEAT = 'repeatBlock__mk00000001';
+  const DB = 'databaseBlock__mk10000001';
+  const TEXT = 'textLabelBlock__mk20000001';
+  const HTML = 'customHtmlBlock__mk30000001';
+  const base = { value: '', visible: true, disabled: false, loading: false, error: null };
+  const mk = (rowHtml: string, html = '') => ({
+    blockIds: [REPEAT, DB, TEXT, HTML],
+    states: {
+      [REPEAT]: { ...base, blockName: 'Orders list', rowHtml, trackedBlockId: DB },
+      [DB]: { ...base, blockName: 'Orders', columns: [{ name: 'Price' }, { name: 'Qty' }] },
+      [TEXT]: { ...base, blockName: 'Heading' },
+      [HTML]: { ...base, blockName: 'Panel', html },
+    },
+    workflows: [], formulas: [], connections: [],
+    pages: [{ id: 'page-1', name: 'Home' }],
+  } as any);
+  const named = (ps: any[], word: string) => ps.filter(p => p.title.includes('nothing on the page has that name') && p.title.includes(word));
+  const any = (ps: any[]) => ps.filter(p => p.title.includes('nothing on the page has that name'));
+
+  check('a misspelled column in row markup is reported',
+    named(diagnosePage(mk('<p>{{Prcie}}</p>')), '"Prcie"').length, 1);
+  check('and it is broken, not a warning',
+    diagnosePage(mk('<p>{{Prcie}}</p>')).find((p: any) => p.title.includes('"Prcie"'))?.severity, 'broken');
+  check('the message says what a builder actually sees',
+    diagnosePage(mk('<p>{{Prcie}}</p>')).find((p: any) => p.title.includes('"Prcie"'))?.detail.includes('gap where the value should be'), true);
+
+  check('a real column is not accused', any(diagnosePage(mk('<p>{{Price}} x {{Qty}}</p>'))).length, 0);
+  check('Row id and Row number are supplied to every row',
+    any(diagnosePage(mk('<p>{{Row number}}. {{Row id}}</p>'))).length, 0);
+  check('a block on the page can be named from row markup',
+    any(diagnosePage(mk('<p>{{Heading}}</p>'))).length, 0);
+  check('and so can the clock', any(diagnosePage(mk('<p>{{today | date: D MMM}}</p>'))).length, 0);
+  check('a filter is not mistaken for a name',
+    any(diagnosePage(mk('<p>{{Price | money: £}}</p>'))).length, 0);
+
+  check('INSIDE A CALCULATION TOO, since that is where a name is easiest to get wrong',
+    named(diagnosePage(mk('<p>{{calc: Prcie * Qty}}</p>')), '"Prcie"').length, 1);
+  check('a correct calculation is left alone',
+    any(diagnosePage(mk('<p>{{calc: Price * Qty | money: £}}</p>'))).length, 0);
+  check('a function name is not mistaken for a column',
+    any(diagnosePage(mk('<p>{{calc: round(Price)}}</p>'))).length, 0);
+
+  check('custom HTML is checked against the blocks on the page',
+    named(diagnosePage(mk('', '<p>{{Headnig}}</p>')), '"Headnig"').length, 1);
+  check('a real block name in custom HTML is fine',
+    any(diagnosePage(mk('', '<p>{{Heading}}</p>'))).length, 0);
+  // A custom HTML block has no table behind it, so a column name is genuinely
+  // nothing there -- and saying so is the point.
+  check('a column name in custom HTML is reported, because it resolves to nothing there',
+    named(diagnosePage(mk('', '<p>{{Price}}</p>')), '"Price"').length, 1);
+
+  /**
+   * The safety valve. Without a tracked table there is no list of columns, so
+   * every slot would be accused -- and a repeater is usually pointed at its
+   * table AFTER its markup is written.
+   */
+  const untracked = {
+    blockIds: [REPEAT],
+    states: { [REPEAT]: { ...base, blockName: 'Orders list', rowHtml: '<p>{{Price}}</p>' } },
+    workflows: [], formulas: [], connections: [], pages: [{ id: 'page-1' }],
+  } as any;
+  check('a repeater with no table yet is not accused', any(diagnosePage(untracked)).length, 0);
+  check('empty markup says nothing', any(diagnosePage(mk(''))).length, 0);
+
+  /**
+   * The false positive that would have made this useless: a block nobody
+   * renamed answers to its type name, and half the blocks on a real page are
+   * exactly that.
+   */
+  const unnamed = {
+    blockIds: [HTML, 'textLabelBlock__mk40000001'],
+    states: {
+      [HTML]: { ...base, blockName: 'Panel', html: '<p>{{Text Label}}</p>' },
+      'textLabelBlock__mk40000001': { ...base, blockName: '' },
+    },
+    workflows: [], formulas: [], connections: [], pages: [{ id: 'page-1' }],
+  } as any;
+  check('A BLOCK NOBODY RENAMED STILL ANSWERS TO ITS TYPE NAME', any(diagnosePage(unnamed)).length, 0);
+}
+
 say(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

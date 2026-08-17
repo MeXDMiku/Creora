@@ -1,6 +1,11 @@
 import type { Workflow, FormulaBinding, BlockRuntimeState } from '../types/creora';
 import { columnsUsedByFormula } from './rows';
 import { nodeTypeFromBlockId } from './blockRegistry';
+// The same rule the renderer uses to decide what a block answers to, and the
+// same function that finds slots -- a second opinion about either would make
+// this panel accuse markup that works.
+import { slotNameOf } from '../state/atoms';
+import { findSlots } from './sanitizeHtml';
 
 /**
  * What is wrong with this page that nobody has noticed.
@@ -245,6 +250,66 @@ export function diagnosePage(facts: PageFacts): Problem[] {
           title: `"${nameOf(facts, blockId)}" filters on a column called "${used}", which is not there`,
           detail:
             'A column that is not there reads as blank, blank fails every comparison, and every row is hidden — so the list looks empty rather than wrong.',
+          blockId,
+        });
+      }
+    }
+  }
+
+  /**
+   * Markup naming something that is not on the page.
+   *
+   * Same shape as the row-formula check above, and the same reason for
+   * existing: a slot nothing answers renders as EMPTY. Not "{{Prcie}}", not a
+   * warning -- nothing at all, in the middle of a card that otherwise looks
+   * finished. The most common version is a column renamed months after the
+   * markup was written, and the card just quietly loses a line.
+   *
+   * A repeater's markup can name a column OR a block on the page OR one of the
+   * built-ins, because that is exactly what it is handed at render time, so all
+   * three are consulted here. Getting that set wrong in either direction is
+   * worse than not checking: too small and it accuses working pages, which
+   * teaches a builder to ignore the panel.
+   */
+  {
+    const builtIn = new Set(['now', 'today']);
+    const blockNames = new Set<string>();
+    for (const id of facts.blockIds || []) blockNames.add(slotNameOf(id, facts.states[id]));
+
+    for (const blockId of facts.blockIds || []) {
+      const state = facts.states[blockId] as any;
+      if (!state) continue;
+      const type = nodeTypeFromBlockId(blockId);
+
+      let markup = '';
+      const known = new Set<string>(blockNames);
+
+      if (type === 'repeatBlock') {
+        const trackedId = String(state?.trackedBlockId || '');
+        const tracked = trackedId ? (facts.states[trackedId] as any) : undefined;
+        // No table means no list of columns to compare against, and guessing
+        // would mean accusing markup that is probably right.
+        if (!tracked) continue;
+        markup = String(state?.rowHtml || '') + ' ' + String(state?.emptyHtml || '');
+        for (const c of tracked?.columns || []) known.add(String(c?.name));
+        // Supplied to every row whether the table has them or not.
+        known.add('Row id');
+        known.add('Row number');
+      } else if (type === 'customHtmlBlock') {
+        markup = String(state?.html || '');
+      } else {
+        continue;
+      }
+
+      if (!markup.trim()) continue;
+
+      for (const used of findSlots(markup)) {
+        if (known.has(used) || builtIn.has(used.trim().toLowerCase())) continue;
+        problems.push({
+          severity: 'broken',
+          title: `"${nameOf(facts, blockId)}" shows "${used}", and nothing on the page has that name`,
+          detail:
+            'A slot nothing answers renders as nothing at all — no name, no warning, just a gap where the value should be.',
           blockId,
         });
       }

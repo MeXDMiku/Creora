@@ -210,13 +210,27 @@ export function getPortBadge(dataType: BlockDataType): string {
  * does, and two resolvers would eventually disagree about which block wins.
  * First one wins on a duplicate name, so a later block cannot steal a slot.
  */
+/**
+ * The name a block ANSWERS TO in markup and formulas.
+ *
+ * Extracted because it was written out five times, and anything that has to
+ * agree in five places eventually does not. It matters most for the block
+ * nobody renamed: a fresh Text block has a placeholder name, and it is
+ * addressable as "Text" -- so anything deciding whether `{{Text}}` refers to
+ * something real has to apply this same rule or it will accuse a slot that
+ * works perfectly.
+ */
+export function slotNameOf(blockId: string, state: { blockName?: unknown } | undefined | null): string {
+  return isGarbageName(state?.blockName as string | undefined)
+    ? getBlockTypeDisplayName(nodeTypeFromBlockId(blockId) ?? '')
+    : String((state as any).blockName);
+}
+
 export function blockValuesByName(store: any): Record<string, any> {
   const byName: Record<string, any> = {};
   for (const id of (store.get(allBlockIdsAtom) || []) as string[]) {
     const state = store.get(blockRuntimeAtom(id));
-    const name = isGarbageName(state?.blockName)
-      ? getBlockTypeDisplayName(nodeTypeFromBlockId(id) ?? '')
-      : (state!.blockName as string);
+    const name = slotNameOf(id, state);
     if (!(name in byName)) byName[name] = state?.value;
   }
   return byName;
