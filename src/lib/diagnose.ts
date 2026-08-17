@@ -38,6 +38,14 @@ export interface PageFacts {
   workflows: Workflow[];
   formulas: FormulaBinding[];
   connections: { id: string; sourceBlockId: string; targetBlockId: string }[];
+  /**
+   * Every page that still exists.
+   *
+   * Required rather than optional on purpose. Optional would mean a caller that
+   * forgets it silently gets fewer checks -- which is the exact failure this
+   * panel exists to catch, reproduced inside the panel itself.
+   */
+  pages: { id: string; name?: string }[];
 }
 
 const IDENTIFIER = /[A-Za-z_$][A-Za-z0-9_$]*/g;
@@ -49,6 +57,10 @@ function nameOf(facts: PageFacts, blockId: string): string {
 
 function exists(facts: PageFacts, blockId: string | undefined | null): boolean {
   return !!blockId && facts.blockIds.includes(blockId);
+}
+
+function pageExists(facts: PageFacts, pageId: string | undefined | null): boolean {
+  return !!pageId && (facts.pages || []).some(p => p.id === pageId);
 }
 
 /**
@@ -124,6 +136,34 @@ export function diagnosePage(facts: PageFacts): Problem[] {
           blockId: workflow.sourceId,
         });
       }
+      /**
+       * A step that goes to a page that is gone.
+       *
+       * Deleting a page does not touch the wires pointing at it, so the step
+       * runs, finds nothing, and the visitor stays exactly where they were.
+       * Nothing throws. That is the whole category this panel exists for, and
+       * it could not see pages at all -- it had no list of them.
+       */
+      if (step.action === 'goToPage') {
+        const destination = String((step as any).value ?? '').trim();
+        if (!destination) {
+          problems.push({
+            severity: 'broken',
+            title: `"${nameOf(facts, workflow.sourceId)}" goes to no page at all`,
+            detail: 'No page was chosen, so pressing it does nothing and says nothing.',
+            blockId: workflow.sourceId,
+          });
+        } else if (!pageExists(facts, destination)) {
+          problems.push({
+            severity: 'broken',
+            title: `"${nameOf(facts, workflow.sourceId)}" goes to a page that is gone`,
+            detail:
+              'That page was deleted, so this leaves the visitor exactly where they were with no sign anything happened.',
+            blockId: workflow.sourceId,
+          });
+        }
+      }
+
       /**
        * A condition can name a third block, and that one can vanish too.
        *
@@ -257,6 +297,25 @@ export function diagnosePage(facts: PageFacts): Problem[] {
     // Through the registry, not by matching the start of an id. Writing that
     // by hand is what made three block types unsaveable in cycle 2.
     const isTrigger = nodeTypeFromBlockId(blockId) === 'buttonBlock';
+    /**
+     * A block whose own target page is gone.
+     *
+     * This predates goToPage entirely -- Buttons and Shapes with the Link role
+     * have carried a targetPageId for weeks, and deleting the page it points at
+     * has always left a control that looks live and does nothing. The panel
+     * read this field already, but only to decide whether the block counted as
+     * "wired to something", and never asked whether the page was still there.
+     */
+    if (state.targetPageId && !pageExists(facts, state.targetPageId)) {
+      problems.push({
+        severity: 'broken',
+        title: `"${nameOf(facts, blockId)}" points at a page that is gone`,
+        detail:
+          'It still looks like a link, and clicking it does nothing at all. Point it somewhere else or clear it.',
+        blockId,
+      });
+    }
+
     if (isTrigger && !wired && !state.targetPageId) {
       problems.push({
         severity: 'idle',

@@ -1772,6 +1772,14 @@ const facts = (over: any = {}) => ({
   workflows: [],
   formulas: [],
   connections: [],
+  /**
+   * The fixture's own pages. It was missing entirely until the panel learned
+   * about pages, and `page-2` above then read as a page that had been deleted
+   * -- eight checks went red at once. The fixture was incomplete, not the
+   * check, which is what making `pages` REQUIRED rather than optional is for:
+   * an optional field would have left every one of these silently unchecked.
+   */
+  pages: [{ id: 'page-1', name: 'Home' }, { id: 'page-2', name: 'Thanks' }],
   ...over,
 } as any);
 
@@ -3246,6 +3254,7 @@ group('the Health panel can see a broken formula condition');
     workflows: [{ id: 'w', sourceId: BTN, sourceEvent: 'onClick', steps }] as any,
     formulas: [] as any,
     connections: [] as any,
+    pages: [{ id: 'page-1', name: 'Home' }],
   });
 
   const broken = diagnosePage(facts([
@@ -3474,6 +3483,69 @@ group('a step that goes nowhere cannot be connected');
   check('no address', whyItCannotWork({ action: 'openUrl', value: '  ' } as any),
     'There is no address to open.');
   check('an address is fine', whyItCannotWork({ action: 'openUrl', value: 'https://x.com' } as any), null);
+}
+
+group('the Health panel can see a wire to a page that is gone');
+{
+  /**
+   * Deleting a page does not touch the wires pointing at it. The step runs,
+   * finds nothing, and the visitor stays exactly where they were -- nothing
+   * throws, nothing is logged. That is the whole category this panel exists
+   * for, and it could not see it, because it had no list of pages at all.
+   *
+   * Found by asking what else needed to know about goToPage right after
+   * building it. The Button half of this predates goToPage by weeks.
+   */
+  const wire = (step: any) => facts({
+    workflows: [{ id: 'w', sourceId: 'buttonBlock__a', sourceEvent: 'onClick', steps: [step] }],
+  });
+
+  const gone = diagnosePage(wire({ targetId: 'numberDisplayBlock__b', action: 'goToPage', value: 'page-deleted' }));
+  check('a step going to a deleted page is reported',
+    gone.filter(p => p.title.includes('goes to a page that is gone')).length, 1);
+  check('and it is broken, not a warning',
+    gone.find(p => p.title.includes('goes to a page that is gone'))?.severity, 'broken');
+
+  const fine = diagnosePage(wire({ targetId: 'numberDisplayBlock__b', action: 'goToPage', value: 'page-2' }));
+  check('a step going to a page that exists is not reported',
+    fine.filter(p => p.title.includes('page that is gone')).length, 0);
+
+  const nowhere = diagnosePage(wire({ targetId: 'numberDisplayBlock__b', action: 'goToPage', value: '' }));
+  check('a step going nowhere at all is reported separately',
+    nowhere.filter(p => p.title.includes('goes to no page at all')).length, 1);
+
+  // Other actions are not accused of anything just for having a value.
+  const other = diagnosePage(wire({ targetId: 'numberDisplayBlock__b', action: 'set', value: 'page-deleted' }));
+  check('a `set` whose value looks like a page id is left alone',
+    other.filter(p => p.title.includes('page')).length, 0);
+
+  /**
+   * And the half that predates goToPage: a Button or a Link-role Shape whose
+   * own target page was deleted. It looks like a link and does nothing. The
+   * panel already READ targetPageId -- only to decide whether the block counted
+   * as wired to something -- and never asked whether the page still existed.
+   */
+  const deadLink = diagnosePage(facts({
+    blockIds: ['buttonBlock__a'],
+    states: { 'buttonBlock__a': { blockName: 'Open shop', targetPageId: 'page-deleted' } },
+  }));
+  check('a button pointing at a deleted page is reported',
+    deadLink.filter(p => p.title.includes('points at a page that is gone')).length, 1);
+
+  const liveLink = diagnosePage(facts({
+    blockIds: ['buttonBlock__a'],
+    states: { 'buttonBlock__a': { blockName: 'Open shop', targetPageId: 'page-2' } },
+  }));
+  check('and one pointing at a real page is not',
+    liveLink.filter(p => p.title.includes('points at a page')).length, 0);
+
+  // A block with no target page at all is not a dead link.
+  const noTarget = diagnosePage(facts({
+    blockIds: ['numberDisplayBlock__b'],
+    states: { 'numberDisplayBlock__b': { blockName: 'Total' } },
+  }));
+  check('a block with no target page is not accused', 
+    noTarget.filter(p => p.title.includes('points at a page')).length, 0);
 }
 
 say(`\n${passed} passed, ${failed} failed`);
