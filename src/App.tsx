@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback, useState, useMemo } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { useSetAtom, useAtom, useAtomValue, useStore } from 'jotai'
+import { PageStamps, interpretSave, shouldKeepAutosaving } from './lib/savePage'
 import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, slotNameOf, slotNameForNodeType, getCanvasBlocks, shapeRoleDataType, currentPageIdAtom, currentPageIsPublishedAtom, pagesListAtom, switchPageFnAtom, isPreviewModeAtom, canvasModeAtom, editingBreakpointAtom, canvasZoomAtom } from './state/atoms'
 import { summarisePageData, describeWhatWillBeLost, downloadPageData, deletePage } from './lib/pageDelete'
 import { newBlockId, defaultRuntimeForNodeType, defaultAttrsForNodeType, BLOCK_FOOTPRINT, nodeTypeFromBlockId, shortBlockId, isBlockNodeType, withoutVisitorState, portableTypeFromNodeType, nodeTypeFromPortableType, type BlockNodeType } from './lib/blockRegistry'
@@ -1761,7 +1762,23 @@ function App() {
 
   // Loading and Saving State
   const [isLoading, setIsLoading] = useState(true)
-  const [saveStatus, setSaveStatus] = useState<'Saved' | 'Saving...' | 'Error saving' | 'Ready'>('Ready')
+  const [saveStatus, setSaveStatus] = useState<'Saved' | 'Saving...' | 'Error saving' | 'Ready' | 'Not saved'>('Ready')
+  /**
+   * The sentence behind a refused save, and the switch that stops autosave.
+   *
+   * A conflict cannot just be a red word. "Error saving" next to a page that
+   * has quietly stopped saving is how somebody keeps typing for an hour, and
+   * the whole point of the guard is that they find out at the first keystroke
+   * rather than when the work is gone.
+   */
+  const [saveProblem, setSaveProblem] = useState<string | null>(null)
+  const autosavePausedRef = useRef(false)
+  /**
+   * Which version of each page this tab believes it holds. Per page, because
+   * switching pages saves the outgoing one -- one stamp would be compared
+   * against the wrong page the first time anybody used the page tabs.
+   */
+  const stampsRef = useRef(new PageStamps())
   const debouncedSaveRef = useRef<any | null>(null)
   const [triggerSaveValue, setTriggerSave] = useAtom(triggerSaveAtom)
 
@@ -2661,6 +2678,16 @@ function App() {
   const saveToSupabase = useCallback(() => {
     if (isLoading || !editor) return
 
+    /**
+     * Autosave is off after a refused save, and stays off until the page is
+     * reloaded or the builder chooses to overwrite. Carrying on would either
+     * repeat the same refusal after every keystroke or -- if it dropped the
+     * version stamp to force its way through -- perform the exact overwrite the
+     * guard exists to prevent. The message stays on screen; this is the half
+     * that makes it true.
+     */
+    if (autosavePausedRef.current) return
+
     if (debouncedSaveRef.current) {
       clearTimeout(debouncedSaveRef.current)
     }
@@ -2718,15 +2745,52 @@ function App() {
           ...(currentName ? { pageName: currentName } : {}),
         }
 
-        const { error } = await supabase
-          .rpc('save_page', {
-            p_id: activePageIdRef.current,
-            p_blocks: blocksPayload,
-            p_workflows: workflows
-          })
+        /**
+         * Guarded save: the version this tab thinks it has goes with the write,
+         * and the server refuses if somebody else moved the page on. Undefined
+         * means this tab does not know, which saves unconditionally -- exactly
+         * what happened before, and the right default, because failing to save
+         * loses the work in front of you for certain.
+         */
+        const pageId = activePageIdRef.current
+        const expected = stampsRef.current.expected(pageId)
+        let { data, error } = await supabase.rpc('save_page_if_unchanged', {
+          p_id: pageId,
+          p_blocks: blocksPayload,
+          p_workflows: workflows,
+          p_expected: expected ?? null,
+        })
+        let outcome = interpretSave(error, data)
 
-        if (error) throw error
-        setSaveStatus('Saved')
+        if (outcome.needsFallback) {
+          // Migration 0006 has not been run. Saving the old way is unguarded,
+          // which is what today already does -- shipping this must not stop
+          // anybody saving until they have run some SQL.
+          const fallback = await supabase.rpc('save_page', {
+            p_id: pageId,
+            p_blocks: blocksPayload,
+            p_workflows: workflows,
+          })
+          outcome = interpretSave(fallback.error, null)
+        }
+
+        if (outcome.ok) {
+          stampsRef.current.record(pageId, outcome.stamp)
+          setSaveProblem(null)
+          setSaveStatus('Saved')
+        } else {
+          // A conflict stops autosave. Retrying every 500ms either repeats the
+          // refusal or, if it dropped the stamp to get through, performs the
+          // overwrite this exists to prevent.
+          if (!shouldKeepAutosaving(outcome)) {
+            autosavePausedRef.current = true
+            stampsRef.current.forget(pageId)
+            setSaveStatus('Not saved')
+            setSaveProblem(outcome.message)
+            return
+          }
+          throw new Error(outcome.message || 'save failed')
+        }
       } catch (err: any) {
         console.error('Failed to save to Supabase:', err)
         console.error('[Supabase Error Message]:', err?.message)
@@ -3089,13 +3153,34 @@ function App() {
         pageName
       }
 
-      const { error } = await supabase
-        .rpc('save_page', {
-          p_id: pageId,
-          p_blocks: blocksPayload,
-          p_workflows: workflows
+      const expected = stampsRef.current.expected(pageId)
+      const { data, error } = await supabase.rpc('save_page_if_unchanged', {
+        p_id: pageId,
+        p_blocks: blocksPayload,
+        p_workflows: workflows,
+        p_expected: expected ?? null,
+      })
+      let outcome = interpretSave(error, data)
+      if (outcome.needsFallback) {
+        const fallback = await supabase.rpc('save_page', {
+          p_id: pageId, p_blocks: blocksPayload, p_workflows: workflows,
         })
-      if (error) throw error
+        outcome = interpretSave(fallback.error, null)
+      }
+      if (outcome.ok) {
+        stampsRef.current.record(pageId, outcome.stamp)
+      } else if (!shouldKeepAutosaving(outcome)) {
+        /**
+         * Leaving a page that would not save. The page being left is the one at
+         * risk, so this is said about it by name rather than about "this page",
+         * which by the time anybody reads it means a different one.
+         */
+        stampsRef.current.forget(pageId)
+        setSaveStatus('Not saved')
+        setSaveProblem(outcome.message)
+      } else if (outcome.message) {
+        throw new Error(outcome.message)
+      }
     } catch (err) {
       console.error('Failed to save page data:', pageId, err)
     }
@@ -3150,6 +3235,12 @@ function App() {
       if (data) {
         const row = data as unknown as PageRow
         const blocksData = row.blocks || {}
+        // Where this page stood when this tab picked it up. Everything the
+        // guarded save does depends on this being recorded on EVERY load path;
+        // a load that forgets it silently drops back to overwriting.
+        stampsRef.current.record(targetPageId, (row as any).updated_at)
+        autosavePausedRef.current = false
+        setSaveProblem(null)
         store.set(currentPageIsPublishedAtom, !!row.is_published)
         const workflowsData = row.workflows || []
 
@@ -3381,6 +3472,7 @@ function App() {
         if (activePageData && editor) {
           const activeRow = activePageData as unknown as PageRow
           const blocksData = activeRow.blocks || {}
+          stampsRef.current.record(lastActiveId, (activeRow as any).updated_at)
           store.set(currentPageIsPublishedAtom, !!activeRow.is_published)
           const workflowsData = activeRow.workflows || []
 
@@ -3559,8 +3651,8 @@ function App() {
           ) : (
             <span style={{ 
               fontSize: '14px', 
-              color: saveStatus === 'Error saving' ? '#ef4444' : saveStatus === 'Saving...' ? '#3b82f6' : '#10b981', 
-              background: saveStatus === 'Error saving' ? '#fee2e2' : saveStatus === 'Saving...' ? '#dbeafe' : '#d1fae5', 
+              color: saveStatus === 'Error saving' || saveStatus === 'Not saved' ? '#ef4444' : saveStatus === 'Saving...' ? '#3b82f6' : '#10b981', 
+              background: saveStatus === 'Error saving' || saveStatus === 'Not saved' ? '#fee2e2' : saveStatus === 'Saving...' ? '#dbeafe' : '#d1fae5', 
               padding: '4px 8px', 
               borderRadius: '4px',
               fontWeight: 500,
@@ -3568,6 +3660,52 @@ function App() {
             }}>
               {saveStatus}
             </span>
+          )}
+
+          {/*
+            A refused save gets a sentence and two ways out, not a red word.
+            "Error saving" beside a page that has quietly stopped saving is how
+            somebody keeps typing for an hour; the point of the guard is that
+            they find out at the first keystroke, while both versions still
+            exist. Reload is listed first because it is the one that loses
+            nothing.
+          */}
+          {saveProblem && (
+            <div style={{
+              position: 'fixed', top: '64px', right: '16px', zIndex: 3000, maxWidth: '380px',
+              background: '#fff', border: '1px solid #fecaca', borderLeft: '4px solid #ef4444',
+              borderRadius: '8px', padding: '12px 14px', boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+            }}>
+              <div style={{ fontWeight: 600, fontSize: '13px', color: '#b91c1c', marginBottom: '6px' }}>
+                Not saved
+              </div>
+              <div style={{ fontSize: '12px', color: '#7f1d1d', lineHeight: 1.5 }}>{saveProblem}</div>
+              <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                <button
+                  onClick={() => window.location.reload()}
+                  style={{ fontSize: '12px', padding: '5px 10px', borderRadius: '5px', border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer' }}
+                >
+                  Reload this page
+                </button>
+                <button
+                  onClick={() => {
+                    /**
+                     * Overwrite on purpose. The stamp was already forgotten
+                     * when the save was refused, so the next save goes out
+                     * unguarded -- which is the whole meaning of this button,
+                     * and why it is a deliberate press rather than a retry.
+                     */
+                    autosavePausedRef.current = false
+                    setSaveProblem(null)
+                    setSaveStatus('Saving...')
+                    saveToSupabaseRef.current?.()
+                  }}
+                  style={{ fontSize: '12px', padding: '5px 10px', borderRadius: '5px', border: '1px solid #fecaca', background: '#fef2f2', color: '#b91c1c', cursor: 'pointer' }}
+                >
+                  Save anyway, keep this version
+                </button>
+              </div>
+            </div>
           )}
 
           {/* Page Switcher Tabs */}

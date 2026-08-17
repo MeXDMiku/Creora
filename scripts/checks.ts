@@ -50,6 +50,7 @@ import { safeUrl, isSafeUrlValue, schemeOf, stripIgnorable } from '../src/lib/ur
 import { fillSlots, leadingSlotName, findSlots as findSlotsForCheck } from '../src/lib/sanitizeHtml';
 import { slotValuesFrom } from '../src/lib/useSlotValues';
 import { slotNameOf, slotNameForNodeType } from '../src/state/atoms';
+import { interpretSave, shouldKeepAutosaving, PageStamps } from '../src/lib/savePage';
 import { visibleRows, rowSlots, compareCells, slotNamesFor, rowMatchesSearch, MAX_RENDERED_ROWS, rowIndexesForStep, coerceForColumn, rowMatchesFormula, columnsUsedByFormula, calcExampleFor, calcExampleWithFilter } from '../src/lib/rows';
 import {
   parseSlot,
@@ -4372,6 +4373,119 @@ group('the calculated-slot example is one that actually renders');
   check('A COLUMN WITH A SPACE IS NOT OFFERED, BECAUSE IT WOULD NOT WORK', spaced, '{{calc: Qty * 2}}');
   check('and the offered one renders', fillSlots(`<p>${spaced}</p>`, { Qty: 4 }), '<p>8</p>');
   check('all of them spaced means no example at all', calcExampleFor(['Your name', 'Total price']), null);
+}
+
+
+// -------------------------------------- saving without overwriting a save
+group('a save cannot silently replace somebody else’s');
+{
+  /**
+   * `save_page` is an unconditional UPDATE. Two tabs on the same page -- the
+   * normal way anybody works -- and the second to autosave replaces everything
+   * the first did. No error, no warning, no copy kept. Autosave here runs
+   * 500ms after a keystroke, so the losing tab overwrites the winning one the
+   * moment it is touched.
+   *
+   * Every decision below is one where the wrong answer is worse than the bug:
+   * refuse too eagerly and the editor cannot save at all.
+   */
+  const ok = interpretSave(null, '2026-08-17T10:00:00Z');
+  check('a save that lands reports where the page now stands', ok.stamp, '2026-08-17T10:00:00Z');
+  check('and it is fine', [ok.ok, ok.stale, ok.needsFallback], [true, false, false]);
+  check('autosave carries on', shouldKeepAutosaving(ok), true);
+
+  const noStamp = interpretSave(null, null);
+  check('a save with no stamp back is still a save', noStamp.ok, true);
+  check('but it admits it does not know the version, rather than inventing one',
+    noStamp.stamp, null);
+
+  const stale = interpretSave({ message: 'page changed elsewhere at 2026-08-17 10:00:00+00', code: 'P0001' }, null);
+  check('a conflict is recognised', stale.stale, true);
+  check('AND IT STOPS AUTOSAVE, because retrying would overwrite or spam',
+    shouldKeepAutosaving(stale), false);
+  check('the message says nothing here was saved', (stale.message || '').includes('Nothing here has been saved'), true);
+  check('and offers both ways out', (stale.message || '').includes('Reload') && (stale.message || '').includes('Save anyway'), true);
+
+  const gone = interpretSave({ message: 'page no longer exists', code: 'P0002' }, null);
+  check('a deleted page is not the same as a conflict', [gone.missing, gone.stale], [true, false]);
+  check('and reloading is not offered, because it would not help',
+    (gone.message || '').includes('reloading will not bring it back'), true);
+  check('autosave stops for that too', shouldKeepAutosaving(gone), false);
+
+  /**
+   * The one that decides whether anybody can save at all. Until the migration
+   * is run the guarded function does not exist, and the editor must fall back
+   * rather than show a builder an error about SQL.
+   */
+  const notRun = interpretSave({ message: 'Could not find the function public.save_page_if_unchanged', code: 'PGRST202' }, null);
+  check('A MISSING MIGRATION FALLS BACK, IT DOES NOT BREAK SAVING', notRun.needsFallback, true);
+  check('and says nothing to the builder about it', notRun.message, null);
+  check('and it is not mistaken for a conflict', notRun.stale, false);
+  check('the same error from a schema cache is the same thing',
+    interpretSave({ message: 'schema cache' }, null).needsFallback, true);
+
+  const denied = interpretSave({ message: 'not your page', code: '42501' }, null);
+  check('somebody else’s page says so plainly', (denied.message || '').includes('owns this page'), true);
+  check('but that is not a conflict either', denied.stale, false);
+
+  const offline = interpretSave({ message: 'Failed to fetch' }, null);
+  check('a network failure keeps trying, because the work is only in this tab',
+    shouldKeepAutosaving(offline), true);
+  check('and says the changes are still here', (offline.message || '').includes('still here'), true);
+
+  const odd = interpretSave({ message: 'deadlock detected' }, null);
+  check('an unrecognised failure is passed on rather than swallowed',
+    (odd.message || '').includes('deadlock detected'), true);
+  check('and does not stop autosave, since nothing says the page moved',
+    shouldKeepAutosaving(odd), true);
+
+  /**
+   * Stamps are per page, because switching pages saves the OUTGOING one. One
+   * stamp would be compared against the wrong page the first time anybody used
+   * the page tabs -- which is how this editor saves.
+   */
+  const stamps = new PageStamps();
+  stamps.record('page-a', '2026-08-17T10:00:00Z');
+  stamps.record('page-b', '2026-08-17T11:00:00Z');
+  check('each page remembers its own version', stamps.expected('page-a'), '2026-08-17T10:00:00Z');
+  check('and does not answer for another', stamps.expected('page-b'), '2026-08-17T11:00:00Z');
+  check('a page never seen is unknown, which SAVES rather than refuses',
+    stamps.expected('page-c'), undefined);
+
+  stamps.record('page-a', null);
+  check('A NULL STAMP CLEARS RATHER THAN KEEPING THE OLD ONE: stale refuses, unknown saves',
+    stamps.expected('page-a'), undefined);
+
+  stamps.record('page-b', '2026-08-17T12:00:00Z');
+  check('a newer stamp replaces the older', stamps.expected('page-b'), '2026-08-17T12:00:00Z');
+  stamps.forget('page-b');
+  check('after a conflict this tab admits it no longer knows', stamps.expected('page-b'), undefined);
+  check('forgetting one page leaves the others alone', stamps.expected('page-c'), undefined);
+
+  /**
+   * BOTH save sites, not one.
+   *
+   * This codebase's signature bug is a fix applied to one copy of something and
+   * not the other -- five renderer drifts, and counting. There are two places
+   * that write a page: the autosave, and the save that happens when you switch
+   * page. A guard on only the first would leave the page switcher overwriting
+   * exactly as before, and nothing would look wrong.
+   */
+  // Comments stripped first: this file's own prose names both functions, and a
+  // check that counts its own documentation counts the wrong thing.
+  const stripped = (text: string) =>
+    text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+  const appSrc = stripped(readFileSync('src/App.tsx', 'utf8'));
+  const guarded = (appSrc.match(/save_page_if_unchanged/g) || []).length;
+  const plain = (appSrc.match(/rpc\('save_page'/g) || []).length;
+  check('BOTH PLACES THAT SAVE A PAGE GO THROUGH THE GUARD', guarded, 2);
+  check('and the unguarded call survives only as the fallback for each', plain, 2);
+  check('every guarded call sends a version stamp',
+    (appSrc.match(/p_expected/g) || []).length, 2);
+  check('every load path records where the page stood',
+    (appSrc.match(/stampsRef\.current\.record/g) || []).length >= 2, true);
+  check('autosave is actually stopped somewhere, not just flagged',
+    /if \(autosavePausedRef\.current\) return/.test(appSrc), true);
 }
 
 say(`\n${passed} passed, ${failed} failed`);
