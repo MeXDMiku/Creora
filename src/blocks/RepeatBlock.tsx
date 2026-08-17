@@ -113,6 +113,8 @@ export function RepeatView({
       visibleRows(rows, {
         search: searchText,
         searchColumns: state?.searchColumns,
+        // A formula over the row's own columns wins when set -- see rows.ts.
+        filterFormula: state?.filterFormula,
         filterColumn: state?.filterColumn,
         filterOperator: state?.filterOperator,
         filterValue,
@@ -126,6 +128,7 @@ export function RepeatView({
       rows,
       searchText,
       state?.searchColumns,
+      state?.filterFormula,
       state?.filterColumn,
       state?.filterOperator,
       filterValue,

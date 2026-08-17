@@ -225,6 +225,29 @@ export default function RepeatBlockInspector({ blockId, editor }: { blockId: str
         <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px' }}>
           Only rows where
           <div style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>
+        {/*
+          A formula over the row's own columns.
+          One column against one value cannot say "worth more than 500" --
+          price times quantity -- however many controls sit beside it. The
+          spelling is {{Column}} because the row markup above already addresses
+          columns that way, and because a bare name cannot contain a space.
+        */}
+        <label style={{ display: 'block', marginBottom: '10px', fontSize: '12px', fontWeight: 600, color: '#334155' }}>
+          Keep rows where&hellip; (a formula, optional)
+          <input
+            type="text"
+            value={runtimeState.filterFormula || ''}
+            onChange={(e) => set({ filterFormula: e.target.value })}
+            placeholder="{{Price}} * {{Qty}} > 500"
+            style={{ display: 'block', marginTop: '4px', width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #ccc', boxSizing: 'border-box', fontFamily: 'ui-monospace, monospace', fontSize: '12px' }}
+          />
+          <span style={{ display: 'block', marginTop: '4px', fontWeight: 400, fontSize: '11px', color: '#64748b', lineHeight: 1.4 }}>
+            Use <code>{'{{Column}}'}</code> for a column. When this is filled in it
+            is used instead of the single filter below. A formula that cannot be
+            worked out keeps every row rather than hiding them all.
+          </span>
+        </label>
+
             <select
               value={runtimeState.filterColumn || ''}
               onChange={(e) => set({ filterColumn: e.target.value })}

@@ -1,5 +1,6 @@
 import type { BlockRuntimeState } from '../types/creora';
 import { evaluateCondition } from './conditions';
+import { evaluateExpression, truthy } from './formula';
 
 /**
  * Which rows a repeater shows, and in what order.
@@ -43,6 +44,15 @@ export interface ViewSpec {
   /** Any operator from conditions.ts. Defaults to equals. */
   filterOperator?: string;
   filterValue?: any;
+  /**
+   * A formula over the row's own columns, written as `{{Price}} * {{Qty}} > 500`.
+   *
+   * Wins over the column/operator/value row when both are set, because a
+   * builder who has written a formula has said the more specific thing. One
+   * comparison against one value cannot express "worth more than 500" however
+   * many controls are added -- the same wall step conditions hit.
+   */
+  filterFormula?: string;
   sortColumn?: string;
   sortDirection?: 'asc' | 'desc';
   /** 1-based. Out of range is clamped, never empty. */
@@ -102,6 +112,10 @@ function cellFor(row: Row, column: string): any {
 }
 
 function passesFilter(row: Row, spec: ViewSpec): boolean {
+  // A formula says the more specific thing, so it wins when both are set.
+  if (isFormulaFilter(spec.filterFormula)) {
+    return rowMatchesFormula(row, spec.filterFormula).pass;
+  }
   const col = spec.filterColumn;
   if (!col) return true;
   const operator = spec.filterOperator || 'equals';
@@ -320,4 +334,98 @@ export function rowIndexesForStep(
 ): number[] {
   const all = matchingRowIndexes(rows, columns, matchColumn, wantedValue);
   return applyToAll ? all : all.slice(0, 1);
+}
+
+/**
+ * Filtering rows with a formula over the row's own columns.
+ *
+ * WHY A COLUMN-OPERATOR-VALUE ROW WAS NOT ENOUGH
+ * A repeater could filter on ONE column against ONE value. So "orders worth
+ * more than 500" -- price times quantity -- was not expressible, and neither
+ * was "unfinished, and belonging to this person", however many controls were
+ * added. Adding more single comparisons cannot multiply, which is the same wall
+ * step conditions hit before they learned to take a formula.
+ *
+ * WHY {{Column}} AND NOT A BARE NAME
+ * The repeater's row markup already addresses columns as `{{Price}}`. Using the
+ * same spelling in its filter means one idea with one syntax, and it is the
+ * only spelling that survives a column called "Your name" -- a bare identifier
+ * cannot contain a space, and half the columns anybody actually creates do.
+ *
+ * The braces are replaced with generated identifiers before the expression is
+ * parsed, so the formula language itself needs to know nothing about columns.
+ */
+
+const SLOT = /\{\{\s*([^}|]+?)\s*\}\}/g;
+
+/** Was this filter written as a formula at all? */
+export function isFormulaFilter(filter: string | undefined | null): boolean {
+  return String(filter ?? '').trim() !== '';
+}
+
+/** The column names a row formula mentions, in the order they appear. */
+export function columnsUsedByFormula(formula: string | undefined | null): string[] {
+  const text = String(formula ?? '');
+  const found: string[] = [];
+  let match: RegExpExecArray | null;
+  const re = new RegExp(SLOT.source, 'g');
+  while ((match = re.exec(text)) !== null) {
+    const name = match[1].trim();
+    if (name && !found.includes(name)) found.push(name);
+  }
+  return found;
+}
+
+export interface RowFormulaResult {
+  /** Whether the row is kept. */
+  pass: boolean;
+  /** Set when the formula could not be worked out at all. */
+  error: string | null;
+}
+
+/**
+ * Answer a row formula against one row.
+ *
+ * A formula that cannot be worked out KEEPS the row rather than dropping it.
+ * That is the deliberate direction: a broken filter that hides everything looks
+ * exactly like a table with no data, and a builder stares at an empty list with
+ * nothing to tell them why. Showing too much is visibly wrong and leads
+ * somebody to the filter; showing nothing is invisibly wrong and leads them to
+ * think the data is gone.
+ */
+export function rowMatchesFormula(
+  row: Record<string, any>,
+  formula: string | undefined | null,
+  rowIdOf: (row: Record<string, any>) => any = r => r?.id,
+): RowFormulaResult {
+  const text = String(formula ?? '').trim();
+  if (!text) return { pass: true, error: null };
+
+  const scope: Record<string, any> = {};
+  let index = 0;
+  const rewritten = text.replace(SLOT, (_all, rawName: string) => {
+    const name = String(rawName).trim();
+    const key = `__col${index++}`;
+    // "Row id" is addressable the same way the repeater's own slots address it.
+    scope[key] = name === 'Row id' ? rowIdOf(row) : row?.[name];
+    return key;
+  });
+
+  try {
+    return { pass: truthy(evaluateExpression(rewritten, scope)), error: null };
+  } catch (err: any) {
+    const message = String(err?.message || 'that formula could not be worked out');
+    /**
+     * A bare name in a row formula is almost always somebody writing `Price`
+     * where they meant `{{Price}}`, and "Referenced block Price does not exist"
+     * sends them looking for a block. Say the thing they can act on.
+     */
+    const friendly = /Referenced block "(.+?)" does not exist/.exec(message);
+    return {
+      pass: true,
+      error: friendly
+        ? `Use {{${friendly[1]}}} to mean a column. A plain name refers to a block, and there is no block called "${friendly[1]}".`
+        : message,
+    };
+  }
 }

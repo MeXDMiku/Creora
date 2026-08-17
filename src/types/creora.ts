@@ -381,6 +381,12 @@ export interface BlockRuntimeState {
   filterOperator?: string;
   /** Take the filter's value from this block instead of the fixed one. */
   filterBlockId?: string;
+  /**
+   * A formula over the row's own columns, e.g. `{{Price}} * {{Qty}} > 500`.
+   * Wins over filterColumn/filterOperator/filterValue when set — it says the
+   * more specific thing, and silently ANDing them would be a rule nobody wrote.
+   */
+  filterFormula?: string;
   /** A block whose value names the column to sort by. */
   sortColumnBlockId?: string;
   /** A block -- usually a Toggle -- where true means last-to-first. */

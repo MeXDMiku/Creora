@@ -264,6 +264,21 @@ const COMPARISONS: Record<string, string> = {
   '!==': 'notEquals',
 };
 
+/**
+ * `and` and `or` as words, not just as functions.
+ *
+ * `and(A, B)` and `A && B` both worked; `A and B` did not, and that is what a
+ * person who has never written code actually types -- it was written that way
+ * in the first draft of a check, by someone who had just built the language.
+ * jsep is told about them once, at module load, and they sit at the same
+ * precedence as their symbol forms so the two spellings cannot disagree.
+ *
+ * `not` stays a function: `not X` reads fine in English but binds ambiguously
+ * next to a comparison, and `not(X)` is unmistakable.
+ */
+jsep.addBinaryOp('and', 2);
+jsep.addBinaryOp('or', 1);
+
 export function evaluateExpression(formula: string, scope: Record<string, any>): FormulaValue {
   if (!formula || formula.trim() === '') return 0;
 
@@ -313,8 +328,8 @@ export function evaluateExpression(formula: string, scope: Record<string, any>):
          * them that way in other versions, and a silent behaviour change on a
          * dependency bump is not worth saving four lines.
          */
-        if (op === '&&') return truthy(walk(node.left)) && truthy(walk(node.right));
-        if (op === '||') return truthy(walk(node.left)) || truthy(walk(node.right));
+        if (op === '&&' || op === 'and') return truthy(walk(node.left)) && truthy(walk(node.right));
+        if (op === '||' || op === 'or') return truthy(walk(node.left)) || truthy(walk(node.right));
 
         const left = walk(node.left);
         const right = walk(node.right);
@@ -337,8 +352,8 @@ export function evaluateExpression(formula: string, scope: Record<string, any>):
 
       case 'LogicalExpression': {
         const op = node.operator;
-        if (op === '&&') return truthy(walk(node.left)) && truthy(walk(node.right));
-        if (op === '||') return truthy(walk(node.left)) || truthy(walk(node.right));
+        if (op === '&&' || op === 'and') return truthy(walk(node.left)) && truthy(walk(node.right));
+        if (op === '||' || op === 'or') return truthy(walk(node.left)) || truthy(walk(node.right));
         throw new Error(`"${op}" is not something a formula can do`);
       }
 

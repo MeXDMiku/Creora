@@ -48,7 +48,7 @@ import { evaluateExpression, FORMULA_FUNCTION_NAMES } from '../src/lib/formula';
 import { stepConditionResult, formulaScope, recalculateAllFormulas, runPageLoadWorkflows, fetchListBlockRows, shouldFetchListRows } from '../src/lib/bindingEngine';
 import { safeUrl, isSafeUrlValue, schemeOf, stripIgnorable } from '../src/lib/urls';
 import { fillSlots, leadingSlotName, findSlots as findSlotsForCheck } from '../src/lib/sanitizeHtml';
-import { visibleRows, rowSlots, compareCells, slotNamesFor, rowMatchesSearch, MAX_RENDERED_ROWS, rowIndexesForStep, coerceForColumn } from '../src/lib/rows';
+import { visibleRows, rowSlots, compareCells, slotNamesFor, rowMatchesSearch, MAX_RENDERED_ROWS, rowIndexesForStep, coerceForColumn, rowMatchesFormula, columnsUsedByFormula } from '../src/lib/rows';
 import {
   parseSlot,
   applyFilters,
@@ -2638,6 +2638,20 @@ group('a formula can now choose');
   check('or', evaluateExpression('or(Agreed, false)', s), true);
   check('not', evaluateExpression('not(Agreed)', s), false);
   check('&& spelling', evaluateExpression('Stock > 0 && Subtotal > 100', s), true);
+  /**
+   * `and` and `or` as WORDS, which is what somebody who has never written code
+   * actually types. Found by writing a check that way without thinking, one
+   * hour after building the language -- it read as obviously correct and did
+   * not parse.
+   */
+  check('the word "and"', evaluateExpression('Stock > 0 and Subtotal > 100', s), true);
+  check('the word "or"', evaluateExpression('Stock > 99 or Subtotal > 100', s), true);
+  check('and it is false when it should be', evaluateExpression('Stock > 99 and Subtotal > 100', s), false);
+  check('the word form and the symbol form agree',
+    evaluateExpression('Stock > 0 and Subtotal > 100', s),
+    evaluateExpression('Stock > 0 && Subtotal > 100', s));
+  check('three of them chain', evaluateExpression('Stock > 0 and Subtotal > 100 and Agreed', s), true);
+  check('and mixes with the function form', evaluateExpression('and(Stock > 0, Subtotal > 100) or false', s), true);
   check('|| spelling', evaluateExpression('Stock > 99 || Subtotal > 100', s), true);
   check('! spelling', evaluateExpression('!Agreed', s), false);
   // A word, not a block. Someone will write these before they write a block name.
@@ -3822,6 +3836,80 @@ group('the popup shows the wire it is open on, and nothing from the last one');
     Object.keys(withMappings.mappings).length > 0, true);
   check('while a wire with none is empty, so the guess fills it',
     Object.keys(loaded.mappings).length, 0);
+}
+
+group('a repeater can filter rows with a formula');
+{
+  /**
+   * A repeater could filter on ONE column against ONE value, so "orders worth
+   * more than 500" -- price times quantity -- was not expressible, and neither
+   * was "unfinished AND belonging to this person". Adding more single
+   * comparisons cannot multiply. Same wall step conditions hit before they
+   * learned to take a formula.
+   *
+   * The spelling is {{Column}} because the repeater's row markup already
+   * addresses columns that way, and because it is the only spelling that
+   * survives a column called "Your name" -- half the columns anybody actually
+   * creates have a space in them.
+   */
+  const rows = [
+    { id: 'r1', Name: 'Ada', 'Your name': 'Ada L', Price: 200, Qty: 3, Done: false },
+    { id: 'r2', Name: 'Grace', 'Your name': 'Grace H', Price: 100, Qty: 2, Done: true },
+    { id: 'r3', Name: 'Katherine', 'Your name': 'Kath J', Price: 50, Qty: 1, Done: false },
+  ];
+  const keep = (formula: string) =>
+    visibleRows(rows, { filterFormula: formula }).rows.map((r: any) => r.id);
+
+  check('two columns multiplied', keep('{{Price}} * {{Qty}} > 500'), ['r1']);
+  check('and the ones under it', keep('{{Price}} * {{Qty}} <= 200'), ['r2', 'r3']);
+  check('several things at once', keep('{{Done}} == false and {{Price}} > 100'), ['r1']);
+  check('a function over a column', keep('contains({{Name}}, "a")'), ['r1', 'r2', 'r3']);
+  check('a stricter one', keep('startsWith({{Name}}, "K")'), ['r3']);
+  check('a boolean column reads as a boolean', keep('{{Done}} == true'), ['r2']);
+  check('a column with a space in its name', keep('contains({{Your name}}, "Grace")'), ['r2']);
+  check('the row id is addressable', keep('{{Row id}} == "r2"'), ['r2']);
+  check('an empty formula filters nothing', keep(''), ['r1', 'r2', 'r3']);
+  check('and neither does whitespace', keep('   '), ['r1', 'r2', 'r3']);
+
+  /**
+   * A formula that cannot be worked out KEEPS the row.
+   *
+   * The deliberate direction. A broken filter that hides everything looks
+   * exactly like a table with no data, and a builder stares at an empty list
+   * with nothing to tell them why. Showing too much is visibly wrong and leads
+   * them to the filter; showing nothing is invisibly wrong and leads them to
+   * think their data is gone.
+   */
+  check('a formula that cannot run keeps everything', keep('sparkline({{Price}})'), ['r1', 'r2', 'r3']);
+  check('and so does a half-typed one', keep('{{Price}} >'), ['r1', 'r2', 'r3']);
+
+  /**
+   * "Referenced block Price does not exist" would send somebody looking for a
+   * block. The message has to name the thing they can act on.
+   */
+  const bare = rowMatchesFormula(rows[0], 'Price > 100');
+  check('a bare column name is explained, not just refused', bare.error?.includes('Use {{Price}} to mean a column'), true);
+  check('and the row is kept while it is wrong', bare.pass, true);
+
+  check('which columns a formula uses', columnsUsedByFormula('{{Price}} * {{Qty}} > {{Price}}'), ['Price', 'Qty']);
+  check('none when there are none', columnsUsedByFormula('1 > 2'), []);
+  check('and it survives being handed nothing', columnsUsedByFormula(null), []);
+
+  // The formula wins over the old row when both are set: it says the more
+  // specific thing, and silently ANDing them would be a rule nobody wrote down.
+  const both = visibleRows(rows, { filterFormula: '{{Price}} > 100', filterColumn: 'Name', filterOperator: 'equals', filterValue: 'Grace' });
+  check('a formula wins over a column filter', both.rows.map((r: any) => r.id), ['r1']);
+
+  // And the old single-column filter still behaves exactly as it did.
+  check('the column filter still works on its own',
+    visibleRows(rows, { filterColumn: 'Done', filterOperator: 'is ON' }).rows.map((r: any) => r.id), ['r2']);
+
+  // Filtering happens before paging, or "the three cheapest red ones" becomes
+  // "the red ones out of the three cheapest" -- checked already for the column
+  // filter, and it has to hold for the formula too.
+  const paged = visibleRows(rows, { filterFormula: '{{Done}} == false', pageSize: 1, page: 2 });
+  check('a formula filter is applied before the page is cut', paged.rows.map((r: any) => r.id), ['r3']);
+  check('and the count of what matched is what matched, not what was drawn', paged.matched, 2);
 }
 
 say(`\n${passed} passed, ${failed} failed`);
