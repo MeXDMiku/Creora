@@ -12,6 +12,79 @@ the record.
 
 ---
 
+## 17 August 2026
+
+Continuing the same session. 1,091 checks, from 1,011. `tsc` clean. Every fix
+has a negative control, and **two of the controls this time came back green**,
+which is its own finding — see below.
+
+### Shipped
+
+**Markup can do arithmetic** — `{{calc: Price * Qty | money: £}}`. Row markup
+could print `{{Price}}` and `{{Qty}}` and had no way to print £600; writing
+`{{Price}} * {{Qty}}` renders `200 * 3`, because slots fill and the asterisk
+just sits there.
+
+**`{{now}}` and `{{today}}` rendered empty on every page** — found while
+checking something else, live the whole time they have existed.
+
+**The Health panel can see markup naming something absent** — the display half
+of a check it already had for row formulas.
+
+**A formula in the wrong spelling says which one** — `{{Price | money: £}}` in
+a filter used to answer "Check the brackets and quotes."
+
+### What broke elsewhere
+
+| what shipped | what it silently broke |
+| :--- | :--- |
+| computed slots | the URL guard — a calculation could assemble `javascript:` and reach an `href` |
+| computed slots | `findSlots` — it asked for a block called "calc: Total * 2", so every computed slot outside a repeater rendered empty |
+| the Health panel check | five separate copies of "what does this block answer to", which had agreed by luck |
+| computed slots | the repeater panel promised a syntax with nothing on screen saying it existed |
+
+### The one that was already broken
+
+`{{now}}` and `{{today}}` **rendered empty in Custom HTML and in row markup**,
+and always had. They were checked through `renderTemplate` — what a workflow's
+text step uses. Markup goes a different way: something resolves the names first
+and hands `fillSlots` a set of values, and it copied every name it was **asked**
+about, including ones no block owned, as a key holding `undefined`. `fillSlots`
+reads a present key as "a block answered this", so the fallback that knows about
+`now` was never reached.
+
+**A check that exercises a path no builder uses is not a check of the feature.**
+
+### Two negative controls came back GREEN
+
+Both times the rule was intact and the control broke the wrong half:
+
+- `withBuiltIns` is a Proxy; the precedence lives entirely in `get`. Swapping
+  the halves of `has` changes nothing — both orders answer true when either side
+  has the name. Noted at the site, so the next person breaks the right half.
+- a control filtered for `calc:` slots coming out of `findSlots`, which by then
+  no longer emits that shape at all. Breaking the expansion instead turned ten
+  checks red, including the Health-panel one — which is the proof that the panel
+  covers calculations without any code of its own.
+
+**A control that stays green has two explanations, and "the check is fine" is
+only one of them.** Read which half you actually broke before believing either.
+
+### Notes worth keeping
+
+- **An example printed in the UI is a promise.** The repeater panel prints a
+  worked `{{calc: ...}}` in the builder's own column names, so it lives in
+  `rows.ts` and is checked by being **run**. It skips a column with a space in
+  it, because a calculation takes bare names — offering one that cannot work is
+  worse than offering nothing.
+- **The two spellings are real and not an apology.** `{{Price}}` in a filter,
+  `Price` in a condition: a column name can contain a space and a bare
+  identifier cannot. The fix is for each box to say which it takes.
+- `git` in this working copy cannot remove its own lock files. Move
+  `.git/index.lock` and `.git/HEAD.lock` aside before each command.
+
+---
+
 ## 16 August 2026
 
 A single long session. 972 checks at the end, from 621 at the start. `tsc` clean
