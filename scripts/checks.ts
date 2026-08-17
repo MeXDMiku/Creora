@@ -3979,5 +3979,114 @@ group('a row formula naming a column that is not there is reported');
     diagnosePage(untracked).filter((p: any) => p.title.includes('filters on a column')).length, 0);
 }
 
+
+// ------------------------------------------------------------ computed slots
+/**
+ * `{{calc: Price * Qty}}` -- markup that can show what its values COME TO.
+ *
+ * The gap: row markup could print `{{Price}}` and `{{Qty}}` and had no way to
+ * print £600. Writing `{{Price}} * {{Qty}}` renders "200 * 3", because slots
+ * fill and the asterisk is just a character sitting between them.
+ *
+ * Two of the checks below are the interesting ones, and both are for mistakes
+ * made writing this feature rather than hypotheticals:
+ *
+ *  - the first version returned its answer directly, walking past the URL check
+ *    at the bottom of fillSlots, so a calculation could build a javascript:
+ *    scheme and put it in an href;
+ *  - findSlots reported the slot as "calc: Total * 2", so the layer that
+ *    fetches values fetched nothing, and every computed slot outside a repeater
+ *    rendered empty. A repeater supplies all its columns regardless, which is
+ *    why it worked in the only place it was first tried.
+ */
+group('computed slots: {{calc: ...}}');
+{
+  const row = { Price: 200, Qty: 3, Name: 'Ada', Note: '' };
+
+  check('a slot can do arithmetic', fillSlots('<p>{{calc: Price * Qty}}</p>', row), '<p>600</p>');
+  check(
+    'and it still goes through the filters, so it can be money',
+    fillSlots('<p>{{calc: Price * Qty | money: £}}</p>', row),
+    '<p>£600.00</p>'
+  );
+  check(
+    'functions and text work, because it is the same evaluator as everywhere else',
+    fillSlots('<p>{{calc: if(Price > 100, "yes", "no")}}</p>', row),
+    '<p>yes</p>'
+  );
+  check('`or` reads as a word, since parseSlot would eat ||',
+    fillSlots('<p>{{calc: if(isBlank(Note) or Qty > 99, "flag", "fine")}}</p>', row), '<p>flag</p>');
+
+  check(
+    'A BROKEN CALCULATION SHOWS NOTHING, NOT AN ERROR: a visitor is not the person who can fix it',
+    fillSlots('<p>[{{calc: Prcie * Qty}}]</p>', row),
+    '<p>[]</p>'
+  );
+  check('a division by zero is still a number, not a crash',
+    fillSlots('<p>{{calc: Price / 0}}</p>', row), '<p>0</p>');
+
+  check(
+    'the answer is escaped like any other value',
+    fillSlots('<p>{{calc: concat("<b>", Name, "</b>")}}</p>', row),
+    '<p>&lt;b&gt;Ada&lt;/b&gt;</p>'
+  );
+
+  /**
+   * The hole this was written for. `href="{{...}}"` records the slot in
+   * urlSlots by its whole name, and the check that consults that list is the
+   * LAST thing fillSlots does -- so an early return skipped it entirely.
+   */
+  check(
+    'A CALCULATION CANNOT BUILD A SCHEME AND SLIP IT INTO AN HREF',
+    fillSlots(
+      '<a href="{{calc: concat(\'javascri\', \'pt:alert(1)\')}}">x</a>',
+      row,
+      ['calc: concat(\'javascri\', \'pt:alert(1)\')']
+    ),
+    '<a href="">x</a>'
+  );
+  check(
+    'a harmless calculated link still works',
+    fillSlots('<a href="{{calc: concat(\'/order/\', Qty)}}">x</a>', row, ['calc: concat(\'/order/\', Qty)']),
+    '<a href="/order/3">x</a>'
+  );
+  check(
+    'the URL guard can key on a calc slot at all',
+    leadingSlotName('{{calc: Price * Qty}}'),
+    'calc: Price * Qty'
+  );
+
+  /**
+   * The other hole. Whatever findSlots returns is what gets fetched, so a calc
+   * has to name its ingredients or it is handed an empty scope.
+   */
+  check(
+    'A CALC SLOT ASKS FOR THE NAMES INSIDE IT, NOT FOR ITSELF',
+    findSlotsForCheck('<p>{{calc: Price * Qty}}</p>'),
+    ['Price', 'Qty']
+  );
+  check('function names are not asked for as if they were blocks',
+    findSlotsForCheck('<p>{{calc: round(Total) + max(A, 2)}}</p>'), ['Total', 'A']);
+  check('a name inside quotes is prose, not a block',
+    findSlotsForCheck('<p>{{calc: if(Paid, "Total due", Total)}}</p>'), ['Paid', 'Total']);
+  check('and neither are the words the language owns',
+    findSlotsForCheck('<p>{{calc: if(Paid and true, blank, Total)}}</p>'), ['Paid', 'Total']);
+  check('an unreadable calc asks for nothing rather than throwing while fetching',
+    findSlotsForCheck('<p>{{calc: Price * * }}</p>'), []);
+  check('a filter on a calc does not become a name',
+    findSlotsForCheck('<p>{{calc: Price * Qty | money: £}}</p>'), ['Price', 'Qty']);
+  check('ordinary slots are untouched',
+    findSlotsForCheck('<p>{{Name}} {{Created | date: D MMM}}</p>'), ['Name', 'Created']);
+
+  // `calc` only means a calculation when it is followed by a colon, so a column
+  // that happens to be called "calc" keeps working.
+  check('a column actually called calc still resolves',
+    fillSlots('<p>{{calc}}</p>', { calc: 'mine' }), '<p>mine</p>');
+  check('and it is looked up rather than parsed',
+    findSlotsForCheck('<p>{{calc}}</p>'), ['calc']);
+  check('spelling is forgiving about case and spaces',
+    fillSlots('<p>{{ CALC :  Price*Qty }}</p>', row), '<p>600</p>');
+}
+
 say(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

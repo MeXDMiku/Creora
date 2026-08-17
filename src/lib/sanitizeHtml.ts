@@ -15,6 +15,11 @@
 
 import { isSafeUrlValue, safeUrl } from './urls';
 import { parseSlot, applyFilters, builtInSlotValue, type FilterOptions } from './format';
+// Slots can hold a calculation (`{{calc: Price * Qty}}`), so the display layer
+// needs the same evaluator the engine uses. Sharing it is the point: a sum that
+// meant one thing in a Formula block and another in row markup would be a new
+// version of the drift bug this codebase already has five of.
+import { evaluateExpression, identifiersIn } from './formula';
 
 const ALLOWED_TAGS = new Set([
   'div','span','p','a','br','hr','strong','b','em','i','u','s','small','mark','sub','sup',
@@ -174,7 +179,25 @@ export function findSlots(html: string | undefined | null): string[] {
   let m: RegExpExecArray | null;
   while ((m = re.exec(html)) !== null) {
     const name = parseSlot(m[1]).name;
-    if (name) names.add(name);
+    if (!name) continue;
+
+    /**
+     * A computed slot reports the names INSIDE it, not itself.
+     *
+     * This function is how the value layer knows what to go and fetch: whatever
+     * it returns is looked up by name and handed to fillSlots. `{{calc: Total *
+     * 2}}` asked for a block called "calc: Total * 2", got nothing, and then
+     * the calculation could not find `Total` and rendered empty -- on a page
+     * that looked entirely correct in the editor. A repeater hid this, because
+     * its rows supply every column whether they were asked for or not, so the
+     * feature worked in the one place it was tried and nowhere else.
+     */
+    const calc = /^calc\s*:\s*([\s\S]+)$/i.exec(name);
+    if (calc) {
+      for (const inner of identifiersIn(calc[1])) names.add(inner);
+      continue;
+    }
+    names.add(name);
   }
   return Array.from(names);
 }
@@ -198,10 +221,61 @@ export function fillSlots(
   return safeHtml.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_, raw) => {
     const { name: key, filters } = parseSlot(String(raw));
 
-    // A real value first. `now` and `today` only answer when nothing on the
-    // page has that name, so a column called "now" beats ours.
+    /**
+     * A calculation, when the slot asks for one.
+     *
+     * Row markup could show `{{Price}}` and `{{Qty}}` and had no way at all to
+     * show what they come to. A shop row displaying "3 x £200" could not
+     * display £600 -- writing `{{Price}} * {{Qty}}` renders the literal text
+     * "200 * 3", because slots fill and the asterisk just sits there.
+     *
+     * It lands before the filter pipeline rather than beside it, so a
+     * calculation can still be formatted the way any other value can:
+     *
+     *     {{calc: Price * Qty | money: £}}   ->   £600.00
+     *
+     * Columns are bare names here, not braces. That is a real difference from a
+     * repeater's FILTER formula, and it is deliberate: parseSlot has already
+     * split this string on `|`, so a nested `{{...}}` cannot survive being
+     * parsed twice. Arithmetic is almost always over Price, Qty, Total and
+     * friends, which are single words; a column called "Your name" is not
+     * something anyone multiplies.
+     */
+    const calcMatch = /^calc\s*:\s*([\s\S]+)$/i.exec(key);
+
+    /**
+     * WHY THIS SETS `value` INSTEAD OF RETURNING ITS OWN ANSWER
+     *
+     * The first version of this returned the calculated text directly, and that
+     * was a hole: a slot standing at the front of a URL attribute is recorded
+     * in `urlSlots` by its whole name, `calc: ...` included, and the check that
+     * uses that list lives at the BOTTOM of this function. Returning early
+     * walked straight past it, so
+     *
+     *     <a href="{{calc: concat('javascri', 'pt:alert(1)')}}">
+     *
+     * put a javascript: URL into an href -- escaping is no defence, it is a
+     * scheme, not markup. Exactly the thing the header of this file says must
+     * never be possible.
+     *
+     * So a calculation is a third way of PRODUCING a value, and nothing more.
+     * All three ways meet at the same tail below: filters, then the URL check,
+     * then escaping. One exit means a future fourth source cannot reintroduce
+     * this by forgetting a step it never knew about.
+     */
     let value: any;
-    if (key in values) {
+    if (calcMatch) {
+      try {
+        value = evaluateExpression(calcMatch[1], values);
+      } catch {
+        // Empty, not an error message. A visitor reading somebody's published
+        // page must never be shown "Referenced block Prcie does not exist" --
+        // the Health panel is where a builder is told.
+        return '';
+      }
+    } else if (key in values) {
+      // A real value first. `now` and `today` only answer when nothing on the
+      // page has that name, so a column called "now" beats ours.
       value = values[key];
     } else {
       value = builtInSlotValue(key, options);

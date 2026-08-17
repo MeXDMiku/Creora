@@ -398,3 +398,91 @@ export function evaluateExpression(formula: string, scope: Record<string, any>):
   if (Array.isArray(result)) return result.join(', ');
   return 0;
 }
+
+/**
+ * The names a formula reads a value from.
+ *
+ * WHY THIS EXISTS (and why it is a real parse, not a regular expression)
+ * Something has to FETCH those values before the formula can be worked out.
+ * A computed slot -- `{{calc: Price * Qty}}` -- is filled by a layer that
+ * resolves slot names to values ahead of time, and it can only fetch what it
+ * has been told about. Without this the layer asks for a block called
+ * "calc: Price * Qty", gets nothing, and every computed slot on a page renders
+ * empty while looking completely reasonable in the editor.
+ *
+ * It walks the parsed formula rather than matching text because the difference
+ * is not academic:
+ *
+ *   round(Total)    -- `round` is a function, not a value to go looking for
+ *   "Total is high" -- inside quotes; a name in prose is prose
+ *   true, and, or   -- words the language itself owns
+ *
+ * The Health panel learned each of those three the hard way with a regular
+ * expression, and reported five imaginary missing blocks for every formula
+ * until it did. Doing it from the syntax tree means it cannot be wrong about
+ * which is which.
+ *
+ * An unreadable formula yields no names rather than throwing. The caller is
+ * fetching values, not judging the formula; whoever evaluates it will produce
+ * the real error, and there is exactly one place that should.
+ */
+export function identifiersIn(formula: string | undefined | null): string[] {
+  const text = String(formula ?? '').trim();
+  if (!text) return [];
+
+  let ast: any;
+  try {
+    ast = jsep(text);
+  } catch {
+    return [];
+  }
+
+  const found: string[] = [];
+  const add = (name: string) => {
+    const lowered = name.toLowerCase();
+    // The words the language answers itself. Kept in step with the Identifier
+    // case in evaluateExpression above -- these never reach a scope lookup.
+    if (lowered === 'true' || lowered === 'false' || lowered === 'blank' || lowered === 'empty') return;
+    if (!found.includes(name)) found.push(name);
+  };
+
+  const walk = (node: any): void => {
+    if (!node || typeof node !== 'object') return;
+    switch (node.type) {
+      case 'Identifier':
+        add(node.name);
+        return;
+      case 'CallExpression':
+        // The callee is the function's name, not a value. Only arguments hold
+        // things to fetch.
+        (node.arguments || []).forEach(walk);
+        return;
+      case 'UnaryExpression':
+        walk(node.argument);
+        return;
+      case 'BinaryExpression':
+      case 'LogicalExpression':
+        walk(node.left);
+        walk(node.right);
+        return;
+      case 'ConditionalExpression':
+        walk(node.test);
+        walk(node.consequent);
+        walk(node.alternate);
+        return;
+      case 'ArrayExpression':
+        (node.elements || []).forEach(walk);
+        return;
+      case 'Compound':
+        (node.body || []).forEach(walk);
+        return;
+      default:
+        // Literal, MemberExpression and anything a future jsep adds: nothing
+        // to fetch, and evaluateExpression is the one that objects.
+        return;
+    }
+  };
+
+  walk(ast);
+  return found;
+}
