@@ -70,6 +70,60 @@ Both times the rule was intact and the control broke the wrong half:
 **A control that stays green has two explanations, and "the check is fine" is
 only one of them.** Read which half you actually broke before believing either.
 
+### Later the same day — tables, and three silent zeros
+
+1,239 checks, from 1,091. `tsc` clean.
+
+**A page could get ONE number out of a table.** `outputMode` is a single
+setting, so a Database block showed the count or the revenue or the average and
+never two of them — and a second Database block is not a second view, it is a
+second table with its own rows. "Revenue, orders, average order value", the
+first three numbers on any dashboard, was not expressible however many blocks
+were added. Now `countOf` `sumOf` `avgOf` `minOf` `maxOf` `joinOf`, in formulas,
+in conditions, and in row markup (`{{calc: Total / sumOf("Orders","Total") * 100
+| round: 1}}%` — a row's share of the whole).
+
+**Two tabs stopped overwriting each other** — migration 0006, unrun.
+
+### Three silent zeros, all the same shape
+
+Each one answered **0** and looked like an answer:
+
+| what | why it was zero |
+| :--- | :--- |
+| `sumOf("Orders", "Totl")` | a misspelled column adds up nothing |
+| `sumOf` over a column holding `12o` | NaN poisons the sum, and a NaN result becomes 0 |
+| the Database block's own sum, same cell | skips it, so the total is short by one row and looks plausible |
+
+The third is not fixed the same way and that is deliberate: it returns a value
+straight into an output port, with nowhere to put an error and eight callers
+reading it. Taking a block's whole output away over one cell is worse than a
+short total — so the **Health panel** reports the cause instead, and the
+difference is written at both sites rather than being an accident.
+
+**A total that refuses is annoying for a minute. A total that is quietly wrong
+gets trusted.**
+
+### Four more negative controls came back GREEN
+
+Two were real gaps, two were the harness lying:
+
+- **real:** every table-function check called `evaluateExpression` directly with
+  a table map handed to it, so removing the map from the *engine's* call — the
+  line that decides whether a real page can use any of this — turned nothing
+  red. The functions worked perfectly in a place no builder reaches. Same again
+  for conditions. Both now go through a real store.
+- **real:** the column plumbing was checked only on hand-built maps.
+- **harness:** a check whose expression *throws* kills the run before the tally,
+  so the control saw no failures and read that as "nothing broke". Controls now
+  report whether the run **finished**, and a run that did not finish is not
+  believed.
+- **overclaiming:** one check was named for a distinction that does not exist on
+  screen. Renamed to what it actually proves.
+
+Running total: **six** green controls across two days. Every one was worth
+chasing, and only half were real.
+
 ### Notes worth keeping
 
 - **An example printed in the UI is a promise.** The repeater panel prints a
