@@ -1,6 +1,6 @@
 import { getDefaultStore } from 'jotai';
 import type { TriggerEvent, StepCondition } from '../types/creora';
-import { blockRuntimeAtom, workflowsAtom, formulasAtom, allBlockIdsAtom, getBlockDefaultValue , recordRun, blockValuesByName, type RunStep, switchPageFnAtom } from '../state/atoms';
+import { blockRuntimeAtom, workflowsAtom, formulasAtom, allBlockIdsAtom, getBlockDefaultValue , recordRun, blockValuesByName, slotNameOf, type RunStep, switchPageFnAtom } from '../state/atoms';
 import { sendWebhook } from './webhook';
 import { computeDatabaseOutput } from './databaseOutput';
 import { validateValue } from './validation';
@@ -11,7 +11,7 @@ import { rowIndexesForStep } from './rows';
 import { safeUrl } from './urls';
 import { toCsv, csvFileName, downloadCsv } from './csv';
 import { evaluateCondition } from './conditions';
-import { evaluateExpression, truthy, type FormulaValue, explainUnreadableFormula } from './formula';
+import { evaluateExpression, truthy, type FormulaValue, explainUnreadableFormula, type TableScope } from './formula';
 export { evaluateCondition };
 import { renderTemplate } from './format';
 import { supabase } from './supabase';
@@ -165,6 +165,30 @@ export function formulaScope(store: ReturnType<typeof getDefaultStore>): Record<
 }
 
 /**
+ * The rows on this page, addressable by a table's name AND by its id.
+ *
+ * Both, deliberately. A formula written by the editor uses ids, because that is
+ * what survives a rename -- but `sumOf("Orders", "Total")` is typed by a person
+ * looking at a block labelled Orders, and refusing them for using the name they
+ * can see would be indefensible.
+ *
+ * The id wins if a table is somehow named after another's id, since the id is
+ * the thing that cannot be two blocks at once.
+ */
+export function tableScope(store: ReturnType<typeof getDefaultStore>): TableScope {
+  const tables: TableScope = {};
+  for (const blockId of store.get(allBlockIdsAtom)) {
+    const state = store.get(blockRuntimeAtom(blockId));
+    const rows = (state as any)?.rows;
+    if (!Array.isArray(rows)) continue;
+    const name = slotNameOf(blockId, state);
+    if (name && !(name in tables)) tables[name] = rows;
+    tables[blockId] = rows;
+  }
+  return tables;
+}
+
+/**
  * One condition, answered, with the sentence explaining what happened.
  *
  * The sentence is returned rather than rebuilt by the caller because the run
@@ -183,7 +207,7 @@ export function stepConditionResult(
   const expression = (condition.expression || '').trim();
   if (expression) {
     try {
-      const answer = evaluateExpression(expression, formulaScope(store));
+      const answer = evaluateExpression(expression, formulaScope(store), tableScope(store));
       const pass = truthy(answer);
       return {
         pass,
@@ -1104,8 +1128,12 @@ export function executeWorkflow(
  * unchanged, and there is a check asserting that formulas saved before today
  * still produce the same numbers.
  */
-export function evaluateFormula(formula: string, scope: Record<string, any>): FormulaValue {
-  return evaluateExpression(formula, scope);
+export function evaluateFormula(
+  formula: string,
+  scope: Record<string, any>,
+  tables?: TableScope,
+): FormulaValue {
+  return evaluateExpression(formula, scope, tables);
 }
 
 /**
@@ -1154,6 +1182,12 @@ export function recalculateAllFormulas(
   }
 
   let scope: Record<string, any> = {};
+  /**
+   * Built ONCE, outside the two passes. Rows do not change between them -- only
+   * block values do -- and rebuilding it per pass would walk every block twice
+   * for an answer that cannot have moved.
+   */
+  const tables = tableScope(store);
 
   // Execute formula evaluation in 2 successive passes to resolve chained formula dependencies
   for (let pass = 1; pass <= 2; pass++) {
@@ -1169,7 +1203,7 @@ export function recalculateAllFormulas(
         const currentTargetState = store.get(targetAtom);
 
         try {
-          const calculatedValue = evaluateFormula(binding.formula, scope);
+          const calculatedValue = evaluateFormula(binding.formula, scope, tables);
           if (currentTargetState.value !== calculatedValue || currentTargetState.error !== null) {
             store.set(targetAtom, {
               ...currentTargetState,

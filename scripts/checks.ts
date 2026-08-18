@@ -4488,5 +4488,336 @@ group('a save cannot silently replace somebody else’s');
     /if \(autosavePausedRef\.current\) return/.test(appSrc), true);
 }
 
+
+// --------------------------------------------- formulas that read a table
+group('a page can get more than one number out of a table');
+{
+  /**
+   * A Database block publishes ONE number: `outputMode` is a single setting, so
+   * a page could show the order count OR the revenue OR the average order, and
+   * never two of them. A second Database block is not a second view of the same
+   * data, it is a second table with its own rows. So "revenue, orders, and
+   * average order value" -- the first three numbers anybody puts on a dashboard
+   * -- was not expressible at all, however many blocks were added.
+   */
+  const ORDERS = [
+    { id: 'r1', Total: 200, Qty: 2, Status: 'paid', Who: 'Ada' },
+    { id: 'r2', Total: 50, Qty: 1, Status: 'pending', Who: 'Bo' },
+    { id: 'r3', Total: 350, Qty: 3, Status: 'paid', Who: 'Cy' },
+    { id: 'r4', Total: '', Qty: 0, Status: 'paid', Who: '' },
+  ];
+  const tables = { Orders: ORDERS, 'databaseBlock__tb00000001': ORDERS };
+  const ask = (f: string) => evaluateExpression(f, { Threshold: 100 }, tables);
+
+  check('how many rows', ask('countOf("Orders")'), 4);
+  check('a total', ask('sumOf("Orders", "Total")'), 600);
+  check('an average, to two decimals like the block’s own', ask('avgOf("Orders", "Total")'), 200);
+  check('the smallest', ask('minOf("Orders", "Total")'), 50);
+  check('the largest', ask('maxOf("Orders", "Total")'), 350);
+  check('names, read out', ask('joinOf("Orders", "Who")'), 'Ada, Bo, Cy');
+
+  check('THREE NUMBERS FROM ONE TABLE, WHICH IS THE WHOLE POINT',
+    [ask('countOf("Orders")'), ask('sumOf("Orders", "Total")'), ask('avgOf("Orders", "Total")')],
+    [4, 600, 200]);
+
+  // Blanks are skipped rather than counted as zero -- an average dragged down
+  // by rows that never had a number is a wrong answer that looks right.
+  check('a blank is not a zero in an average', ask('avgOf("Orders", "Total")'), 200);
+  check('and not a zero in the smallest either', ask('minOf("Orders", "Total")'), 50);
+
+  // The filter is the repeater's row-formula spelling, because it is the same
+  // question asked in the same language.
+  check('only the paid ones', ask('sumOf("Orders", "Total", \'{{Status}} == "paid"\')'), 550);
+  check('counted the same way', ask('countOf("Orders", \'{{Status}} == "paid"\')'), 3);
+  check('a filter can do arithmetic, like any formula',
+    ask('countOf("Orders", \'{{Total}} * {{Qty}} > 300\')'), 2);
+  check('and can read a block on the page',
+    ask('sumOf("Orders", "Total", \'{{Total}} >= 100\')'), 550);
+  check('joined with a filter', ask('joinOf("Orders", "Who", \'{{Status}} == "paid"\')'), 'Ada, Cy');
+  check('Row id works in a filter, as it does everywhere else',
+    ask('countOf("Orders", \'{{Row id}} == "r1"\')'), 1);
+  check('a filter matching nothing totals zero, not an error',
+    ask('sumOf("Orders", "Total", \'{{Status}} == "refunded"\')'), 0);
+
+  // Composes with everything else, because it is the same evaluator.
+  check('a table function inside if()',
+    ask('if(countOf("Orders") > 3, "busy", "quiet")'), 'busy');
+  check('and inside arithmetic', ask('sumOf("Orders", "Total") / countOf("Orders")'), 150);
+  check('two tables functions compared', ask('sumOf("Orders", "Total") > Threshold'), true);
+
+  /**
+   * The refusals. Each one is a message somebody has to act on.
+   */
+  const fails = (f: string) => { try { evaluateExpression(f, {}, tables); return null; } catch (e: any) { return String(e.message); } };
+  check('AN UNQUOTED TABLE SAYS SO, rather than reading the block’s single number',
+    (fails('countOf(Orders)') || '').includes('in quotes'), true);
+  check('a table that is not there names the ones that are',
+    (fails('countOf("Ordres")') || '').includes('Tables on this page: Orders'), true);
+  check('and does not list the internal ids alongside them',
+    (fails('countOf("Ordres")') || '').includes('databaseBlock__'), false);
+  check('a filter that is not quoted says so',
+    (fails('countOf("Orders", {{Status}})') || '').length > 0, true);
+
+  /**
+   * A filter that cannot be worked out THROWS here, unlike a repeater's, which
+   * keeps the row. A repeater showing too many rows is visibly wrong and leads
+   * somebody to the filter; a TOTAL that is quietly too big just looks like a
+   * number. There is nothing to notice, so it has to refuse.
+   */
+  check('A BROKEN FILTER REFUSES RATHER THAN QUIETLY OVER-COUNTING',
+    (fails('sumOf("Orders", "Total", \'{{Status}} === \')') || '').length > 0, true);
+
+  check('a table function where no tables exist says where it does work',
+    (() => { try { evaluateExpression('countOf("Orders")', {}); return null; } catch (e: any) { return String(e.message); } })()?.includes('not in page markup'), true);
+  check('the id spelling works too, since that is what the editor inserts',
+    evaluateExpression('countOf("databaseBlock__tb00000001")', {}, tables), 4);
+  check('a page with no tables at all says that instead of listing nothing',
+    (() => { try { evaluateExpression('countOf("Orders")', {}, {}); return null; } catch (e: any) { return String(e.message); } })()?.includes('no tables on it'), true);
+
+  check('the new names are offered when a function is misspelled',
+    (fails('sumOff("Orders", "Total")') || '').includes('sumOf'), true);
+
+  /**
+   * The sweep. A new kind of name in a formula is exactly the shape that has
+   * made the Health panel accuse working pages twice before -- once for every
+   * function name, once for `and` and `or`.
+   */
+  const src = readFileSync('src/blocks/FormulaDisplayBlock.inspector.tsx', 'utf8');
+  check('the formula panel lists the table functions, or nobody can find them',
+    src.includes('TABLE_FUNCTION_NAMES'), true);
+  check('and shows the quotes, which is the part nobody would guess',
+    src.includes('sumOf("Orders", "Total")'), true);
+}
+
+
+group('a table function is not reported as a missing block');
+{
+  /**
+   * Twice now the Health panel has accused a formula that works: once treating
+   * every function name as a block, once `and` and `or`. A quoted table name is
+   * the third shape of the same mistake, so it is checked before it happens
+   * rather than after somebody reports it.
+   */
+  const TARGET = 'numberDisplayBlock__tf00000001';
+  const DB = 'databaseBlock__tf10000001';
+  const base = { value: 0, visible: true, disabled: false, loading: false, error: null };
+  const facts = (formula: string) => ({
+    blockIds: [TARGET, DB],
+    states: {
+      [TARGET]: { ...base, blockName: 'Revenue' },
+      [DB]: { ...base, blockName: 'Orders', rows: [], columns: [{ name: 'Total' }] },
+    },
+    workflows: [],
+    formulas: [{ targetBlockId: TARGET, formula }],
+    connections: [], pages: [{ id: 'page-1', name: 'Home' }],
+  } as any);
+  const missing = (f: string) =>
+    diagnosePage(facts(f)).filter((p: any) => p.title.toLowerCase().includes('gone') || p.title.toLowerCase().includes('does not exist'));
+
+  check('a quoted table name is not a block', missing('sumOf("Orders", "Total")').length, 0);
+  check('nor is the function itself', missing('countOf("Orders")').length, 0);
+  check('nor anything inside a quoted condition',
+    missing('countOf("Orders", \'{{Status}} == "paid"\')').length, 0);
+  check('a real missing block is still caught, so this is not just switched off',
+    missing('sumOf("Orders", "Total") + numberDisplayBlock__gone0000001').length, 1);
+}
+
+
+// ------------------------ table functions, through the engine rather than beside it
+/**
+ * THE CONTROL THAT CAME BACK GREEN.
+ *
+ * Every table-function check above calls evaluateExpression directly, with a
+ * table map handed to it. So removing `tables` from the engine's own call --
+ * the line that decides whether a real page can use any of this -- turned
+ * NOTHING red. The functions worked perfectly in a place no builder ever
+ * reaches.
+ *
+ * This group goes the way a page goes: a Database block holding rows, a Formula
+ * binding, and recalculateAllFormulas. It is also the only thing that proves
+ * the two ways of naming a table (by name, by id) survive the trip.
+ */
+group('a formula on a real page can read a real table');
+{
+  const TOTAL = 'formulaDisplayBlock__tt00000001';
+  const COUNT = 'formulaDisplayBlock__tt00000002';
+  const AVERAGE = 'formulaDisplayBlock__tt00000003';
+  const DB = 'databaseBlock__tt10000001';
+  const base = { visible: true, disabled: false, loading: false, error: null };
+
+  const mk = () => {
+    const store = createStore();
+    store.set(allBlockIdsAtom, [TOTAL, COUNT, AVERAGE, DB]);
+    store.set(blockRuntimeAtom(TOTAL), { ...base, value: 0, blockName: 'Revenue' });
+    store.set(blockRuntimeAtom(COUNT), { ...base, value: 0, blockName: 'How many' });
+    store.set(blockRuntimeAtom(AVERAGE), { ...base, value: 0, blockName: 'Average order' });
+    store.set(blockRuntimeAtom(DB), {
+      ...base, value: 2, blockName: 'Orders',
+      columns: [{ name: 'Total' }, { name: 'Status' }],
+      rows: [
+        { id: 'r1', Total: 200, Status: 'paid' },
+        { id: 'r2', Total: 50, Status: 'pending' },
+      ],
+    });
+    store.set(formulasAtom, [
+      { targetBlockId: TOTAL, formula: 'sumOf("Orders", "Total")' },
+      { targetBlockId: COUNT, formula: 'countOf("Orders")' },
+      { targetBlockId: AVERAGE, formula: 'avgOf("Orders", "Total")' },
+    ] as any);
+    store.set(workflowsAtom, []);
+    return store;
+  };
+
+  const store = mk();
+  recalculateAllFormulas(store);
+  const valueOf = (id: string) => store.get(blockRuntimeAtom(id)).value;
+  const errorOf = (id: string) => store.get(blockRuntimeAtom(id)).error;
+
+  check('THE TOTAL LANDS IN THE BLOCK, which no check above could tell you', valueOf(TOTAL), 250);
+  check('and the count', valueOf(COUNT), 2);
+  check('and the average', valueOf(AVERAGE), 125);
+  check('none of them errored', [errorOf(TOTAL), errorOf(COUNT), errorOf(AVERAGE)], [null, null, null]);
+
+  check('THREE DIFFERENT NUMBERS OUT OF ONE TABLE, on one page, at once',
+    [valueOf(COUNT), valueOf(TOTAL), valueOf(AVERAGE)], [2, 250, 125]);
+
+  /**
+   * The reactive half. A total that does not move when a row arrives is worse
+   * than no total: it is a number somebody trusts.
+   */
+  const withRow = store.get(blockRuntimeAtom(DB));
+  store.set(blockRuntimeAtom(DB), {
+    ...withRow,
+    rows: [...(withRow as any).rows, { id: 'r3', Total: 100, Status: 'paid' }],
+  });
+  recalculateAllFormulas(store);
+  check('A NEW ROW MOVES THE TOTAL', valueOf(TOTAL), 350);
+  check('and the count', valueOf(COUNT), 3);
+  check('and the average follows both', valueOf(AVERAGE), 116.67);
+
+  // A row removed has to move it back, which is the half that gets forgotten.
+  const fewer = store.get(blockRuntimeAtom(DB));
+  store.set(blockRuntimeAtom(DB), { ...fewer, rows: (fewer as any).rows.slice(0, 1) });
+  recalculateAllFormulas(store);
+  check('and a row removed moves it back', [valueOf(TOTAL), valueOf(COUNT)], [200, 1]);
+
+  // Filters, through the engine.
+  const filtered = createStore();
+  filtered.set(allBlockIdsAtom, [TOTAL, DB]);
+  filtered.set(blockRuntimeAtom(TOTAL), { ...base, value: 0, blockName: 'Paid revenue' });
+  filtered.set(blockRuntimeAtom(DB), {
+    ...base, value: 0, blockName: 'Orders',
+    columns: [{ name: 'Total' }, { name: 'Status' }],
+    rows: [
+      { id: 'r1', Total: 200, Status: 'paid' },
+      { id: 'r2', Total: 50, Status: 'pending' },
+      { id: 'r3', Total: 100, Status: 'paid' },
+    ],
+  });
+  filtered.set(formulasAtom, [
+    { targetBlockId: TOTAL, formula: 'sumOf("Orders", "Total", \'{{Status}} == "paid"\')' },
+  ] as any);
+  filtered.set(workflowsAtom, []);
+  recalculateAllFormulas(filtered);
+  check('a filtered total, on a real page', filtered.get(blockRuntimeAtom(TOTAL)).value, 300);
+
+  /**
+   * The id spelling has to survive the trip too -- it is what the editor's own
+   * block picker inserts, so a formula built by clicking rather than typing
+   * goes through this path and no other.
+   */
+  const byId = createStore();
+  byId.set(allBlockIdsAtom, [TOTAL, DB]);
+  byId.set(blockRuntimeAtom(TOTAL), { ...base, value: 0, blockName: 'Revenue' });
+  byId.set(blockRuntimeAtom(DB), {
+    ...base, value: 0, blockName: 'Orders',
+    columns: [{ name: 'Total' }],
+    rows: [{ id: 'r1', Total: 200 }, { id: 'r2', Total: 50 }],
+  });
+  byId.set(formulasAtom, [{ targetBlockId: TOTAL, formula: `sumOf("${DB}", "Total")` }] as any);
+  byId.set(workflowsAtom, []);
+  recalculateAllFormulas(byId);
+  check('THE ID SPELLING WORKS ON A REAL PAGE, which is what the picker inserts',
+    byId.get(blockRuntimeAtom(TOTAL)).value, 250);
+
+  /**
+   * A block nobody renamed is addressable by its type name here as everywhere
+   * else -- and "Database" is what half of them are called.
+   */
+  const unnamed = createStore();
+  unnamed.set(allBlockIdsAtom, [TOTAL, DB]);
+  unnamed.set(blockRuntimeAtom(TOTAL), { ...base, value: 0, blockName: 'Revenue' });
+  unnamed.set(blockRuntimeAtom(DB), {
+    ...base, value: 0, blockName: '', columns: [{ name: 'Total' }],
+    rows: [{ id: 'r1', Total: 7 }],
+  });
+  unnamed.set(formulasAtom, [{ targetBlockId: TOTAL, formula: 'sumOf("Database", "Total")' }] as any);
+  unnamed.set(workflowsAtom, []);
+  recalculateAllFormulas(unnamed);
+  check('a table nobody renamed answers to its type name', unnamed.get(blockRuntimeAtom(TOTAL)).value, 7);
+
+  /**
+   * And the failure, on a real page: a misspelled table has to reach the block
+   * as an error rather than settling on a stale number that looks like an
+   * answer. This is the one that would hurt most silently.
+   */
+  const typo = createStore();
+  typo.set(allBlockIdsAtom, [TOTAL, DB]);
+  typo.set(blockRuntimeAtom(TOTAL), { ...base, value: 999, blockName: 'Revenue' });
+  typo.set(blockRuntimeAtom(DB), {
+    ...base, value: 0, blockName: 'Orders', columns: [{ name: 'Total' }],
+    rows: [{ id: 'r1', Total: 7 }],
+  });
+  typo.set(formulasAtom, [{ targetBlockId: TOTAL, formula: 'sumOf("Ordres", "Total")' }] as any);
+  typo.set(workflowsAtom, []);
+  recalculateAllFormulas(typo);
+  check('A MISSPELLED TABLE SHOWS AN ERROR, not the last number that worked',
+    (typo.get(blockRuntimeAtom(TOTAL)).error || '').includes('Ordres'), true);
+  check('and it names the table that does exist', 
+    (typo.get(blockRuntimeAtom(TOTAL)).error || '').includes('Orders'), true);
+
+  /**
+   * A CONDITION can read a table too, and that was unchecked as well -- the
+   * same control, run twice, came back green for the same reason both times.
+   *
+   * It is the more useful half, if anything: "stop taking bookings once there
+   * are twenty" and "only charge postage under fifty pounds" are conditions,
+   * not displays, and neither was sayable before.
+   */
+  const gate = createStore();
+  gate.set(allBlockIdsAtom, [DB]);
+  gate.set(blockRuntimeAtom(DB), {
+    ...base, value: 0, blockName: 'Bookings',
+    columns: [{ name: 'Seats' }, { name: 'Paid' }],
+    rows: [
+      { id: 'r1', Seats: 2, Paid: 'yes' },
+      { id: 'r2', Seats: 3, Paid: 'no' },
+    ],
+  });
+  gate.set(workflowsAtom, []);
+  gate.set(formulasAtom, []);
+  const asks = (expression: string) =>
+    stepConditionResult({ fieldId: '', operator: 'equals', expression } as any, gate);
+
+  check('A CONDITION CAN COUNT A TABLE, which is what stops a form once it is full',
+    asks('countOf("Bookings") < 20').pass, true);
+  check('and refuse when it is', asks('countOf("Bookings") >= 2').pass, true);
+  check('a total in a condition', asks('sumOf("Bookings", "Seats") > 4').pass, true);
+  check('and under it', asks('sumOf("Bookings", "Seats") > 50').pass, false);
+  check('a filtered count in a condition',
+    asks('countOf("Bookings", \'{{Paid}} == "yes"\') == 1').pass, true);
+  check('the run log shows the answer it actually got, not just pass or fail',
+    asks('countOf("Bookings") < 20').describe.includes('2'), true);
+
+  /**
+   * Fail closed, as every other unworkable condition does. A step guarded by a
+   * table that is not there must NOT run -- a condition nobody can answer is
+   * not a condition that passed.
+   */
+  const broken = asks('countOf("Bookngs") < 20');
+  check('a misspelled table in a condition FAILS CLOSED', broken.pass, false);
+  check('and says which name failed', broken.describe.includes('Bookngs'), true);
+}
+
 say(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

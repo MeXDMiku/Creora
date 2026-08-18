@@ -1,7 +1,7 @@
 import { useAtom, useSetAtom, useStore } from 'jotai'
 import { blockRuntimeAtom, triggerSaveAtom, formulasAtom, getBlockTypeDisplayName, getCanvasBlocks } from '../state/atoms'
 import { recalculateAllFormulas } from '../lib/bindingEngine'
-import { FORMULA_FUNCTION_NAMES } from '../lib/formula'
+import { FORMULA_FUNCTION_NAMES, TABLE_FUNCTION_NAMES } from '../lib/formula'
 import { useMemo, useState, useEffect } from 'react'
 
 const PAGE_ID = '00000000-0000-0000-0000-000000000001'
@@ -210,8 +210,20 @@ export default function FormulaDisplayBlockInspector({ blockId, editor }: { bloc
             <div style={{ marginBottom: '6px' }}>
               <strong>Join text:</strong> <code>join(" ", First, Last)</code>
             </div>
+            {/*
+              Tables get a paragraph of their own rather than two more names in
+              the list below. A Database block publishes ONE number, so a page
+              could show the order count or the revenue and never both -- these
+              are how you get past that, and nobody would guess from seeing
+              "sumOf" among thirty names that the table goes in quotes.
+            */}
+            <div style={{ marginBottom: '6px' }}>
+              <strong>A whole table:</strong> <code>sumOf("Orders", "Total")</code> &mdash;
+              its name in quotes. Some rows only:{' '}
+              <code>{'countOf("Orders", \'{{Status}} == "paid"\')'}</code>
+            </div>
             <div style={{ marginTop: '8px', paddingTop: '6px', borderTop: '1px solid #e5e7eb' }}>
-              {FORMULA_FUNCTION_NAMES.join(' &middot; ').replace(/&middot;/g, '\u00b7')}
+              {[...FORMULA_FUNCTION_NAMES, ...TABLE_FUNCTION_NAMES].join(' &middot; ').replace(/&middot;/g, '\u00b7')}
             </div>
             <div style={{ marginTop: '6px', color: '#64748b' }}>
               Use the picker below to drop a block in by name.

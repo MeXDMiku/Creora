@@ -212,3 +212,29 @@ reason written down at step 6.
 It is the rule that turned 21 days of zero commits into a working deployed
 product in three days. It was not new tooling and it was not a better idea. It
 was finishing one thing at a time.
+
+
+## What can and cannot be run from a Linux session
+
+`npm run check` and the typecheck (`node ./node_modules/typescript/lib/tsc.js -p
+tsconfig.app.json --noEmit`) are pure JavaScript and run anywhere.
+
+**`npm run build` cannot.** `node_modules` holds
+`@rolldown/binding-win32-x64-msvc` — the bundler's native binary, compiled for
+Windows. Run from Linux it dies with `MODULE_NOT_FOUND` on the binding, which
+surfaces as a bare `Segmentation fault (core dumped)` from `npm run build` and
+looks exactly like the VM instability that makes `tsc` crash at random. It is
+not that. Retrying will never work; the build has to happen on the machine that
+owns the checkout.
+
+So the ceiling on verification from a Linux session is: **typecheck + checks**.
+The bundle itself is unverified until somebody runs `npm run build` on Windows.
+Nothing in this project has ever broken between those two points, but that is a
+record, not a guarantee.
+
+`git push` from a Linux session hits `HTTP 403 from proxy after CONNECT`.
+Committing works; pushing is the user's, on Windows.
+
+`git` in that working copy also cannot remove its own lock files
+(`Operation not permitted` on unlink). Move `.git/index.lock` and
+`.git/HEAD.lock` aside before each git command or the next one fails.

@@ -244,6 +244,172 @@ export const FORMULA_FUNCTIONS: Record<string, (args: any[]) => FormulaValue> = 
 };
 
 /** The names as a builder types them, for help text and for the inspector. */
+/**
+ * Rows, by the name or the id of the block holding them.
+ *
+ * Both keys on purpose. A formula addresses a block by its id, because that is
+ * what the editor inserts and what survives a rename -- but a person typing
+ * `sumOf("Orders", "Total")` into a box will type the name they can see, and
+ * being refused for it would be indefensible.
+ */
+export type TableScope = Record<string, Record<string, any>[]>;
+
+const SLOT_IN_WHERE = /\{\{\s*([^}|]+?)\s*\}\}/g;
+
+/**
+ * The functions that read a whole table.
+ *
+ * WHY THESE EXIST
+ * A Database block publishes ONE number. Its `outputMode` is a single setting,
+ * so a page could show the order count OR the total revenue OR the average
+ * order, and never two of them -- and a second Database block is not a second
+ * view, it is a second table with its own rows. So "revenue, orders, and
+ * average order value" -- the first three numbers anybody puts on a dashboard
+ * -- was not expressible at all, however many blocks were added.
+ *
+ * WHY THE TABLE IS NAMED IN QUOTES
+ * `countOf(Orders)` cannot work: by the time a function sees its argument the
+ * name has already become the block's value, which is the single number this
+ * exists to get past. The name has to arrive unevaluated, and a string literal
+ * is the only way to say that in an expression language without adding syntax.
+ *
+ * WHY THE FILTER IS THE ROW-FORMULA SPELLING
+ * `sumOf("Orders", "Total", '{{Status}} == "paid"')` uses exactly the language
+ * a repeater's row filter uses, because it is the same question asked in the
+ * same place. A second spelling for "this row counts" would be a second thing
+ * to learn and a second thing to get subtly different.
+ */
+const TABLE_FUNCTIONS: Record<string, true> = {
+  countOf: true, sumOf: true, avgOf: true, minOf: true, maxOf: true, joinOf: true,
+};
+
+export const TABLE_FUNCTION_NAMES = Object.keys(TABLE_FUNCTIONS);
+
+/** Rows of the named table, or a refusal that says which name failed. */
+function rowsNamed(name: string, tables: TableScope | undefined): Record<string, any>[] {
+  if (!tables) {
+    throw new Error('Tables cannot be read from here — countOf and sumOf work in a formula or a condition, not in page markup');
+  }
+  const rows = tables[name];
+  if (!rows) {
+    const known = Object.keys(tables).filter(k => !k.includes('__'));
+    throw new Error(
+      known.length
+        ? `There is no table called "${name}". Tables on this page: ${known.join(', ')}`
+        : `There is no table called "${name}", and this page has no tables on it`,
+    );
+  }
+  return rows;
+}
+
+/**
+ * Keep the rows a filter says to keep.
+ *
+ * A filter that cannot be worked out THROWS here, unlike the repeater's, and
+ * the difference is deliberate: a repeater showing too many rows is visibly
+ * wrong and leads somebody to the filter, but a TOTAL that is quietly too big
+ * looks like a number. There is nothing to notice, so it has to refuse.
+ */
+function rowsWhere(rows: Record<string, any>[], where: string | null): Record<string, any>[] {
+  if (!where || !where.trim()) return rows;
+  return rows.filter(row => {
+    const rowScope: Record<string, any> = {};
+    let index = 0;
+    const rewritten = where.replace(SLOT_IN_WHERE, (_all, rawName: string) => {
+      const key = `__w${index++}`;
+      const name = String(rawName).trim();
+      rowScope[key] = name === 'Row id' ? row?.id : row?.[name];
+      return key;
+    });
+    return truthy(evaluateExpression(rewritten, rowScope));
+  });
+}
+
+const numbersIn = (rows: Record<string, any>[], column: string): number[] =>
+  rows.map(r => r?.[column]).filter(v => v !== null && v !== undefined && v !== '').map(num);
+
+/**
+ * Run one of them.
+ *
+ * The arguments are inspected before they are worked out, because the first one
+ * is a NAME and the third is a filter to run once per row -- evaluating either
+ * as an ordinary value would destroy it.
+ */
+function callTableFunction(
+  name: string,
+  args: any[],
+  walk: (node: any) => any,
+  tables: TableScope | undefined,
+): FormulaValue {
+  // A literal string, taken as written. Anything else is worked out first, so
+  // a formula can build a table name if it really wants to.
+  const asName = (node: any, which: string): string => {
+    if (!node) throw new Error(`${name} needs ${which}`);
+    if (node.type === 'Literal' && typeof node.value === 'string') return node.value;
+    /**
+     * Anything else is worked out, so a formula CAN build a name if it really
+     * wants to -- but a bare `countOf(Orders)` is the overwhelmingly likely
+     * case, and it fails inside walk() with "Referenced block Orders does not
+     * exist", which sends somebody looking for a block that is sitting right
+     * there. The missing thing is the quotes, so that is what gets said.
+     */
+    let value: any;
+    try {
+      value = walk(node);
+    } catch {
+      throw new Error(`${name} needs ${which} in quotes — ${name}("Orders") rather than ${name}(Orders)`);
+    }
+    if (typeof value === 'string' && value) return value;
+    throw new Error(`${name} needs ${which} in quotes — ${name}("Orders") rather than ${name}(Orders)`);
+  };
+  // The filter is NOT worked out here: it is a formula about a row, and there
+  // is no row yet. Its text is what gets passed on.
+  const asWhere = (node: any): string | null => {
+    if (!node) return null;
+    if (node.type === 'Literal' && typeof node.value === 'string') return node.value;
+    throw new Error(`${name}'s condition has to be in quotes, like '{{Status}} == "paid"'`);
+  };
+
+  const table = rowsNamed(asName(args[0], 'a table name'), tables);
+
+  if (name === 'countOf') {
+    if (args.length > 2) throw new Error('countOf takes a table and, if you want, a condition');
+    return rowsWhere(table, asWhere(args[1])).length;
+  }
+
+  const column = asName(args[1], 'a column name');
+  const kept = rowsWhere(table, asWhere(args[2]));
+
+  switch (name) {
+    case 'sumOf':
+      return numbersIn(kept, column).reduce((a, b) => a + b, 0);
+    case 'avgOf': {
+      const ns = numbersIn(kept, column);
+      // Two decimals, matching the Database block's own average -- an average
+      // of 21.333333333 in a Number Display is noise, and two answers to the
+      // same question that disagree in the sixth decimal is worse than noise.
+      return ns.length ? Math.round((ns.reduce((a, b) => a + b, 0) / ns.length) * 100) / 100 : 0;
+    }
+    case 'minOf': {
+      const ns = numbersIn(kept, column);
+      // Empty gives 0 rather than Infinity. Infinity is arithmetically right
+      // and useless on a page.
+      return ns.length ? Math.min(...ns) : 0;
+    }
+    case 'maxOf': {
+      const ns = numbersIn(kept, column);
+      return ns.length ? Math.max(...ns) : 0;
+    }
+    case 'joinOf':
+      return kept
+        .map(r => r?.[column])
+        .filter(v => v !== null && v !== undefined && String(v) !== '')
+        .join(', ');
+    default:
+      throw new Error(`There is no function called "${name}"`);
+  }
+}
+
 export const FORMULA_FUNCTION_NAMES = [
   'if', 'and', 'or', 'not', 'isBlank',
   'min', 'max', 'sum', 'avg', 'abs', 'floor', 'ceil', 'round', 'pow', 'sqrt', 'clamp',
@@ -279,7 +445,11 @@ const COMPARISONS: Record<string, string> = {
 jsep.addBinaryOp('and', 2);
 jsep.addBinaryOp('or', 1);
 
-export function evaluateExpression(formula: string, scope: Record<string, any>): FormulaValue {
+export function evaluateExpression(
+  formula: string,
+  scope: Record<string, any>,
+  tables?: TableScope,
+): FormulaValue {
   if (!formula || formula.trim() === '') return 0;
 
   let ast: any;
@@ -361,6 +531,20 @@ export function evaluateExpression(formula: string, scope: Record<string, any>):
         return truthy(walk(node.test)) ? walk(node.consequent) : walk(node.alternate);
 
       case 'CallExpression': {
+        /**
+         * A function OVER A TABLE, before the ordinary ones.
+         *
+         * These are handled here rather than in FORMULA_FUNCTIONS because they
+         * need two things an ordinary function never gets: the table's rows,
+         * and the ARGUMENT AS WRITTEN. `countOf("Orders")` cannot take the
+         * value of Orders -- that is the single number the block already
+         * publishes, which is exactly the limitation this exists to lift.
+         */
+        const called = node.callee?.name;
+        if (typeof called === 'string' && called in TABLE_FUNCTIONS) {
+          return callTableFunction(called, node.arguments || [], walk, tables);
+        }
+
         if (node.callee?.type !== 'Identifier') {
           throw new Error('Only the built-in functions can be called in a formula');
         }
@@ -368,7 +552,7 @@ export function evaluateExpression(formula: string, scope: Record<string, any>):
         const fn = FORMULA_FUNCTIONS[typed.toLowerCase()];
         if (!fn) {
           throw new Error(
-            `There is no function called "${typed}". Available: ${FORMULA_FUNCTION_NAMES.join(', ')}`,
+            `There is no function called "${typed}". Available: ${[...FORMULA_FUNCTION_NAMES, ...TABLE_FUNCTION_NAMES].join(', ')}`,
           );
         }
         // `if` is not lazy. Both branches are worked out before one is chosen,
