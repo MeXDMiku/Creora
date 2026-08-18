@@ -4506,7 +4506,10 @@ group('a page can get more than one number out of a table');
     { id: 'r3', Total: 350, Qty: 3, Status: 'paid', Who: 'Cy' },
     { id: 'r4', Total: '', Qty: 0, Status: 'paid', Who: '' },
   ];
-  const tables = { Orders: ORDERS, 'databaseBlock__tb00000001': ORDERS };
+  // Columns travel with the rows now, so a misspelled column can be refused
+  // instead of quietly totalling nothing.
+  const asTable = { rows: ORDERS, columns: ['Total', 'Qty', 'Status', 'Who'] };
+  const tables = { Orders: asTable, 'databaseBlock__tb00000001': asTable };
   const ask = (f: string) => evaluateExpression(f, { Threshold: 100 }, tables);
 
   check('how many rows', ask('countOf("Orders")'), 4);
@@ -4573,6 +4576,51 @@ group('a page can get more than one number out of a table');
     evaluateExpression('countOf("databaseBlock__tb00000001")', {}, tables), 4);
   check('a page with no tables at all says that instead of listing nothing',
     (() => { try { evaluateExpression('countOf("Orders")', {}, {}); return null; } catch (e: any) { return String(e.message); } })()?.includes('no tables on it'), true);
+
+  /**
+   * A MISSPELLED COLUMN. sumOf("Orders", "Totl") used to add up nothing and
+   * answer 0 -- not an error, not looking like an error, sitting on a dashboard
+   * being wrong. A total that refuses is annoying for a minute; a total that is
+   * quietly wrong is trusted.
+   */
+  check('A MISSPELLED COLUMN REFUSES RATHER THAN TOTALLING NOTHING',
+    (fails('sumOf("Orders", "Totl")') || '').includes('no column called "Totl"'), true);
+  check('and lists the columns that are there',
+    (fails('sumOf("Orders", "Totl")') || '').includes('Total, Qty, Status, Who'), true);
+  check('an average of a column that is not there refuses too',
+    (fails('avgOf("Orders", "Totl")') || '').length > 0, true);
+  check('and so does joining one', (fails('joinOf("Orders", "Nmae")') || '').length > 0, true);
+  check('a real column is still fine', evaluateExpression('sumOf("Orders", "Total")', {}, tables), 600);
+  /**
+   * `Row id` reads the row's id, spelled the way a repeater's slots and a row
+   * filter spell it. It was accepted as a column name and then resolved to
+   * nothing -- the exact silent-blank the column check above exists to stop,
+   * introduced by writing the column check.
+   */
+  check('ROW ID IS THE SAME IDEA WITH THE SAME SPELLING EVERYWHERE',
+    evaluateExpression('joinOf("Orders", "Row id", \'{{Row id}} == "r1"\')', {}, tables), 'r1');
+  check('and all of them when nothing filters',
+    evaluateExpression('joinOf("Orders", "Row id")', {}, tables), 'r1, r2, r3, r4');
+
+  /**
+   * Where it deliberately says nothing. A table with no declared columns and no
+   * rows cannot tell a typo from an empty table -- which is every page for its
+   * first half-second, before the rows arrive.
+   */
+  const empty = { Fresh: { rows: [], columns: [] } };
+  /**
+   * Wrapped, because a check that THROWS kills the whole run rather than
+   * recording one failure -- which is how a negative control on this line came
+   * back looking green: the run never reached the tally.
+   */
+  const tries = (f: string, t: any) => { try { return evaluateExpression(f, {}, t); } catch (e: any) { return `threw: ${e.message}`; } };
+  check('an empty, undeclared table does not accuse anybody',
+    tries('sumOf("Fresh", "Total")', empty), 0);
+  const undeclared = { Loose: { rows: [{ id: 'x', Total: 5 }], columns: [] } };
+  check('rows alone are enough to catch a typo once they exist',
+    (() => { try { evaluateExpression('sumOf("Loose", "Totl")', {}, undeclared); return null; } catch (e: any) { return String(e.message); } })()?.includes('Totl'), true);
+  check('and the real column still works without a declaration',
+    evaluateExpression('sumOf("Loose", "Total")', {}, undeclared), 5);
 
   check('the new names are offered when a function is misspelled',
     (fails('sumOff("Orders", "Total")') || '').includes('sumOf'), true);
@@ -4771,6 +4819,28 @@ group('a formula on a real page can read a real table');
   typo.set(formulasAtom, [{ targetBlockId: TOTAL, formula: 'sumOf("Ordres", "Total")' }] as any);
   typo.set(workflowsAtom, []);
   recalculateAllFormulas(typo);
+  /**
+   * A misspelled COLUMN, on a real page. This is the one that proves the
+   * table's columns travel with its rows through tableScope -- without them
+   * `sumOf("Orders", "Totl")` totals nothing and lands 0 on the block, which is
+   * not an error and does not look like one.
+   */
+  const badCol = createStore();
+  badCol.set(allBlockIdsAtom, [TOTAL, DB]);
+  badCol.set(blockRuntimeAtom(TOTAL), { ...base, value: 0, blockName: 'Revenue' });
+  badCol.set(blockRuntimeAtom(DB), {
+    ...base, value: 0, blockName: 'Orders',
+    columns: [{ name: 'Total' }, { name: 'Status' }],
+    rows: [],
+  });
+  badCol.set(formulasAtom, [{ targetBlockId: TOTAL, formula: 'sumOf("Orders", "Totl")' }] as any);
+  badCol.set(workflowsAtom, []);
+  recalculateAllFormulas(badCol);
+  check('A MISSPELLED COLUMN IS CAUGHT ON A REAL PAGE, EVEN WITH NO ROWS YET',
+    (badCol.get(blockRuntimeAtom(TOTAL)).error || '').includes('Totl'), true);
+  check('and the message names the columns the table does have',
+    (badCol.get(blockRuntimeAtom(TOTAL)).error || '').includes('Total, Status'), true);
+
   check('A MISSPELLED TABLE SHOWS AN ERROR, not the last number that worked',
     (typo.get(blockRuntimeAtom(TOTAL)).error || '').includes('Ordres'), true);
   check('and it names the table that does exist', 
@@ -4817,6 +4887,43 @@ group('a formula on a real page can read a real table');
   const broken = asks('countOf("Bookngs") < 20');
   check('a misspelled table in a condition FAILS CLOSED', broken.pass, false);
   check('and says which name failed', broken.describe.includes('Bookngs'), true);
+}
+
+
+group('a table named inside a formula survives being copied');
+{
+  /**
+   * The sweep after table functions. A formula built by the picker names its
+   * table by id -- inside a STRING, which is a shape no formula had before.
+   * Copying a page regenerates every block id, so a `sumOf("<old id>", ...)`
+   * that is not remapped points at a block on the ORIGINAL page: the copy shows
+   * the original's totals, silently, and moves when the original does.
+   */
+  const map = {
+    'databaseBlock__old0000001': 'databaseBlock__new0000001',
+    'numberDisplayBlock__old002': 'numberDisplayBlock__new002',
+  };
+  check('an id inside quotes is remapped like any other',
+    remapFormulaExpression('sumOf("databaseBlock__old0000001", "Total")', map),
+    'sumOf("databaseBlock__new0000001", "Total")');
+  check('and so is a bare one alongside it',
+    remapFormulaExpression('sumOf("databaseBlock__old0000001", "Total") + numberDisplayBlock__old002', map),
+    'sumOf("databaseBlock__new0000001", "Total") + numberDisplayBlock__new002');
+
+  /**
+   * And a table named by its NAME must not be touched. Names are not ids, they
+   * are not regenerated, and rewriting one would break the copy in the opposite
+   * direction.
+   */
+  check('A HUMAN NAME IS LEFT ALONE, because it is not an id and is not regenerated',
+    remapFormulaExpression('sumOf("Orders", "Total")', map),
+    'sumOf("Orders", "Total")');
+  check('a column name is left alone too',
+    remapFormulaExpression('sumOf("Orders", "databaseBlock__old0000001x")', map),
+    'sumOf("Orders", "databaseBlock__old0000001x")');
+  check('a filter inside the formula is left as written',
+    remapFormulaExpression('countOf("Orders", \'{{Status}} == "paid"\')', map),
+    'countOf("Orders", \'{{Status}} == "paid"\')');
 }
 
 say(`\n${passed} passed, ${failed} failed`);

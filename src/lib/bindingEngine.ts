@@ -181,9 +181,13 @@ export function tableScope(store: ReturnType<typeof getDefaultStore>): TableScop
     const state = store.get(blockRuntimeAtom(blockId));
     const rows = (state as any)?.rows;
     if (!Array.isArray(rows)) continue;
+    // Columns travel with the rows so a misspelled COLUMN can be refused rather
+    // than quietly totalling nothing. See columnNamed in formula.ts.
+    const columns = ((state as any)?.columns || []).map((c: any) => String(c?.name ?? c));
+    const table = { rows, columns };
     const name = slotNameOf(blockId, state);
-    if (name && !(name in tables)) tables[name] = rows;
-    tables[blockId] = rows;
+    if (name && !(name in tables)) tables[name] = table;
+    tables[blockId] = table;
   }
   return tables;
 }

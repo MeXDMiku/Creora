@@ -252,7 +252,22 @@ export const FORMULA_FUNCTIONS: Record<string, (args: any[]) => FormulaValue> = 
  * `sumOf("Orders", "Total")` into a box will type the name they can see, and
  * being refused for it would be indefensible.
  */
-export type TableScope = Record<string, Record<string, any>[]>;
+export interface TableData {
+  rows: Record<string, any>[];
+  /**
+   * The columns the table is declared to have.
+   *
+   * Carried alongside the rows because a MISSPELLED COLUMN is otherwise
+   * indistinguishable from an empty one: `sumOf("Orders", "Totl")` adds up
+   * nothing and answers 0, which is not an error, does not look like an error,
+   * and sits on a dashboard being wrong. Rows alone cannot tell the two apart
+   * when the table is empty, and cannot tell them apart at all if every row
+   * happens to be missing that field.
+   */
+  columns: string[];
+}
+
+export type TableScope = Record<string, TableData>;
 
 const SLOT_IN_WHERE = /\{\{\s*([^}|]+?)\s*\}\}/g;
 
@@ -285,13 +300,16 @@ const TABLE_FUNCTIONS: Record<string, true> = {
 
 export const TABLE_FUNCTION_NAMES = Object.keys(TABLE_FUNCTIONS);
 
-/** Rows of the named table, or a refusal that says which name failed. */
-function rowsNamed(name: string, tables: TableScope | undefined): Record<string, any>[] {
+/** The named table, or a refusal that says which name failed. */
+function tableNamed(name: string, tables: TableScope | undefined): TableData {
   if (!tables) {
     throw new Error('Tables cannot be read from here — countOf and sumOf work in a formula or a condition, not in page markup');
   }
-  const rows = tables[name];
-  if (!rows) {
+  const table = tables[name];
+  if (!table) {
+    // Ids are left out of the list on purpose: they are a real spelling, but
+    // showing somebody `databaseBlock__1f3a...` when they mistyped "Orders" is
+    // noise in the one sentence that has to be readable.
     const known = Object.keys(tables).filter(k => !k.includes('__'));
     throw new Error(
       known.length
@@ -299,7 +317,44 @@ function rowsNamed(name: string, tables: TableScope | undefined): Record<string,
         : `There is no table called "${name}", and this page has no tables on it`,
     );
   }
-  return rows;
+  return table;
+}
+
+/**
+ * Refuse a column the table does not have.
+ *
+ * THE FAILURE THIS PREVENTS
+ * `sumOf("Orders", "Totl")` adds up nothing and answers **0**. That is not an
+ * error, does not look like an error, and sits on a dashboard being wrong --
+ * the worst failure this project has a name for. A total that refuses is
+ * annoying for a minute; a total that is quietly wrong is trusted.
+ *
+ * WHEN IT DELIBERATELY SAYS NOTHING
+ * A table with no declared columns and no rows cannot tell a typo from an empty
+ * table, so it does not guess. Refusing there would break a page whose table
+ * simply has not loaded yet, which is every page for its first half-second.
+ */
+function columnNamed(table: TableData, column: string): string {
+  const declared = (table.columns || []).map(c => String(c));
+  if (declared.length) {
+    if (declared.includes(column) || column === 'Row id') return column;
+    throw new Error(
+      `There is no column called "${column}" in that table. Its columns are: ${declared.join(', ')}`,
+    );
+  }
+  // No declared columns: fall back to what the rows actually carry, which is
+  // still better than nothing once any row exists.
+  if (table.rows.length) {
+    const seen = new Set<string>();
+    for (const row of table.rows) for (const key of Object.keys(row || {})) seen.add(key);
+    if (seen.has(column) || column === 'Row id' || column === 'id') return column;
+    throw new Error(
+      `There is no column called "${column}" in that table. It has: ${Array.from(seen).filter(k => k !== 'id').join(', ')}`,
+    );
+  }
+  // Empty and undeclared: nothing can be told apart, and a sum of nothing
+  // being 0 is the honest answer rather than a guess.
+  return column;
 }
 
 /**
@@ -325,8 +380,20 @@ function rowsWhere(rows: Record<string, any>[], where: string | null): Record<st
   });
 }
 
+/**
+ * One cell.
+ *
+ * `Row id` is spelled the same here as it is in a repeater's slots and in a row
+ * filter, because it is the same idea and a third spelling would be a third
+ * thing to get wrong. Without this it was ACCEPTED as a column name and then
+ * resolved to nothing, which is the exact silent-blank shape the column check
+ * above exists to stop -- introduced by the check itself.
+ */
+const cellOf = (row: Record<string, any>, column: string): any =>
+  column === 'Row id' ? row?.id : row?.[column];
+
 const numbersIn = (rows: Record<string, any>[], column: string): number[] =>
-  rows.map(r => r?.[column]).filter(v => v !== null && v !== undefined && v !== '').map(num);
+  rows.map(r => cellOf(r, column)).filter(v => v !== null && v !== undefined && v !== '').map(num);
 
 /**
  * Run one of them.
@@ -370,15 +437,15 @@ function callTableFunction(
     throw new Error(`${name}'s condition has to be in quotes, like '{{Status}} == "paid"'`);
   };
 
-  const table = rowsNamed(asName(args[0], 'a table name'), tables);
+  const table = tableNamed(asName(args[0], 'a table name'), tables);
 
   if (name === 'countOf') {
     if (args.length > 2) throw new Error('countOf takes a table and, if you want, a condition');
-    return rowsWhere(table, asWhere(args[1])).length;
+    return rowsWhere(table.rows, asWhere(args[1])).length;
   }
 
-  const column = asName(args[1], 'a column name');
-  const kept = rowsWhere(table, asWhere(args[2]));
+  const column = columnNamed(table, asName(args[1], 'a column name'));
+  const kept = rowsWhere(table.rows, asWhere(args[2]));
 
   switch (name) {
     case 'sumOf':
@@ -402,7 +469,7 @@ function callTableFunction(
     }
     case 'joinOf':
       return kept
-        .map(r => r?.[column])
+        .map(r => cellOf(r, column))
         .filter(v => v !== null && v !== undefined && String(v) !== '')
         .join(', ');
     default:
