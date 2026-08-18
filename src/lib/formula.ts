@@ -392,8 +392,41 @@ function rowsWhere(rows: Record<string, any>[], where: string | null): Record<st
 const cellOf = (row: Record<string, any>, column: string): any =>
   column === 'Row id' ? row?.id : row?.[column];
 
-const numbersIn = (rows: Record<string, any>[], column: string): number[] =>
-  rows.map(r => cellOf(r, column)).filter(v => v !== null && v !== undefined && v !== '').map(num);
+/**
+ * The numbers in a column, or a refusal naming the value that is not one.
+ *
+ * THE FAILURE THIS PREVENTS, WHICH IS THE WORST ONE HERE
+ * `num` answers NaN for a value it cannot read, NaN poisons a sum, and
+ * evaluateExpression turns a NaN result into **0**. So ONE mistyped cell --
+ * "12o" for "120", or "£200" typed into a text column -- made an entire
+ * revenue total read zero. Not an error, not a gap, a confident 0 on a
+ * dashboard, from one character.
+ *
+ * WHY IT REFUSES RATHER THAN SKIPPING
+ * Skipping the bad cell gives a total that is £120 short and looks completely
+ * plausible, so nobody ever finds it. Refusing is loud, and the message names
+ * the offending value, which is the one thing that makes it fixable in seconds.
+ *
+ * Blanks are still skipped, not refused: an empty cell is a row that has not
+ * been filled in, which is ordinary, while a cell holding "twelve" is a
+ * mistake.
+ */
+function numbersIn(rows: Record<string, any>[], column: string): number[] {
+  const out: number[] = [];
+  for (const row of rows) {
+    const value = cellOf(row, column);
+    if (value === null || value === undefined || value === '') continue;
+    const n = num(value);
+    if (isNaN(n)) {
+      const shown = String(value);
+      throw new Error(
+        `"${column}" holds ${shown.length > 30 ? shown.slice(0, 30) + '…' : shown}, which is not a number, so it cannot be added up`,
+      );
+    }
+    out.push(n);
+  }
+  return out;
+}
 
 /**
  * Run one of them.

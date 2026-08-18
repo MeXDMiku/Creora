@@ -316,6 +316,61 @@ export function diagnosePage(facts: PageFacts): Problem[] {
     }
   }
 
+  /**
+   * A column of numbers with something that is not a number in it.
+   *
+   * This is the cause of two different quiet wrongnesses at once, which is why
+   * it is worth a check of its own:
+   *
+   *  - a Database block's own sum SKIPS the bad cell, so the total comes out
+   *    short by exactly that row and looks completely plausible
+   *  - `sumOf` in a formula refuses outright, and a builder gets an error they
+   *    cannot place until they know which cell
+   *
+   * One mistyped character -- "12o" for "120", or "£200" typed into a text
+   * column -- and a revenue figure is wrong on a dashboard with nothing to
+   * notice.
+   *
+   * ONLY MIXED COLUMNS ARE REPORTED. A column of words is a text column and is
+   * nobody's business; a column with numbers in it AND one thing that is not a
+   * number is a typo, near enough always.
+   */
+  for (const blockId of facts.blockIds || []) {
+    const state = facts.states[blockId] as any;
+    const rows = state?.rows;
+    if (!Array.isArray(rows) || !rows.length) continue;
+
+    for (const column of (state?.columns || []) as { name?: string }[]) {
+      const name = String(column?.name ?? '');
+      if (!name) continue;
+
+      let numbers = 0;
+      let firstBad: string | null = null;
+      for (const row of rows) {
+        const value = row?.[name];
+        if (value === null || value === undefined || value === '') continue;
+        if (isNaN(Number(value))) {
+          if (firstBad === null) firstBad = String(value);
+        } else {
+          numbers += 1;
+        }
+      }
+
+      // Numbers on one side and something else on the other. Either alone is
+      // an ordinary column.
+      if (!numbers || firstBad === null) continue;
+
+      const shown = firstBad.length > 30 ? firstBad.slice(0, 30) + '…' : firstBad;
+      problems.push({
+        severity: 'warning',
+        title: `"${nameOf(facts, blockId)}" has "${shown}" in its ${name} column, which is not a number`,
+        detail:
+          'Totals over this column leave that row out, so the answer comes out short and looks right — and a formula using sumOf will refuse to run at all.',
+        blockId,
+      });
+    }
+  }
+
   // --- formulas referring to nothing ---
   for (const binding of facts.formulas || []) {
     if (!exists(facts, binding.targetBlockId)) {

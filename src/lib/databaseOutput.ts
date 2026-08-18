@@ -32,6 +32,25 @@ function applyFilter(rows: Row[], state?: BlockRuntimeState): Row[] {
   return rows.filter((r) => String(r?.[col] ?? '') === wanted);
 }
 
+/**
+ * The usable numbers in a column.
+ *
+ * A cell that is not a number is SKIPPED here, and that is a knowing
+ * difference from `sumOf` in the formula language, which refuses. The two are
+ * not free to be the same:
+ *
+ *  - this returns a value that goes straight into a block's output port. It has
+ *    nowhere to put a refusal, and eight call sites read it. Throwing would
+ *    take a block's whole output away over one mistyped cell.
+ *  - `sumOf` is written into a formula box that already shows errors, so it can
+ *    refuse and say which value it choked on.
+ *
+ * The cost of skipping is a total that is quietly SHORT -- plausible, and
+ * therefore never noticed. That cost is not accepted silently: the Health panel
+ * reports a column holding numbers AND something that is not one, which is the
+ * cause of both the short total here and the refusal there. See
+ * "holds a value that is not a number" in diagnose.ts.
+ */
 function numbers(rows: Row[], column?: string): number[] {
   if (!column) return [];
   return rows

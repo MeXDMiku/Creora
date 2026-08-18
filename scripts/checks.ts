@@ -4607,6 +4607,47 @@ group('a page can get more than one number out of a table');
    * rows cannot tell a typo from an empty table -- which is every page for its
    * first half-second, before the rows arrive.
    */
+  /**
+   * ONE MISTYPED CELL USED TO MAKE THE WHOLE TOTAL READ 0.
+   *
+   * num() answers NaN for a value it cannot read, NaN poisons a sum, and a NaN
+   * result becomes 0. So "12o" for "120" -- or "£200" typed into a text column
+   * -- turned an entire revenue figure into a confident zero on a dashboard,
+   * from one character, with nothing to notice.
+   */
+  const dirty = {
+    Orders: {
+      rows: [{ id: 'a', Total: 200 }, { id: 'b', Total: '12o' }, { id: 'c', Total: 100 }],
+      columns: ['Total'],
+    },
+  };
+  const dirtyFail = (f: string) => { try { evaluateExpression(f, {}, dirty); return null; } catch (e: any) { return String(e.message); } };
+  check('A CELL THAT IS NOT A NUMBER REFUSES INSTEAD OF ANSWERING ZERO',
+    (dirtyFail('sumOf("Orders", "Total")') || '').includes('not a number'), true);
+  check('and it names the value, which is what makes it fixable',
+    (dirtyFail('sumOf("Orders", "Total")') || '').includes('12o'), true);
+  check('an average refuses on the same cell', (dirtyFail('avgOf("Orders", "Total")') || '').length > 0, true);
+  check('so does the largest', (dirtyFail('maxOf("Orders", "Total")') || '').length > 0, true);
+  check('counting is unaffected, since it does not read the values',
+    evaluateExpression('countOf("Orders")', {}, dirty), 3);
+  check('and joining is unaffected too, since text is the point of it',
+    evaluateExpression('joinOf("Orders", "Total")', {}, dirty), '200, 12o, 100');
+
+  /**
+   * A blank is still skipped rather than refused. An empty cell is a row nobody
+   * has filled in yet, which is ordinary; a cell holding "twelve" is a mistake.
+   */
+  const withBlanks = { Orders: { rows: [{ id: 'a', Total: 200 }, { id: 'b', Total: '' }], columns: ['Total'] } };
+  check('a blank cell is ordinary and is skipped',
+    evaluateExpression('sumOf("Orders", "Total")', {}, withBlanks), 200);
+  check('and does not drag an average down',
+    evaluateExpression('avgOf("Orders", "Total")', {}, withBlanks), 200);
+
+  // A long value is trimmed so one runaway cell cannot fill the panel.
+  const long = { Orders: { rows: [{ id: 'a', Total: 'x'.repeat(120) }], columns: ['Total'] } };
+  check('a very long value is trimmed in the message',
+    (() => { try { evaluateExpression('sumOf("Orders", "Total")', {}, long); return ''; } catch (e: any) { return String(e.message); } })().length < 120, true);
+
   const empty = { Fresh: { rows: [], columns: [] } };
   /**
    * Wrapped, because a check that THROWS kills the whole run rather than
@@ -5014,6 +5055,69 @@ group('markup can calculate over a whole table');
   check('no usable column, no example', shareExampleFor('Orders', ['Order total']), null);
   check('and the panel actually prints it', repeatSrc.includes('shareExample'), false);
   check('the inspector prints it', readFileSync('src/blocks/RepeatBlock.inspector.tsx', 'utf8').includes('shareExample'), true);
+}
+
+
+group('a number column with something that is not a number in it');
+{
+  /**
+   * One character causes two different quiet wrongnesses at once, which is why
+   * this is a check of its own: a Database block's own sum SKIPS the bad cell,
+   * so the total is short by that row and looks plausible, while sumOf in a
+   * formula refuses outright and the builder cannot place the error.
+   *
+   * Only MIXED columns are reported. A column of words is a text column and is
+   * nobody's business; numbers plus one thing that is not a number is a typo,
+   * near enough always.
+   */
+  const DB = 'databaseBlock__nc00000001';
+  const base = { value: 0, visible: true, disabled: false, loading: false, error: null };
+  const mk = (rows: any[], columns = ['Total', 'Who']) => ({
+    blockIds: [DB],
+    states: {
+      [DB]: { ...base, blockName: 'Orders', rows, columns: columns.map(name => ({ name })) },
+    },
+    workflows: [], formulas: [], connections: [], pages: [{ id: 'page-1' }],
+  } as any);
+  const found = (facts: any) =>
+    diagnosePage(facts).filter((p: any) => p.title.includes('which is not a number'));
+
+  const typo = found(mk([
+    { id: 'a', Total: 200, Who: 'Ada' },
+    { id: 'b', Total: '12o', Who: 'Bo' },
+    { id: 'c', Total: 100, Who: 'Cy' },
+  ]));
+  check('THE MISTYPED CELL IS FOUND', typo.length, 1);
+  check('and it is quoted, so it can be searched for', typo[0]?.title.includes('"12o"'), true);
+  check('and the column is named', typo[0]?.title.includes('Total column'), true);
+  check('a warning, not broken — the page still works, it is just wrong',
+    typo[0]?.severity, 'warning');
+  check('the message explains BOTH ways it goes wrong',
+    typo[0]?.detail.includes('comes out short') && typo[0]?.detail.includes('sumOf'), true);
+
+  check('a clean number column is not accused',
+    found(mk([{ id: 'a', Total: 200, Who: 'Ada' }, { id: 'b', Total: 100, Who: 'Bo' }])).length, 0);
+  check('A COLUMN OF WORDS IS A TEXT COLUMN AND IS LEFT ALONE',
+    found(mk([{ id: 'a', Total: 'high', Who: 'Ada' }, { id: 'b', Total: 'low', Who: 'Bo' }])).length, 0);
+  check('and the names beside it are never accused',
+    found(mk([{ id: 'a', Total: 200, Who: 'Ada' }, { id: 'b', Total: '12o', Who: 'Bo' }]))
+      .filter((p: any) => p.title.includes('Who')).length, 0);
+  check('a blank is a row nobody filled in, not a mistake',
+    found(mk([{ id: 'a', Total: 200 }, { id: 'b', Total: '' }, { id: 'c', Total: null }])).length, 0);
+  check('an empty table says nothing', found(mk([])).length, 0);
+  check('a currency symbol typed into the cell is caught, because it is the same mistake',
+    found(mk([{ id: 'a', Total: 200 }, { id: 'b', Total: '£200' }])).length, 1);
+
+  // Only the first is reported per column: twenty rows of the same paste error
+  // would otherwise bury every other finding on the page.
+  const many = found(mk([
+    { id: 'a', Total: 1 }, { id: 'b', Total: 'x' }, { id: 'c', Total: 'y' }, { id: 'd', Total: 'z' },
+  ]));
+  check('ONE FINDING PER COLUMN, not one per row', many.length, 1);
+
+  // A runaway cell cannot fill the panel.
+  const long = found(mk([{ id: 'a', Total: 1 }, { id: 'b', Total: 'q'.repeat(200) }]));
+  check('a very long value is trimmed', long[0]?.title.length < 120, true);
 }
 
 say(`\n${passed} passed, ${failed} failed`);
