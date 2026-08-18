@@ -299,7 +299,11 @@ export function fillSlots(
     let value: any;
     if (calcMatch) {
       try {
-        value = evaluateExpression(calcMatch[1], withBuiltIns(values, options));
+        // Tables come through options, so `{{calc: Total / sumOf("Orders","Total")}}`
+        // -- a row's share of the whole -- is sayable. Absent means the caller
+        // could not supply them, and the calculation refuses rather than
+        // treating the page as having no tables and answering 0.
+        value = evaluateExpression(calcMatch[1], withBuiltIns(values, options), options.tables as any);
       } catch {
         // Empty, not an error message. A visitor reading somebody's published
         // page must never be shown "Referenced block Prcie does not exist" --

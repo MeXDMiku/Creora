@@ -11,6 +11,7 @@ import {
 } from '../state/atoms';
 import { useBlockDrag } from '../hooks/useBlockDrag';
 import { sanitizeHtml, findSlots, fillSlots } from '../lib/sanitizeHtml';
+import { useTableScope } from '../lib/useTableScope';
 import { useSlotValues } from '../lib/useSlotValues';
 
 /**
@@ -31,9 +32,11 @@ export function CustomHtmlView({ blockId }: { blockId: string }) {
   const cleaned = useMemo(() => sanitizeHtml(raw), [raw]);
   const slots = useMemo(() => findSlots(cleaned.html), [cleaned.html]);
   const values = useSlotValues(slots);
+  // So a panel can say "42 orders, £8,400" without a Formula block per number.
+  const tables = useTableScope();
   const html = useMemo(
-    () => fillSlots(cleaned.html, values, cleaned.urlSlots),
-    [cleaned.html, values, cleaned.urlSlots]
+    () => fillSlots(cleaned.html, values, cleaned.urlSlots, { tables }),
+    [cleaned.html, values, cleaned.urlSlots, tables]
   );
 
   return <div dangerouslySetInnerHTML={{ __html: html }} />;

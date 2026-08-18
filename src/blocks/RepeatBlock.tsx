@@ -16,6 +16,7 @@ import {
 import { useBlockDrag } from '../hooks/useBlockDrag';
 import { blockToCSS } from '../lib/renderBlockStyles';
 import { sanitizeHtml, findSlots, fillSlots } from '../lib/sanitizeHtml';
+import { useTableScope } from '../lib/useTableScope';
 import { useSlotValues } from '../lib/useSlotValues';
 import { useDatabaseRows } from '../hooks/useDatabaseRows';
 import { visibleRows, rowSlots } from '../lib/rows';
@@ -147,6 +148,13 @@ export function RepeatView({
   // without that being a separate feature.
   const templateSlots = useMemo(() => findSlots(template.html), [template.html]);
   const pageValues = useSlotValues(templateSlots);
+  /**
+   * Tables, so a row can work out its share of the whole:
+   * `{{calc: Total / sumOf("Orders", "Total") * 100 | round: 1}}%`. Read through
+   * an atom rather than built here, so a row added to another block moves this
+   * total instead of leaving it as it stood when this last rendered.
+   */
+  const tables = useTableScope();
 
   const clickColumn = state?.clickColumn;
   const clickTargetPageId = state?.clickTargetPageId;
@@ -224,7 +232,8 @@ export function RepeatView({
           const html = fillSlots(
             template.html,
             { ...pageValues, ...rowSlots(row, index) },
-            template.urlSlots
+            template.urlSlots,
+            { tables }
           );
           return (
             <div

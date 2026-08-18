@@ -3,7 +3,7 @@ import { useMemo } from 'react'
 import { blockRuntimeAtom, triggerSaveAtom, getBlockTypeDisplayName, getCanvasBlocks } from '../state/atoms'
 import { useStore } from 'jotai'
 import { sanitizeHtml } from '../lib/sanitizeHtml'
-import { MAX_RENDERED_ROWS, calcExampleFor, calcExampleWithFilter } from '../lib/rows'
+import { MAX_RENDERED_ROWS, calcExampleFor, calcExampleWithFilter, shareExampleFor } from '../lib/rows'
 import { FilterHelp } from '../components/FilterHelp'
 import { pagesListAtom, currentPageIdAtom } from '../state/atoms'
 
@@ -62,6 +62,10 @@ export default function RepeatBlockInspector({ blockId, editor }: { blockId: str
   // Built out in rows.ts, where a check can render it and prove the example
   // the panel prints is one that actually works.
   const calcExample = calcExampleFor(columns)
+  // Reading a whole table from inside a row is the least guessable thing in the
+  // language -- the table and the column both go in quotes, which is the
+  // opposite of the bare names sitting beside them in the same slot.
+  const shareExample = shareExampleFor(tracked?.blockName || 'Table', columns)
 
   const set = (patch: Record<string, unknown>) => {
     setRuntimeState(prev => ({ ...prev, ...patch }))
@@ -151,6 +155,13 @@ export default function RepeatBlockInspector({ blockId, editor }: { blockId: str
               a sum in a slot: <code>{calcExample}</code>. It formats like any
               other slot — <code>{calcExampleWithFilter(calcExample)}</code> —
               and column names go in without braces there.
+            </span>
+          )}
+          {shareExample && (
+            <span style={hintStyle}>
+              A row can read the whole table too, so it can show its share of it:{' '}
+              <code>{shareExample}</code>. The table and the column go in quotes
+              there; everything else in a slot does not.
             </span>
           )}
         </div>

@@ -51,7 +51,7 @@ import { fillSlots, leadingSlotName, findSlots as findSlotsForCheck } from '../s
 import { slotValuesFrom } from '../src/lib/useSlotValues';
 import { slotNameOf, slotNameForNodeType } from '../src/state/atoms';
 import { interpretSave, shouldKeepAutosaving, PageStamps } from '../src/lib/savePage';
-import { visibleRows, rowSlots, compareCells, slotNamesFor, rowMatchesSearch, MAX_RENDERED_ROWS, rowIndexesForStep, coerceForColumn, rowMatchesFormula, columnsUsedByFormula, calcExampleFor, calcExampleWithFilter } from '../src/lib/rows';
+import { visibleRows, rowSlots, compareCells, slotNamesFor, rowMatchesSearch, MAX_RENDERED_ROWS, rowIndexesForStep, coerceForColumn, rowMatchesFormula, columnsUsedByFormula, calcExampleFor, calcExampleWithFilter, shareExampleFor } from '../src/lib/rows';
 import {
   parseSlot,
   applyFilters,
@@ -4924,6 +4924,96 @@ group('a table named inside a formula survives being copied');
   check('a filter inside the formula is left as written',
     remapFormulaExpression('countOf("Orders", \'{{Status}} == "paid"\')', map),
     'countOf("Orders", \'{{Status}} == "paid"\')');
+}
+
+
+group('markup can calculate over a whole table');
+{
+  /**
+   * A row could read a value but never a whole table, so "this row's share of
+   * the total" -- which is most of what anybody wants a percentage for -- was
+   * not sayable in markup at all.
+   */
+  const ORDERS = {
+    rows: [{ id: 'r1', Total: 200 }, { id: 'r2', Total: 50 }, { id: 'r3', Total: 250 }],
+    columns: ['Total'],
+  };
+  const opts = { tables: { Orders: ORDERS } };
+
+  check('a total in markup',
+    fillSlots('<p>{{calc: sumOf("Orders", "Total")}}</p>', {}, [], opts), '<p>500</p>');
+  check("A ROW'S SHARE OF THE WHOLE, which is the reason for this",
+    fillSlots('<p>{{calc: Total / sumOf("Orders", "Total") * 100}}%</p>', { Total: 200 }, [], opts),
+    '<p>40%</p>');
+  check('and it still formats like any other slot',
+    fillSlots('<p>{{calc: sumOf("Orders", "Total") | money: £}}</p>', {}, [], opts),
+    '<p>£500.00</p>');
+  check('a count reads the same way',
+    fillSlots('<p>{{calc: countOf("Orders")}} orders</p>', {}, [], opts), '<p>3 orders</p>');
+
+  /**
+   * A caller that cannot supply tables renders NOTHING rather than a number.
+   *
+   * What this does and does not prove, since a control caught the difference:
+   * it shows the page stays blank, not WHY. Both "tables are unavailable here"
+   * and "there is no table called Orders" end the same way on screen, because a
+   * visitor is never told either. The distinction between those two messages is
+   * checked where it is visible -- in the error a builder reads -- not here.
+   *
+   * What matters on the page is the negative: it never becomes a confident 0,
+   * which a share of the whole would then divide by.
+   */
+  check('a calculation that cannot reach the tables shows nothing',
+    fillSlots('<p>[{{calc: sumOf("Orders", "Total")}}]</p>', {}), '<p>[]</p>');
+  check('AND NEVER A CONFIDENT ZERO, which a share of the whole would divide by',
+    fillSlots('<p>[{{calc: Total / sumOf("Orders", "Total")}}]</p>', { Total: 200 }), '<p>[]</p>');
+
+  // A visitor is never shown the reason; the Health panel is where a builder is told.
+  check('a misspelled table is silent on the page, as every other calc failure is',
+    fillSlots('<p>[{{calc: sumOf("Ordres", "Total")}}]</p>', {}, [], opts), '<p>[]</p>');
+
+  // And the guard still holds for anything a table function could build.
+  check('a calculated table value cannot become a scheme in an href',
+    fillSlots(
+      '<a href="{{calc: concat(\'javascri\', \'pt:\', text(countOf("Orders")))}}">x</a>',
+      {}, ['calc: concat(\'javascri\', \'pt:\', text(countOf("Orders")))'], opts),
+    '<a href="">x</a>');
+
+  /**
+   * The wiring. Both blocks that render markup have to read the tables through
+   * an ATOM -- building the map inline computes the right answer once and never
+   * again, because nothing in a repeater subscribes to another block's rows.
+   * The page would show the total as it stood when it last happened to render,
+   * and a stale number looks exactly like an answer.
+   */
+  const repeatSrc = readFileSync('src/blocks/RepeatBlock.tsx', 'utf8');
+  const htmlSrc = readFileSync('src/blocks/CustomHtmlBlock.tsx', 'utf8');
+  check('the repeater reads tables through the atom', repeatSrc.includes('useTableScope()'), true);
+  check('and hands them to fillSlots', /fillSlots\([\s\S]{0,200}\{ tables \}/.test(repeatSrc), true);
+  check('custom HTML does both too',
+    htmlSrc.includes('useTableScope()') && htmlSrc.includes('{ tables }'), true);
+  check('NEITHER BUILDS THE MAP INLINE, which would freeze the total',
+    repeatSrc.includes('tableScope(') || htmlSrc.includes('tableScope('), false);
+
+  /**
+   * The panel prints this one too, so it is checked by being run. It earns its
+   * own example because the table and the column go in QUOTES while everything
+   * else in the same slot does not, and nobody guesses that.
+   */
+  const share = shareExampleFor('Orders', ['Total', 'Status']);
+  check('the share example is built from the builder’s own names',
+    share, '{{calc: Total / sumOf("Orders", "Total") * 100 | round: 1}}%');
+  // 40.0, not 40: `round: 1` keeps the decimal place, which is what makes a
+  // column of percentages line up. Worth pinning, since the obvious guess is 40.
+  check('AND IT RENDERS, which is the only thing that makes printing it honest',
+    fillSlots(`<p>${share}</p>`, { Total: 200 }, [], opts), '<p>40.0%</p>');
+  check('a column with a space is skipped, because it cannot go in a calculation',
+    shareExampleFor('Orders', ['Order total', 'Qty']),
+    '{{calc: Qty / sumOf("Orders", "Qty") * 100 | round: 1}}%');
+  check('no table, no example', shareExampleFor('', ['Total']), null);
+  check('no usable column, no example', shareExampleFor('Orders', ['Order total']), null);
+  check('and the panel actually prints it', repeatSrc.includes('shareExample'), false);
+  check('the inspector prints it', readFileSync('src/blocks/RepeatBlock.inspector.tsx', 'utf8').includes('shareExample'), true);
 }
 
 say(`\n${passed} passed, ${failed} failed`);

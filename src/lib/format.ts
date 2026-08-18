@@ -260,6 +260,17 @@ function titleCase(text: string): string {
 export interface FilterOptions {
   /** The clock. Passed in so a check can pin it and a page can use the real one. */
   now?: Date;
+  /**
+   * The tables on the page, for a computed slot that reads one.
+   *
+   * Optional, and absent means "not available here" rather than "empty page" --
+   * the difference matters, because an empty page would make sumOf answer 0 and
+   * a row would show a confident zero instead of nothing.
+   *
+   * Typed loosely to keep format.ts from depending on the formula language;
+   * this only ever travels through to evaluateExpression, which owns the shape.
+   */
+  tables?: Record<string, { rows: Record<string, any>[]; columns: string[] }>;
 }
 
 /**

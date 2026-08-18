@@ -467,3 +467,26 @@ export function calcExampleFor(columns: string[] | undefined | null): string | n
 export function calcExampleWithFilter(example: string | null, symbol = '£'): string | null {
   return example ? example.replace(/\}\}$/, ` | money: ${symbol}}}`) : null;
 }
+
+/**
+ * A worked example of a row's share of the whole, in the builder's own names.
+ *
+ * Same reasoning as calcExampleFor: printed in the panel, so it is checked by
+ * being RUN. This one earns its own example because reading a whole table from
+ * inside a row is the least guessable thing in the language -- the table goes
+ * in quotes and the column does too, which is the opposite of the bare names
+ * beside it in the same slot.
+ */
+export function shareExampleFor(
+  tableName: string | undefined | null,
+  columns: string[] | undefined | null,
+): string | null {
+  const table = String(tableName ?? '').trim();
+  if (!table) return null;
+  const numeric = (columns || [])
+    .map(c => String(c ?? '').trim())
+    .filter(c => /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(c));
+  if (!numeric.length) return null;
+  const col = numeric[0];
+  return `{{calc: ${col} / sumOf("${table}", "${col}") * 100 | round: 1}}%`;
+}
