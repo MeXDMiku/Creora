@@ -397,6 +397,7 @@ export function rowMatchesFormula(
   row: Record<string, any>,
   formula: string | undefined | null,
   rowIdOf: (row: Record<string, any>) => any = r => r?.id,
+  now?: Date,
 ): RowFormulaResult {
   const text = String(formula ?? '').trim();
   if (!text) return { pass: true, error: null };
@@ -412,7 +413,10 @@ export function rowMatchesFormula(
   });
 
   try {
-    return { pass: truthy(evaluateExpression(rewritten, scope)), error: null };
+    // No tables in a row filter -- a repeater filtering itself by a total of
+    // itself is a loop nobody asked for -- but the clock is here, so
+    // `{{Due}} > today` works where a builder most expects it to.
+    return { pass: truthy(evaluateExpression(rewritten, scope, undefined, { now })), error: null };
   } catch (err: any) {
     const message = String(err?.message || 'that formula could not be worked out');
     /**

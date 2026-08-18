@@ -108,6 +108,18 @@ const FORMULA_WORDS = new Set([
    * assumption elsewhere that was correct when it was written.
    */
   'and', 'or',
+  /**
+   * And `today` and `now` the same way, one cycle later. A formula's scope is
+   * keyed by block id, so these could never have been blocks -- but this scan
+   * matches identifiers, not meanings, and every date formula written from now
+   * on says one of them.
+   *
+   * FOURTH TIME. The pattern is not "remember to update this list"; it is that
+   * a scan built from a regular expression has to be swept every time the
+   * language gains a word. Written here rather than in the log, because this is
+   * where somebody adding the fifth word will be standing.
+   */
+  'today', 'now',
 ]);
 
 export function referencedIds(formula: string | null | undefined): string[] {

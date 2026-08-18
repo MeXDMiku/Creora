@@ -1,5 +1,8 @@
 import jsep from 'jsep';
 import { evaluateCondition } from './conditions';
+// The same date reader the display filters use. Two ways of deciding what
+// counts as a date would eventually disagree about a real page's data.
+import { toDate } from './format';
 
 /**
  * What a formula can say.
@@ -365,7 +368,11 @@ function columnNamed(table: TableData, column: string): string {
  * wrong and leads somebody to the filter, but a TOTAL that is quietly too big
  * looks like a number. There is nothing to notice, so it has to refuse.
  */
-function rowsWhere(rows: Record<string, any>[], where: string | null): Record<string, any>[] {
+function rowsWhere(
+  rows: Record<string, any>[],
+  where: string | null,
+  options?: EvaluateOptions,
+): Record<string, any>[] {
   if (!where || !where.trim()) return rows;
   return rows.filter(row => {
     const rowScope: Record<string, any> = {};
@@ -376,7 +383,9 @@ function rowsWhere(rows: Record<string, any>[], where: string | null): Record<st
       rowScope[key] = name === 'Row id' ? row?.id : row?.[name];
       return key;
     });
-    return truthy(evaluateExpression(rewritten, rowScope));
+    // The clock reaches a table's filter too, so
+    // countOf("Bookings", '{{Due}} > today') means what it reads as.
+    return truthy(evaluateExpression(rewritten, rowScope, undefined, options));
   });
 }
 
@@ -440,6 +449,7 @@ function callTableFunction(
   args: any[],
   walk: (node: any) => any,
   tables: TableScope | undefined,
+  options?: EvaluateOptions,
 ): FormulaValue {
   // A literal string, taken as written. Anything else is worked out first, so
   // a formula can build a table name if it really wants to.
@@ -474,11 +484,11 @@ function callTableFunction(
 
   if (name === 'countOf') {
     if (args.length > 2) throw new Error('countOf takes a table and, if you want, a condition');
-    return rowsWhere(table.rows, asWhere(args[1])).length;
+    return rowsWhere(table.rows, asWhere(args[1]), options).length;
   }
 
   const column = columnNamed(table, asName(args[1], 'a column name'));
-  const kept = rowsWhere(table.rows, asWhere(args[2]));
+  const kept = rowsWhere(table.rows, asWhere(args[2]), options);
 
   switch (name) {
     case 'sumOf':
@@ -509,6 +519,108 @@ function callTableFunction(
       throw new Error(`There is no function called "${name}"`);
   }
 }
+
+/**
+ * Dates, as arithmetic rather than as formatting.
+ *
+ * WHY THESE ARE MISSING UNTIL NOW, AND WHY IT MATTERS
+ * A date could be SHOWN (`{{Due | date: D MMM}}`) and shifted for showing
+ * (`{{Due | plus: 7 days}}`), and that was the whole of it. Nothing could ask a
+ * QUESTION about one. "Three days left", "overdue", "bookings this month",
+ * "only if the date has not passed" — every one of them was unsayable, on a
+ * product whose two worked examples are a booking form and a task list.
+ *
+ * WHY dateAdd RETURNS TEXT AND NOT A DATE
+ * A formula's answer lands in a block's value, gets compared, gets saved, and
+ * gets put through display filters. A Date object survives none of that
+ * reliably, and widening the language's value type to carry one would touch
+ * every comparison in it. An ISO string survives all of it: `toDate` reads it
+ * back, `| date:` formats it, `isBefore` parses it, and a builder who displays
+ * it raw sees something unambiguous rather than a locale accident.
+ *
+ * WHOLE DAYS, NOT FRACTIONS
+ * daysBetween works from midnight to midnight, so "how many days until the
+ * 20th" gives the same answer at 9am and at 5pm. Counting in 24-hour
+ * increments from `now` would give 3 in the morning and 2 in the afternoon,
+ * and somebody would file that as a bug — correctly.
+ */
+function startOfDay(d: Date): Date {
+  const copy = new Date(d.getTime());
+  copy.setHours(0, 0, 0, 0);
+  return copy;
+}
+
+/** Read a date the way the display filters read one, so both agree. */
+function asDate(value: any, fn: string): Date {
+  const d = toDate(value);
+  if (!d) {
+    const shown = String(value ?? '');
+    throw new Error(
+      shown.trim() === ''
+        ? `${fn} needs a date, and that one is empty`
+        : `${fn} could not read "${shown.length > 30 ? shown.slice(0, 30) + '…' : shown}" as a date`,
+    );
+  }
+  return d;
+}
+
+const DAY_MS = 86400000;
+
+const DATE_FUNCTIONS: Record<string, (args: any[], now: Date) => FormulaValue> = {
+  /** Whole days from a to b. Negative when b is earlier. */
+  daysBetween: (args, _now) => {
+    need('daysBetween', args, 2, 2);
+    const a = startOfDay(asDate(args[0], 'daysBetween'));
+    const b = startOfDay(asDate(args[1], 'daysBetween'));
+    return Math.round((b.getTime() - a.getTime()) / DAY_MS);
+  },
+  /** Days from today. Negative once it has passed, which is what "overdue" is. */
+  daysUntil: (args, now) => {
+    need('daysUntil', args, 1, 1);
+    const target = startOfDay(asDate(args[0], 'daysUntil'));
+    return Math.round((target.getTime() - startOfDay(now).getTime()) / DAY_MS);
+  },
+  /** Whole days since. The same number the other way round, spelled the way people say it. */
+  daysSince: (args, now) => {
+    need('daysSince', args, 1, 1);
+    const past = startOfDay(asDate(args[0], 'daysSince'));
+    return Math.round((startOfDay(now).getTime() - past.getTime()) / DAY_MS);
+  },
+  /** Shift a date. Text out, so it survives being stored, compared and formatted. */
+  dateAdd: (args, _now) => {
+    need('dateAdd', args, 2, 2);
+    const d = asDate(args[0], 'dateAdd');
+    const days = num(args[1]);
+    if (isNaN(days)) throw new Error('dateAdd needs a number of days');
+    return new Date(d.getTime() + days * DAY_MS).toISOString();
+  },
+  isBefore: (args, _now) => {
+    need('isBefore', args, 2, 2);
+    return asDate(args[0], 'isBefore').getTime() < asDate(args[1], 'isBefore').getTime();
+  },
+  isAfter: (args, _now) => {
+    need('isAfter', args, 2, 2);
+    return asDate(args[0], 'isAfter').getTime() > asDate(args[1], 'isAfter').getTime();
+  },
+  /** Same calendar day, whatever the time on either. */
+  isSameDay: (args, _now) => {
+    need('isSameDay', args, 2, 2);
+    return startOfDay(asDate(args[0], 'isSameDay')).getTime()
+      === startOfDay(asDate(args[1], 'isSameDay')).getTime();
+  },
+  year: (args, _now) => { need('year', args, 1, 1); return asDate(args[0], 'year').getFullYear(); },
+  /** 1-12. Not 0-11: a formula is read by a person, not by JavaScript. */
+  month: (args, _now) => { need('month', args, 1, 1); return asDate(args[0], 'month').getMonth() + 1; },
+  day: (args, _now) => { need('day', args, 1, 1); return asDate(args[0], 'day').getDate(); },
+  /** Monday is 1 and Sunday is 7, which is how a week is spoken about. */
+  weekday: (args, _now) => {
+    need('weekday', args, 1, 1);
+    const js = asDate(args[0], 'weekday').getDay();
+    return js === 0 ? 7 : js;
+  },
+};
+
+export const DATE_FUNCTION_NAMES = Object.keys(DATE_FUNCTIONS);
 
 export const FORMULA_FUNCTION_NAMES = [
   'if', 'and', 'or', 'not', 'isBlank',
@@ -545,10 +657,20 @@ const COMPARISONS: Record<string, string> = {
 jsep.addBinaryOp('and', 2);
 jsep.addBinaryOp('or', 1);
 
+export interface EvaluateOptions {
+  /**
+   * The clock. Passed in for the same reason format.ts takes one: `today` and
+   * `daysUntil` are the two things in this language whose answer changes on its
+   * own, and a check that cannot pin them cannot check them.
+   */
+  now?: Date;
+}
+
 export function evaluateExpression(
   formula: string,
   scope: Record<string, any>,
   tables?: TableScope,
+  options?: EvaluateOptions,
 ): FormulaValue {
   if (!formula || formula.trim() === '') return 0;
 
@@ -558,6 +680,16 @@ export function evaluateExpression(
   } catch {
     throw new Error('That formula could not be read. Check the brackets and quotes.');
   }
+
+  // Read once per evaluation, not once per mention: two `today`s in one formula
+  // that straddled midnight would otherwise disagree with each other.
+  const fixed = options?.now;
+  let sampled: Date | null = null;
+  const clock = (): Date => {
+    if (fixed) return fixed;
+    if (!sampled) sampled = new Date();
+    return sampled;
+  };
 
   const walk = (node: any): any => {
     switch (node.type) {
@@ -573,10 +705,17 @@ export function evaluateExpression(
         if (lowered === 'true') return true;
         if (lowered === 'false') return false;
         if (lowered === 'blank' || lowered === 'empty') return '';
-        if (!(name in scope)) {
-          throw new Error(`Referenced block "${name}" does not exist`);
-        }
-        return scope[name];
+        if (name in scope) return scope[name];
+        /**
+         * The clock, AFTER the scope, so anything on the page called `today`
+         * still wins -- the same precedence markup already documents for its
+         * built-in slots. Without these two words `daysUntil(Due)` would have
+         * nothing to count from: a formula's scope is keyed by block id, so
+         * there is no `today` in it and never was.
+         */
+        if (lowered === 'today') return startOfDay(clock());
+        if (lowered === 'now') return clock();
+        throw new Error(`Referenced block "${name}" does not exist`);
       }
 
       case 'UnaryExpression': {
@@ -642,7 +781,10 @@ export function evaluateExpression(
          */
         const called = node.callee?.name;
         if (typeof called === 'string' && called in TABLE_FUNCTIONS) {
-          return callTableFunction(called, node.arguments || [], walk, tables);
+          return callTableFunction(called, node.arguments || [], walk, tables, { now: clock() });
+        }
+        if (typeof called === 'string' && called in DATE_FUNCTIONS) {
+          return DATE_FUNCTIONS[called](node.arguments.map(walk), clock());
         }
 
         if (node.callee?.type !== 'Identifier') {
@@ -652,7 +794,7 @@ export function evaluateExpression(
         const fn = FORMULA_FUNCTIONS[typed.toLowerCase()];
         if (!fn) {
           throw new Error(
-            `There is no function called "${typed}". Available: ${[...FORMULA_FUNCTION_NAMES, ...TABLE_FUNCTION_NAMES].join(', ')}`,
+            `There is no function called "${typed}". Available: ${[...FORMULA_FUNCTION_NAMES, ...TABLE_FUNCTION_NAMES, ...DATE_FUNCTION_NAMES].join(', ')}`,
           );
         }
         // `if` is not lazy. Both branches are worked out before one is chosen,

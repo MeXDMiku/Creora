@@ -5120,5 +5120,121 @@ group('a number column with something that is not a number in it');
   check('a very long value is trimmed', long[0]?.title.length < 120, true);
 }
 
+
+// -------------------------------------------------- dates, as arithmetic
+group('a formula can ask a question about a date');
+{
+  /**
+   * A date could be SHOWN and shifted for showing, and that was all. Nothing
+   * could ask a question about one. "Three days left", "overdue", "this
+   * month", "only if it has not passed" -- every one unsayable, on a product
+   * whose two worked examples are a booking form and a task list.
+   *
+   * The clock is pinned here for the obvious reason: `today` is one of exactly
+   * two things in this language whose answer changes on its own.
+   */
+  const NOW_D = new Date(2026, 7, 17, 14, 30); // Mon 17 Aug 2026, afternoon
+  const at = (f: string, scope: any = {}) => evaluateExpression(f, scope, undefined, { now: NOW_D });
+
+  check('days until something', at('daysUntil("2026-08-20")'), 3);
+  check('and it is negative once it has passed, which is what overdue means',
+    at('daysUntil("2026-08-14")'), -3);
+  check('today is zero', at('daysUntil("2026-08-17")'), 0);
+  check('days since', at('daysSince("2026-08-10")'), 7);
+  check('between two dates', at('daysBetween("2026-08-17", "2026-08-24")'), 7);
+  check('and backwards', at('daysBetween("2026-08-24", "2026-08-17")'), -7);
+
+  /**
+   * WHOLE DAYS, from midnight. The clock here says 14:30, so counting in
+   * 24-hour steps would answer 2 in the afternoon and 3 in the morning for the
+   * same question -- and somebody would file that as a bug, correctly.
+   */
+  check('THE ANSWER DOES NOT DEPEND ON THE TIME OF DAY',
+    evaluateExpression('daysUntil("2026-08-20")', {}, undefined, { now: new Date(2026, 7, 17, 23, 59) }),
+    3);
+  check('nor in the small hours',
+    evaluateExpression('daysUntil("2026-08-20")', {}, undefined, { now: new Date(2026, 7, 17, 0, 1) }),
+    3);
+
+  check('is it before', at('isBefore("2026-08-10", "2026-08-17")'), true);
+  check('is it after', at('isAfter("2026-08-20", "2026-08-17")'), true);
+  check('the same day whatever the time',
+    at('isSameDay("2026-08-17T01:00:00", "2026-08-17T23:00:00")'), true);
+  check('parts of a date', [at('year("2026-08-17")'), at('month("2026-08-17")'), at('day("2026-08-17")')], [2026, 8, 17]);
+  check('MONTH IS 1-12, because a formula is read by a person', at('month("2026-01-05")'), 1);
+  check('and Monday is 1, because that is how a week is spoken about', at('weekday("2026-08-17")'), 1);
+  check('with Sunday at 7 rather than 0', at('weekday("2026-08-16")'), 7);
+
+  /**
+   * `today` and `now` as words. A formula's scope is keyed by block id, so
+   * there was no `today` in it and never could have been.
+   */
+  check('today is a word a formula can use', at('daysUntil(today)'), 0);
+  check('and it composes', at('daysBetween(today, "2026-08-24")'), 7);
+  check('A BLOCK CALLED today STILL WINS, the same precedence markup documents',
+    at('today', { today: 'mine' }), 'mine');
+
+  /**
+   * dateAdd hands back TEXT, so the answer survives being stored, compared and
+   * formatted. A Date object survives none of those reliably.
+   */
+  check('a shifted date can be compared', at('isAfter(dateAdd(today, 7), "2026-08-20")'), true);
+  check('and read back by the same functions', at('daysUntil(dateAdd(today, 5))'), 5);
+  check('and formatted like any other date',
+    fillSlots('<p>{{calc: dateAdd(today, 7) | date: D MMM YYYY}}</p>', {}, [], { now: NOW_D }),
+    '<p>24 Aug 2026</p>');
+  check('backwards too', at('daysUntil(dateAdd(today, -2))'), -2);
+
+  // The everyday sentence, in the shape somebody actually writes it.
+  check('THE SENTENCE THIS EXISTS FOR',
+    at('if(daysUntil(Due) < 0, "Overdue", concat(text(daysUntil(Due)), " days left"))', { Due: '2026-08-20' }),
+    '3 days left');
+  check('and the other half of it',
+    at('if(daysUntil(Due) < 0, "Overdue", "fine")', { Due: '2026-08-01' }), 'Overdue');
+
+  // Refusals.
+  const bad = (f: string) => { try { at(f); return null; } catch (e: any) { return String(e.message); } };
+  check('something that is not a date says so, and says which',
+    (bad('daysUntil("next tuesday-ish")') || '').includes('next tuesday-ish'), true);
+  check('an empty date is named as empty rather than as unreadable',
+    (bad('daysUntil("")') || '').includes('empty'), true);
+  check('the date functions are offered when one is misspelled',
+    (bad('daysUnti("2026-08-20")') || '').includes('daysUntil'), true);
+
+  /**
+   * The reader is shared with the display filters. Two ways of deciding what
+   * counts as a date would eventually disagree about a real page's data.
+   */
+  check('a timestamp reads as a date here as it does in a filter',
+    at('year(1755388800)') > 2020, true);
+
+  /**
+   * THE SWEEP, and the fourth time this exact assumption has broken.
+   *
+   * The Health panel scans a formula for identifiers and reports the ones that
+   * are not blocks. Every new WORD in the language -- `and` and `or` last
+   * cycle, `today` and `now` this one -- looks exactly like a block that has
+   * been deleted, so every date formula would arrive with a false "block is
+   * gone" beside it.
+   */
+  // The formula has to actually SAY today, or the check is named for something
+  // it never touches -- which is how this one first went in.
+  check('TODAY IS NOT REPORTED AS A DELETED BLOCK', referencedIds('daysUntil(today) < 0'), []);
+  check('and neither is the column beside it', referencedIds('daysUntil(Due) > 0'), ['Due']);
+  check('nor when both appear together',
+    referencedIds('daysBetween(today, Due) > 3'), ['Due']);
+  check('nor is now', referencedIds('daysBetween(now, Due)'), ['Due']);
+  check('nor are the date functions themselves',
+    referencedIds('if(isBefore(today, Due), dateAdd(Due, 7), Due)'), ['Due']);
+  check('and a real deleted block is still reported, so this is not switched off',
+    referencedIds('daysUntil(Gone)'), ['Gone']);
+
+  const helpSrc = readFileSync('src/blocks/FormulaDisplayBlock.inspector.tsx', 'utf8');
+  check('the panel lists the date functions, or nobody finds them',
+    helpSrc.includes('DATE_FUNCTION_NAMES'), true);
+  check('and shows the one sentence anybody actually wants',
+    helpSrc.includes('daysUntil(Due)'), true);
+}
+
 say(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

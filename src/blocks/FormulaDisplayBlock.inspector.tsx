@@ -1,7 +1,7 @@
 import { useAtom, useSetAtom, useStore } from 'jotai'
 import { blockRuntimeAtom, triggerSaveAtom, formulasAtom, getBlockTypeDisplayName, getCanvasBlocks } from '../state/atoms'
 import { recalculateAllFormulas } from '../lib/bindingEngine'
-import { FORMULA_FUNCTION_NAMES, TABLE_FUNCTION_NAMES } from '../lib/formula'
+import { FORMULA_FUNCTION_NAMES, TABLE_FUNCTION_NAMES, DATE_FUNCTION_NAMES } from '../lib/formula'
 import { useMemo, useState, useEffect } from 'react'
 
 const PAGE_ID = '00000000-0000-0000-0000-000000000001'
@@ -217,13 +217,23 @@ export default function FormulaDisplayBlockInspector({ blockId, editor }: { bloc
               are how you get past that, and nobody would guess from seeing
               "sumOf" among thirty names that the table goes in quotes.
             */}
+            {/*
+              Dates get their own line for the same reason tables do: nobody
+              guesses that `today` is a word here, and "3 days left" is the
+              single most common thing anybody wants a date for.
+            */}
+            <div style={{ marginBottom: '6px' }}>
+              <strong>Dates:</strong> <code>daysUntil(Due)</code> — negative once it
+              has passed. Also <code>today</code>, <code>daysSince</code>,{' '}
+              <code>isBefore</code>, <code>dateAdd(today, 7)</code>.
+            </div>
             <div style={{ marginBottom: '6px' }}>
               <strong>A whole table:</strong> <code>sumOf("Orders", "Total")</code> &mdash;
               its name in quotes. Some rows only:{' '}
               <code>{'countOf("Orders", \'{{Status}} == "paid"\')'}</code>
             </div>
             <div style={{ marginTop: '8px', paddingTop: '6px', borderTop: '1px solid #e5e7eb' }}>
-              {[...FORMULA_FUNCTION_NAMES, ...TABLE_FUNCTION_NAMES].join(' &middot; ').replace(/&middot;/g, '\u00b7')}
+              {[...FORMULA_FUNCTION_NAMES, ...TABLE_FUNCTION_NAMES, ...DATE_FUNCTION_NAMES].join(' &middot; ').replace(/&middot;/g, '\u00b7')}
             </div>
             <div style={{ marginTop: '6px', color: '#64748b' }}>
               Use the picker below to drop a block in by name.
