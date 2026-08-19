@@ -421,6 +421,67 @@ constant changed the check along with the code and it stayed green. **A check
 written in terms of the thing it checks is not a check.** Literals now, and a
 control in each direction.
 
+### Removing the friction instead of adding to the queue
+
+1,637 checks.
+
+Five migrations had sat unrun for days — the row-ownership one since 13 August.
+Each fixes something silently broken until it is applied. **The work was done and
+the friction was the whole obstacle**: five pastes is not five times the effort of
+one, it is five times the chance of stopping after the first.
+
+`supabase/RUN_ALL_MIGRATIONS.sql` is all eight, generated, in order. The header
+promises it is safe to run whole — and that promise is now *checked*, not
+claimed: no table or index without `if not exists`, every trigger dropped before
+it is created, functions created `or replace`, nothing inserted at the top level.
+The next migration somebody writes is the one that would break the promise,
+silently, because the failure is a duplicate-object error halfway through a paste
+that has already applied half of itself.
+
+I also considered closing the webhook leak with `pg_net` and stopped: I could not
+confirm it is on the free plan, and a sixth migration needing a *dashboard toggle*
+makes the queue worse, not better.
+
+### Walking the journey the audit stakes two site types on
+
+"A blog is possible now. A directory is possible now." Both moved on one sentence
+— a page can be opened *with* a row — and every piece was checked on its own
+while **the journey was checked nowhere**. Four correct functions in a row can
+still fail to be a road.
+
+It works. Walking it pinned down that an ampersand in a title does not become a
+second parameter, that an id containing `/ ? #` survives the round trip, that
+arriving with no row does not show the preview row to *everybody*, and that a
+bare link shows the list rather than a wrong row — hiding everything would read
+as "this post was deleted".
+
+### The one security hole, said out loud
+
+`get_page` returns workflows whole, and it has to: the browser fires the wire, so
+the address must reach the browser. No client-side arrangement closes it.
+
+**So the Health panel names it instead** — the block, and a truncated address,
+because printing the whole thing puts the token on screen for whoever is standing
+behind them. A warning rather than broken: it works exactly as intended, and what
+is wrong is what it costs.
+
+### Two of my own mistakes this stretch
+
+**I wrote fifty-one checks that already existed.** Forty lines from the top of
+the file, covering all three directions *and* TipTap registration, which mine did
+not. Removed. Past sixteen hundred checks, reading the file is not how you find
+out — grep for the claim first. A control told me, by naming an existing check I
+had not written.
+
+**A control that renames an export proves nothing.** It breaks compilation, so
+the suite never runs and reports zero failures. A control has to change
+*behaviour*.
+
+And an instrument note: this working copy is a network mount, and a control can
+start the check subprocess **before its write has landed** — reporting zero
+failures against the unmodified file. It happened once in a batch of five. A
+green control now has a fourth possible explanation, and it is the boring one.
+
 ### Notes worth keeping
 
 - **An example printed in the UI is a promise.** The repeater panel prints a
