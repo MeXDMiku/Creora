@@ -3284,11 +3284,11 @@ group('a row action can act on every matching row');
     { id: 'r3', Name: 'Katherine', Done: true, Score: 30 },
   ];
 
-  check('the first match only, by default', rowIndexesForStep(rows, columns, 'Done', true), [0]);
-  check('every match when asked', rowIndexesForStep(rows, columns, 'Done', true, true), [0, 2]);
-  check('in the table`s own order', rowIndexesForStep(rows, columns, 'Done', true, true)[0] < rowIndexesForStep(rows, columns, 'Done', true, true)[1], true);
-  check('no match is no rows, not row zero', rowIndexesForStep(rows, columns, 'Name', 'Nobody', true), []);
-  check('and nothing at all without a match column', rowIndexesForStep(rows, columns, '', 'x', true), []);
+  check('the first match only, by default', rowIndexesForStep(rows, columns, { matchColumn: 'Done', matchValue: true }).indexes, [0]);
+  check('every match when asked', rowIndexesForStep(rows, columns, { matchColumn: 'Done', matchValue: true, which: 'all' }).indexes, [0, 2]);
+  check('in the table`s own order', rowIndexesForStep(rows, columns, { matchColumn: 'Done', matchValue: true, which: 'all' }).indexes[0] < rowIndexesForStep(rows, columns, { matchColumn: 'Done', matchValue: true, which: 'all' }).indexes[1], true);
+  check('no match is no rows, not row zero', rowIndexesForStep(rows, columns, { matchColumn: 'Name', matchValue: 'Nobody', which: 'all' }).indexes, []);
+  check('and nothing at all without a match column', rowIndexesForStep(rows, columns, { matchColumn: '', matchValue: 'x', which: 'all' }).indexes, []);
 
   /**
    * The coercion is the half that must not drift, and it is why this is one
@@ -3296,10 +3296,10 @@ group('a row action can act on every matching row');
    * typed into a text field arrives as the STRING "true"; a number column
    * compares numerically so "20" finds 20.
    */
-  check('a boolean column matches the string "true"', rowIndexesForStep(rows, columns, 'Done', 'true', true), [0, 2]);
-  check('a number column matches numeric text', rowIndexesForStep(rows, columns, 'Score', '20', true), [1]);
-  check('a text column compares as text', rowIndexesForStep(rows, columns, 'Name', 'Ada', true), [0]);
-  check('an unknown column matches nothing rather than everything', rowIndexesForStep(rows, columns, 'Nope', '', true), []);
+  check('a boolean column matches the string "true"', rowIndexesForStep(rows, columns, { matchColumn: 'Done', matchValue: 'true', which: 'all' }).indexes, [0, 2]);
+  check('a number column matches numeric text', rowIndexesForStep(rows, columns, { matchColumn: 'Score', matchValue: '20', which: 'all' }).indexes, [1]);
+  check('a text column compares as text', rowIndexesForStep(rows, columns, { matchColumn: 'Name', matchValue: 'Ada', which: 'all' }).indexes, [0]);
+  check('an unknown column matches nothing rather than everything', rowIndexesForStep(rows, columns, { matchColumn: 'Nope', matchValue: '', which: 'all' }).indexes, []);
   check('coercion for a column nobody declared leaves the value alone', coerceForColumn('7', undefined), '7');
 
   /**
@@ -3313,16 +3313,16 @@ group('a row action can act on every matching row');
    * were computed against, and this checks the shape that guarantees it.
    */
   const changes = { Done: true };
-  const applied = rows.map((r, i) => (rowIndexesForStep(rows, columns, 'Done', false, true).includes(i) ? { ...r, ...changes } : r));
+  const applied = rows.map((r, i) => (rowIndexesForStep(rows, columns, { matchColumn: 'Done', matchValue: false, which: 'all' }).indexes.includes(i) ? { ...r, ...changes } : r));
   check('updating by mapping keeps each row`s own other columns', applied.map(r => r.Name), ['Ada', 'Grace', 'Katherine']);
   check('and changes only the mapped column', applied.map(r => r.Done), [true, true, true]);
   check('and leaves unmapped values alone', applied.map(r => r.Score), [10, 20, 30]);
 
   // Deleting several has to walk a defined order, or removing one shifts the next.
-  const doomed = new Set(rowIndexesForStep(rows, columns, 'Done', true, true));
+  const doomed = new Set(rowIndexesForStep(rows, columns, { matchColumn: 'Done', matchValue: true, which: 'all' }).indexes);
   const survivors = rows.filter((_, i) => !doomed.has(i));
   check('deleting every match removes exactly those', survivors.map(r => r.id), ['r2']);
-  const oneOnly = new Set(rowIndexesForStep(rows, columns, 'Done', true));
+  const oneOnly = new Set(rowIndexesForStep(rows, columns, { matchColumn: 'Done', matchValue: true }).indexes);
   check('and the default still removes exactly one', rows.filter((_, i) => !oneOnly.has(i)).map(r => r.id), ['r2', 'r3']);
 }
 
@@ -3717,7 +3717,12 @@ group('an existing wire can be read back into the popup');
   check('the match column', d.matchColumn, 'Email');
   check('where the match value comes from', d.matchValueSource, 'block');
   check('and which block', d.matchValueVal, 'inputBlock__e000000001');
-  check('every matching row', d.applyToAll, true);
+  /**
+   * An old step's `applyToAll: true` arrives as `which: 'all'`. That translation
+   * is the whole compatibility promise: somebody has a button that clears their
+   * cart, and it has to keep clearing it.
+   */
+  check('an old every-matching-row flag arrives as "all"', d.which, 'all');
   check('that it is conditional at all', d.isConditional, true);
   check('all/any', d.matchMode, 'any');
   check('both conditions', d.conds.length, 2);
@@ -3871,7 +3876,8 @@ group('the popup shows the wire it is open on, and nothing from the last one');
   check('one blank condition row, ready to fill', fresh.conds, [{ fieldId: '', operator: 'equals', value: '', expression: '' }]);
   check('no otherwise branch', fresh.elseEnabled, false);
   check('no column mappings', fresh.mappings, {});
-  check('not every-matching-row', fresh.applyToAll, false);
+  check('a new one acts on the first match only', fresh.which, 'first');
+  check('and has no match formula', fresh.matchFormula, '');
   check('not on page load', fresh.onPageLoad, false);
   check('no page chosen', fresh.goToPageId, '');
   check('no address', fresh.openUrlValue, '');
@@ -6544,6 +6550,15 @@ group('every migration in one paste, and that paste stays true');
   check('the bundle exists at all', existsSync(bundlePath), true);
 
   /**
+   * HOW MANY THERE ARE, STATED, because two groups below generate their checks
+   * by looping over this list. A directory listing that comes back short --
+   * this is a network mount, and it has been seen doing stranger things --
+   * would quietly remove checks rather than fail any, and the run would end
+   * green with a smaller number nobody was reading. Raise it when you add one.
+   */
+  check('every migration on disk is accounted for', migrationFiles().length, 9);
+
+  /**
    * A BUNDLE THAT HAS DRIFTED IS WORSE THAN NO BUNDLE: somebody pastes it and
    * believes they are up to date. Rebuilt in memory and compared, so an edited
    * migration with a stale bundle turns this red.
@@ -7313,6 +7328,117 @@ group('a list can be filtered and ordered by something worked out');
 }
 
 
+group('a step can act on the oldest row that matches');
+{
+  /**
+   * RANK 4 FROM docs/BUILT_ONE_TO_FIND_OUT.md, and the one behaviour on that
+   * site that felt like software rather than a page: cancelling a booking
+   * PROMOTES WHOEVER HAS BEEN WAITING LONGEST.
+   *
+   * Two things were missing and they are small.
+   *
+   * ONE CONDITION WAS NOT ENOUGH. A step matched one column against one value.
+   * A waiting list needs two at once -- waiting, AND for this class -- so it
+   * was not sayable however many controls sat beside it. Same wall the row
+   * filter hit, same answer: a formula.
+   *
+   * AND "THE OLDEST" HAD NO SPELLING. A step acted on the first match or all of
+   * them, and first-match was documented as an implementation detail rather
+   * than a promise. It is a promise now, and it rests on the server: rows come
+   * back `order by dr.created_at asc`, so the first match is the one that has
+   * been waiting longest. There is a check below that reads the SQL, because a
+   * promise resting on another file needs to break when that file does.
+   */
+  const columns = [{ name: 'ClassId', type: 'text' }, { name: 'Name', type: 'text' }, { name: 'Status', type: 'text' }] as any;
+  const bookings = [
+    { id: 'b1', ClassId: 'c3', Name: 'Ada', Status: 'confirmed' },
+    { id: 'b2', ClassId: 'c3', Name: 'Bo', Status: 'waitlist' },   // waiting longest
+    { id: 'b3', ClassId: 'c1', Name: 'Cy', Status: 'waitlist' },   // different class
+    { id: 'b4', ClassId: 'c3', Name: 'Dee', Status: 'waitlist' },  // waiting less long
+  ];
+  const step = (extra: any) => rowIndexesForStep(bookings, columns, extra);
+
+  check('PROMOTE THE LONGEST WAITER: two conditions and the oldest of them',
+    step({ matchFormula: `{{Status}} == "waitlist" and {{ClassId}} == "c3"` }).indexes, [1]);
+  check('and it is Bo, who has been waiting longest',
+    bookings[step({ matchFormula: `{{Status}} == "waitlist" and {{ClassId}} == "c3"` }).indexes[0]].Name, 'Bo');
+  check('the newest one is sayable too, for a stack rather than a queue',
+    step({ matchFormula: `{{Status}} == "waitlist" and {{ClassId}} == "c3"`, which: 'last' }).indexes, [3]);
+  check('and all of them, for "cancel the whole class"',
+    step({ matchFormula: `{{ClassId}} == "c3"`, which: 'all' }).indexes, [0, 1, 3]);
+  check('a formula matching nothing acts on nothing',
+    step({ matchFormula: `{{Status}} == "nonsense"`, which: 'all' }).indexes, []);
+
+  check('A FORMULA IS USED INSTEAD OF THE COLUMN MATCH, not alongside it',
+    step({ matchColumn: 'Status', matchValue: 'confirmed', matchFormula: `{{Status}} == "waitlist"` }).indexes, [1]);
+  check('and with no formula the column match is untouched',
+    step({ matchColumn: 'Status', matchValue: 'waitlist', which: 'all' }).indexes, [1, 2, 3]);
+
+  /**
+   * WHAT `applyToAll` MEANT STILL MEANS IT. A workflow saved before `which`
+   * existed changed exactly one row, or every row, and it has to keep doing
+   * whichever it did -- somebody has been pressing that button for weeks.
+   */
+  check('an old step with applyToAll still means every match',
+    step({ matchColumn: 'Status', matchValue: 'waitlist', applyToAll: true }).indexes, [1, 2, 3]);
+  check('an old step without it still means the first',
+    step({ matchColumn: 'Status', matchValue: 'waitlist' }).indexes, [1]);
+  check('and an explicit which wins over the old flag, since it was written later',
+    step({ matchColumn: 'Status', matchValue: 'waitlist', applyToAll: true, which: 'first' }).indexes, [1]);
+
+  /**
+   * A FORMULA THAT CANNOT BE WORKED OUT MATCHES NOTHING. This is the OPPOSITE
+   * of the repeater's rule, on purpose, and it is worth being loud about
+   * because the two rules sit in the same file.
+   *
+   * A filter that fails open shows too many rows and somebody sees it. A WRITE
+   * that fails open changes rows nobody asked it to change, and there is no
+   * undo. Showing is recoverable; writing is not.
+   */
+  const broken = step({ matchFormula: `{{Status}} ==`, which: 'all' });
+  check('A BROKEN MATCH FORMULA TOUCHES NO ROWS AT ALL', broken.indexes, []);
+  check('and says why, so the step has not just silently declined', !!broken.error, true);
+  check('which is the opposite of a repeater filter, which keeps every row',
+    visibleRows(bookings, { filterFormula: `{{Status}} ==` }).rows.length, 4);
+
+  /**
+   * THE POPUP HAS TO ACCEPT IT. whyItCannotWork refuses to create a wire that
+   * cannot possibly do anything, and it asked for a match COLUMN -- so a
+   * perfectly good waiting-list step was refused for not having one. That is
+   * the same "looks broken, is not" it exists to prevent, pointed backwards.
+   */
+  check('A FORMULA-ONLY STEP IS ALLOWED, since a formula says which row',
+    whyItCannotWork({
+      action: 'updateRow',
+      matchFormula: `{{Status}} == "waitlist"`,
+      mappings: { Status: { source: 'fixed', value: 'confirmed' } },
+    }), null);
+  check('and it still refuses one that changes nothing',
+    (whyItCannotWork({ action: 'updateRow', matchFormula: `{{Status}} == "waitlist"`, mappings: {} }) || '')
+      .includes('changes nothing'), true);
+  check('a delete needs only the formula',
+    whyItCannotWork({ action: 'deleteRow', matchFormula: `{{Status}} == "cancelled"` }), null);
+  check('and with neither formula nor column it still says so',
+    (whyItCannotWork({ action: 'deleteRow' }) || '').includes('WHICH row'), true);
+
+  /**
+   * THE PROMISE THAT LIVES IN ANOTHER FILE.
+   *
+   * "First means oldest" is only true while the server hands rows back in the
+   * order they were created. That is one `order by` in a migration, and nothing
+   * in TypeScript would notice it changing -- the waiting list would quietly
+   * start promoting whoever happened to be first in an unordered result, which
+   * on Postgres looks stable right up until it does not.
+   */
+  const rowsSql = readFileSync('supabase/migrations/0001_identity_and_ownership.sql', 'utf8');
+  check('THE SERVER STILL RETURNS ROWS OLDEST FIRST, which is what "oldest" rests on',
+    /order\s+by\s+dr\.created_at\s+asc/i.test(rowsSql), true);
+  const ownedSql = readFileSync('supabase/migrations/0004_row_ownership.sql', 'utf8');
+  check('and the per-visitor reader that replaces it says the same thing',
+    /order\s+by\s+dr\.created_at\s+asc/i.test(ownedSql), true);
+}
+
+
 group('a slot can contain a slot');
 {
   /**
@@ -7363,6 +7489,30 @@ group('a slot can contain a slot');
     fillSlots(`<p>{{calc: text("}}")}}</p>`, {}).includes('}}'), true);
 }
 
+/**
+ * HOW MANY CHECKS THERE ARE, WRITTEN DOWN.
+ *
+ * Not a vanity number. Two runs an hour apart reported 1737 and 1736 with
+ * nothing red either time -- one check had silently not run, and a suite that
+ * quietly shrinks is the worst possible failure here, because the summary line
+ * still says the reassuring thing. Everything else in this file exists to stop
+ * a wrong answer that looks like a right one; this stops a MISSING answer that
+ * looks like a right one.
+ *
+ * Several groups build their checks by looping over what is on disk, and this
+ * is a network mount. If this goes red and you did not add or remove a check,
+ * do not adjust the number -- find out which one did not run.
+ *
+ * Raise it in the same commit that adds the checks, the way the drift budget
+ * above is raised: a number changed where it can be seen in a diff.
+ */
+const EXPECTED_CHECKS = 1758;
 reachedTheEnd = true;
+if (passed + failed !== EXPECTED_CHECKS) {
+  failed++;
+  say(`\n  FAIL  THIS FILE RAN ${passed + failed - 1} CHECKS AND EXPECTED ${EXPECTED_CHECKS}`);
+  say(`          If you added or removed some, change EXPECTED_CHECKS in scripts/checks.ts.`);
+  say(`          If you did not, one of them silently did not run — find out which.`);
+}
 say(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

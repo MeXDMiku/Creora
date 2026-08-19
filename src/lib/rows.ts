@@ -461,15 +461,85 @@ export function matchingRowIndexes(
  * rewrite people's data the next time they pressed a button they had already
  * been pressing for weeks.
  */
+/** Which of the rows a step matched it should actually act on. */
+export type WhichMatches = 'first' | 'last' | 'all';
+
+export interface RowStepMatch {
+  matchColumn?: string | null;
+  matchValue?: any;
+  /**
+   * A row formula, in the same language as a repeater's filter. Wins over the
+   * column/value pair when set, for the same reason it wins there: the builder
+   * wrote the more specific thing.
+   *
+   * This is what makes "promote the longest waiter" sayable. One column against
+   * one value cannot express "waiting, and for THIS class" -- two conditions --
+   * however many controls sit beside it.
+   */
+  matchFormula?: string | null;
+  which?: WhichMatches;
+  /** What `which` used to be. `which` wins when both are set. */
+  applyToAll?: boolean;
+  tables?: TableScope;
+  now?: Date;
+}
+
+export interface RowStepMatchResult {
+  indexes: number[];
+  /** Set when the match formula could not be worked out. */
+  error: string | null;
+}
+
+/**
+ * Which rows a workflow step acts on.
+ *
+ * WHY 'first' IS THE OLDEST, and why that is a fact rather than a hope.
+ * Rows arrive from the server `order by dr.created_at asc` -- see
+ * `page_rows` in supabase/migrations/0001_identity_and_ownership.sql, and the
+ * check that reads that file so this sentence cannot quietly stop being true.
+ * So the first match is the one that has been waiting longest, which is the
+ * whole of a waiting list.
+ *
+ * A FORMULA THAT CANNOT BE WORKED OUT MATCHES NOTHING, which is the opposite of
+ * the repeater's rule and deliberately so. A filter that fails open shows too
+ * many rows and somebody sees it; a WRITE that fails open changes rows nobody
+ * asked it to change, and there is no undo. Showing is recoverable, writing is
+ * not.
+ */
 export function rowIndexesForStep(
   rows: Record<string, any>[] | undefined | null,
   columns: ColumnDef[] | undefined | null,
-  matchColumn: string | undefined | null,
-  wantedValue: any,
-  applyToAll?: boolean,
-): number[] {
-  const all = matchingRowIndexes(rows, columns, matchColumn, wantedValue);
-  return applyToAll ? all : all.slice(0, 1);
+  match: RowStepMatch,
+): RowStepMatchResult {
+  const list = Array.isArray(rows) ? rows : [];
+  const which: WhichMatches = match.which || (match.applyToAll ? 'all' : 'first');
+  const formula = String(match.matchFormula ?? '').trim();
+
+  let found: number[];
+  if (formula) {
+    found = [];
+    let error: string | null = null;
+    list.forEach((row, index) => {
+      const answer = rowFormulaValue(row, formula, {
+        rowNumber: index + 1,
+        tables: match.tables,
+        now: match.now,
+      });
+      if (answer.error) {
+        if (!error) error = answer.error;
+        return;
+      }
+      if (truthy(answer.value)) found.push(index);
+    });
+    if (error) return { indexes: [], error };
+  } else {
+    if (!match.matchColumn) return { indexes: [], error: null };
+    found = matchingRowIndexes(list, columns, match.matchColumn, match.matchValue);
+  }
+
+  if (which === 'all') return { indexes: found, error: null };
+  if (which === 'last') return { indexes: found.slice(-1), error: null };
+  return { indexes: found.slice(0, 1), error: null };
 }
 
 /**

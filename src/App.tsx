@@ -410,7 +410,8 @@ function ConnectionPopup({ editor }: { editor: any }) {
     setMatchColumn(d.matchColumn)
     setMatchValueSource(d.matchValueSource)
     setMatchValueVal(d.matchValueVal)
-    setApplyToAll(d.applyToAll)
+    setWhich(d.which)
+    setMatchFormula(d.matchFormula)
     setIsConditional(d.isConditional)
     setMatchMode(d.matchMode)
     setConds(d.conds)
@@ -476,8 +477,14 @@ function ConnectionPopup({ editor }: { editor: any }) {
   const [matchColumn, setMatchColumn] = useState<string>('')
   const [matchValueSource, setMatchValueSource] = useState<'fixed' | 'block'>('fixed')
   const [matchValueVal, setMatchValueVal] = useState<string>('')
-  // Off by default, and it has to stay that way -- see WorkflowStep.applyToAll.
-  const [applyToAll, setApplyToAll] = useState(false)
+  /**
+   * 'first' by default, and it has to stay that way: a step saved before any of
+   * this existed changed exactly one row, and turning that into "all of them"
+   * would rewrite data the next time somebody pressed a button they had been
+   * pressing for weeks.
+   */
+  const [which, setWhich] = useState<'first' | 'last' | 'all'>('first')
+  const [matchFormula, setMatchFormula] = useState('')
 
   useEffect(() => {
     if (isDatabaseBlock && databaseColumns.length > 0) {
@@ -554,6 +561,7 @@ function ConnectionPopup({ editor }: { editor: any }) {
     mappings,
     matchColumn,
     matchValue: { source: matchValueSource, value: matchValueVal },
+    matchFormula,
     webhookUrl,
     value,
   })
@@ -691,7 +699,8 @@ function ConnectionPopup({ editor }: { editor: any }) {
         // no mappings, no match column — it just takes the table as it stands
       } else if (action === 'updateRow' || action === 'deleteRow') {
         stepStep.matchColumn = matchColumn
-        if (applyToAll) stepStep.applyToAll = true
+        stepStep.which = which
+        if (matchFormula.trim()) stepStep.matchFormula = matchFormula.trim()
         stepStep.matchValue = {
           source: matchValueSource,
           value: matchValueVal || (canvasBlocks[0]?.id || '')
@@ -1062,19 +1071,42 @@ function ConnectionPopup({ editor }: { editor: any }) {
             </div>
 
             {/*
-              The whole reason "delete all completed" and "mark everything as
-              read" were impossible: the action found one row and stopped.
-              Worded as what it does rather than as a flag name, and it says how
-              many it currently matches so nobody finds out by pressing it.
+              Two conditions at once, which one column against one value can
+              never be. "Waiting, AND for this class" is the whole of a waiting
+              list, and it was not sayable however many controls sat here.
             */}
-            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: 500, color: '#475569', cursor: 'pointer', marginTop: '2px' }}>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '11px', fontWeight: 500, color: '#475569', marginTop: '2px' }}>
+              Or a formula, if one column is not enough
               <input
-                type="checkbox"
-                checked={applyToAll}
-                onChange={(e) => setApplyToAll(e.target.checked)}
-                style={{ cursor: 'pointer' }}
+                type="text"
+                value={matchFormula}
+                onChange={(e) => setMatchFormula(e.target.value)}
+                placeholder={'{{Status}} == "waitlist" and {{ClassId}} == "c3"'}
+                style={{ ...inputStyle, padding: '4px 6px', fontSize: '11px', height: '24px', fontFamily: 'ui-monospace, monospace' }}
               />
-              {action === 'deleteRow' ? 'Remove every matching row' : 'Change every matching row'}
+              <span style={{ fontWeight: 400, fontSize: '10px', color: '#64748b', lineHeight: 1.4 }}>
+                Used instead of the column above. A formula that cannot be worked
+                out changes nothing at all — a write that guesses cannot be undone.
+              </span>
+            </label>
+
+            {/*
+              Which of the matches. "The first" is the OLDEST, because rows come
+              back in the order they were created -- that is what makes
+              "promote whoever has been waiting longest" one step. Worded as
+              what it does rather than as a flag name.
+            */}
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '11px', fontWeight: 500, color: '#475569', marginTop: '2px' }}>
+              {action === 'deleteRow' ? 'Remove' : 'Change'}
+              <select
+                value={which}
+                onChange={(e) => setWhich(e.target.value as any)}
+                style={{ ...selectStyle, padding: '2px 24px 2px 6px', fontSize: '11px', height: '24px' }}
+              >
+                <option value="first">the first match — the one waiting longest</option>
+                <option value="last">the last match — the newest</option>
+                <option value="all">every matching row</option>
+              </select>
             </label>
 
             {matchValueSource === 'fixed' ? (

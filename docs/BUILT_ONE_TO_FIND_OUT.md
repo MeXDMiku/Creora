@@ -98,19 +98,51 @@ That is a relation, built out of parts that already exist.
 
 Ordered by how many of the fifteen it unblocks.
 
-| rank | missing | unblocks | size |
-| :--- | :--- | :--- | :--- |
-| 1 | **the calling row inside a table condition** | 6 of the 15 | **small** |
-| 2 | **sort and filter a repeater by a formula** | 2 | small |
-| 3 | **per-visitor rows** — migration 0004 | 2 | written, unrun |
-| 4 | **act on the oldest matching row** | the waitlist promotion | small |
-| 5 | **uniqueness across two columns** | one person, one booking | small, extends 0008 |
-| 6 | **show something by role** | the owner's dashboard | medium |
-| 7 | **style driven by a value** | full/low/open cards | medium, and touches layout |
+| rank | missing | unblocks | size | state |
+| :--- | :--- | :--- | :--- | :--- |
+| 1 | **the calling row inside a table condition** | 6 of the 15 | **small** | **done** |
+| 2 | **sort and filter a repeater by a formula** | 2 | small | **done** |
+| 3 | **per-visitor rows** — migration 0004 | 2 | written | **needs the database** |
+| 4 | **act on the oldest matching row** | the waitlist promotion | small | **done** |
+| 5 | **uniqueness across two columns** | one person, one booking | small, extends 0008 | needs the database |
+| 6 | **show something by role** | the owner's dashboard | medium | |
+| 7 | **style driven by a value** | full/low/open cards | medium, and touches layout | |
 
 Ranks 1, 2, 4 and 5 are all small, and together they are eleven of the fifteen.
 None of them is a new block type. **The engine does not need more nodes; it
 needs the ones it has to be able to see each other.**
+
+### What shipped, 19 Aug
+
+Nine of the fifteen behaviours are now sayable, in the spelling this document
+predicted:
+
+```
+who teaches it     {{calc: joinOf("Instructors", "Name", '{{Row id}} == InstructorId')}}
+places left        {{calc: Capacity - countOf("Bookings", '{{ClassId}} == RowId')}}
+star rating        {{calc: avgOf("Reviews", "Rating", '{{ClassId}} == RowId')}}
+revenue            sumOf("Classes", "Price", '{{Row id}} == ClassId')   per booking
+hide full          keep rows where  {{Capacity}} - countOf("Bookings", '…') > 0
+best rated first   order by         avgOf("Reviews", "Rating", '{{ClassId}} == RowId')
+promote the waiter change  {{Status}} == "waitlist" and {{ClassId}} == "c3"  → the first match
+```
+
+Three bugs came out of building it, and none of them would have been found by
+reading the code:
+
+- a slot inside a quoted condition was being rewritten by the outer scan, so
+  `hide full` compared nothing to something and kept every row — no error
+- the invented name a slot is rewritten to was a constant, so a value of that
+  name became `X == X` and matched everything
+- a row's id was spelled `Row id`, with a space, and could not be typed in an
+  expression at all — the whole feature would have looked right in the checks
+  and failed on a page
+
+**Ranks 3 and 5 are not code.** Both are migrations that exist and have never
+been run against the database. Nothing more can be done about them from here.
+
+Rank 6 (show by role) and rank 7 (style driven by a value) are next, and both
+touch the parts of the app this project has deliberately left until last.
 
 ---
 

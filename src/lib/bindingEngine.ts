@@ -617,7 +617,9 @@ export function executeWorkflow(
           const currentRows = targetState?.rows || [];
 
           const matchCol = step.matchColumn;
-          if (!matchCol) break;
+          // A formula is a complete answer on its own, so a step that has one
+          // needs no column.
+          if (!matchCol && !String(step.matchFormula ?? '').trim()) break;
 
           let matchVal: any = '';
           if (step.matchValue) {
@@ -637,9 +639,25 @@ export function executeWorkflow(
            * one side and a delete removes nothing while an update changes the
            * wrong row.
            */
-          const matchedIndexes = rowIndexesForStep(
-            currentRows, columns, matchCol, matchVal, step.applyToAll
-          );
+          const matched = rowIndexesForStep(currentRows, columns, {
+            matchColumn: matchCol,
+            matchValue: matchVal,
+            matchFormula: step.matchFormula,
+            which: step.which,
+            applyToAll: step.applyToAll,
+            tables: tableScope(store),
+          });
+          if (matched.error) {
+            /**
+             * The failure is put where a person will meet it. A step that
+             * cannot work out which rows it means has not "done nothing" -- it
+             * has silently declined to do the thing the button promised, and
+             * the only evidence is this line.
+             */
+            store.set(targetAtom, { ...targetState, error: matched.error });
+            break;
+          }
+          const matchedIndexes = matched.indexes;
           if (!matchedIndexes.length) break;
 
           /**
@@ -802,7 +820,9 @@ export function executeWorkflow(
           const currentRows = targetState?.rows || [];
 
           const matchCol = step.matchColumn;
-          if (!matchCol) break;
+          // A formula is a complete answer on its own, so a step that has one
+          // needs no column.
+          if (!matchCol && !String(step.matchFormula ?? '').trim()) break;
 
           let matchVal: any = '';
           if (step.matchValue) {
@@ -822,9 +842,25 @@ export function executeWorkflow(
            * one side and a delete removes nothing while an update changes the
            * wrong row.
            */
-          const matchedIndexes = rowIndexesForStep(
-            currentRows, columns, matchCol, matchVal, step.applyToAll
-          );
+          const matched = rowIndexesForStep(currentRows, columns, {
+            matchColumn: matchCol,
+            matchValue: matchVal,
+            matchFormula: step.matchFormula,
+            which: step.which,
+            applyToAll: step.applyToAll,
+            tables: tableScope(store),
+          });
+          if (matched.error) {
+            /**
+             * The failure is put where a person will meet it. A step that
+             * cannot work out which rows it means has not "done nothing" -- it
+             * has silently declined to do the thing the button promised, and
+             * the only evidence is this line.
+             */
+            store.set(targetAtom, { ...targetState, error: matched.error });
+            break;
+          }
+          const matchedIndexes = matched.indexes;
           if (!matchedIndexes.length) break;
 
           /**

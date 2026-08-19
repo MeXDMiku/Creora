@@ -87,6 +87,8 @@ export interface StepDraft {
   mappings?: Record<string, { source: 'fixed' | 'block'; value: string }>;
   matchColumn?: string;
   matchValue?: { source: 'fixed' | 'block'; value: string };
+  /** A formula deciding which rows. Used instead of the column/value pair. */
+  matchFormula?: string;
   webhookUrl?: string;
   value?: string;
 }
@@ -113,6 +115,22 @@ export function whyItCannotWork(draft: StepDraft): string | null {
   }
 
   if (draft.action === 'updateRow' || draft.action === 'deleteRow') {
+    /**
+     * A formula is a complete answer to "which rows", so the two complaints
+     * below do not apply to it. Without this, the popup refused to create a
+     * perfectly good waiting-list step because no COLUMN was chosen -- the
+     * exact "looks broken, is not" that whyItCannotWork exists to prevent,
+     * pointed the wrong way.
+     */
+    if (String(draft.matchFormula ?? '').trim()) {
+      if (draft.action === 'updateRow') {
+        const mapped = Object.values(draft.mappings || {}).filter(filled);
+        if (mapped.length === 0) {
+          return 'It finds the row and then changes nothing. Fill in at least one column.';
+        }
+      }
+      return null;
+    }
     if (!draft.matchColumn) {
       return 'Nothing says WHICH row to change. Choose a column to find it by.';
     }
@@ -181,7 +199,14 @@ export interface WireDraft {
   matchColumn: string;
   matchValueSource: 'fixed' | 'block';
   matchValueVal: string;
-  applyToAll: boolean;
+  matchFormula: string;
+  /**
+   * Which of the matches to act on. Replaced `applyToAll`, which could only say
+   * one-or-all and had no way to say "the oldest" -- the whole of a waiting
+   * list. An old step's flag is read into this on the way in, so nothing saved
+   * before it existed changes what it does.
+   */
+  which: 'first' | 'last' | 'all';
   isConditional: boolean;
   matchMode: 'all' | 'any';
   conds: { fieldId: string; operator: string; value: string; expression?: string }[];
@@ -243,7 +268,10 @@ export function draftFromWorkflow(workflow: any): WireDraft {
     matchColumn: str(step.matchColumn),
     matchValueSource: step.matchValue?.source === 'block' ? 'block' : 'fixed',
     matchValueVal: str(step.matchValue?.value),
-    applyToAll: step.applyToAll === true,
+    matchFormula: str(step.matchFormula),
+    which: step.which === 'last' || step.which === 'all' || step.which === 'first'
+      ? step.which
+      : (step.applyToAll === true ? 'all' : 'first'),
     isConditional: conds.length > 0,
     matchMode: step.match === 'any' ? 'any' : 'all',
     conds: conds.length ? conds : [{ fieldId: '', operator: 'equals', value: '', expression: '' }],
@@ -289,7 +317,8 @@ export function defaultWireDraft(): WireDraft {
     matchColumn: '',
     matchValueSource: 'fixed',
     matchValueVal: '',
-    applyToAll: false,
+    matchFormula: '',
+    which: 'first',
     isConditional: false,
     matchMode: 'all',
     conds: [{ fieldId: '', operator: 'equals', value: '', expression: '' }],

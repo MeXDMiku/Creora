@@ -121,6 +121,26 @@ export interface WorkflowStep {
    * weeks.
    */
   applyToAll?: boolean;
+  /**
+   * A formula deciding which rows this step acts on, in the same language as a
+   * repeater's filter: `{{Status}} == "waitlist" and {{ClassId}} == "c3"`.
+   * Used instead of matchColumn/matchValue when set.
+   *
+   * One column against one value cannot say "waiting, AND for this class", so
+   * the whole of a waiting list was unsayable. A formula that cannot be worked
+   * out matches NOTHING — a write that fails open changes rows nobody asked it
+   * to, and there is no undo.
+   */
+  matchFormula?: string;
+  /**
+   * Which of the matches to act on. `first` is the OLDEST, because rows arrive
+   * oldest-first from the server — that is what makes "promote whoever has been
+   * waiting longest" one step rather than a query language.
+   *
+   * Absent means the old behaviour: `applyToAll` if it is set, otherwise the
+   * first match.
+   */
+  which?: 'first' | 'last' | 'all';
   /** Where a sendWebhook step posts to. */
   webhookUrl?: string;
   // --- Otherwise: what to do when the conditions do NOT pass ---
