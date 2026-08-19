@@ -9,7 +9,8 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "typecheck": "tsc -b",
-    "check": "node --experimental-strip-types --import ./scripts/register.mjs scripts/checks.ts"
+    "check": "node --experimental-strip-types --import ./scripts/register.mjs scripts/checks.ts",
+    "control": "node scripts/control.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.0",

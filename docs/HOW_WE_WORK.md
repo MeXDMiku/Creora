@@ -258,3 +258,62 @@ the wrong line — but on this mount there is a fourth, and it is the boring one
 
 A batch is still worth running; it is only the green results in it that need
 repeating.
+
+`scripts/control.mjs` now flushes each write before starting the subprocess, so
+this particular explanation should be retired rather than lived with. Treat a
+green control as suspicious for the other three reasons.
+
+
+## The instrument lied: `'passed,' in output`
+
+The controls above used to be run by a throwaway script that decided whether a
+run had finished by asking whether the output contained `'passed,'`.
+
+That string is also in the **name of a check**:
+
+> `and it is negative once it has passed, which is what overdue means`
+
+So a suite that **crashed** — no tally, no exit code read, half the checks never
+run — came back as *finished, zero failed*. Two controls were cleared by that
+green. One of them was hiding a crash and the other was hiding a check that
+could not fail.
+
+The rule this leaves behind is not "be careful with substrings". It is:
+
+**A summary line must be matched as a line, anchored, and its absence must be
+its own outcome.**
+
+```js
+const TALLY = /^(\d+) passed, (\d+) failed/m;   // ^ and m are the whole point
+```
+
+`npm run control` does this, and reports `NO TALLY AT ALL` as a distinct
+result that can never be read as a pass.
+
+Two things came out of that crash which are worth keeping:
+
+- **`ran()` in `scripts/checks.ts`.** `check()` takes an already-worked-out
+  value, so a check whose expression throws does not go red — it takes the
+  process down before `check` is called, and every check after it never runs. A
+  crash says *something moved*. A FAIL says *which sentence stopped being true*.
+  Anywhere an expression is allowed to be wrong, wrap it.
+- **The suite cannot exit without a tally.** A `process.on('exit')` guard prints
+  one marked `SUITE STOPPED EARLY` if the last line was never reached, so a
+  crash is countable rather than silent.
+
+
+## Write the control before you believe the check
+
+Two of the checks written for the relation work were caught by their own
+controls and neither was caught by reading them:
+
+- `THE TESTED ROW WINS OVER THE CALLER WHERE BOTH HAVE THE NAME` passed with the
+  precedence **inverted**. The sentence described a contest that cannot happen:
+  a `{{Column}}` slot is rewritten to an invented name before anything resolves,
+  so there is nothing for a caller to shadow it with. The check was replaced
+  with the guarantee that is actually true, which is stronger.
+- Writing the replacement turned up a real bug in the same three lines. The
+  invented name was a fixed `__w0`, so a caller value of that name got
+  overwritten and `'{{Status}} == __w0'` quietly became `Status == Status` —
+  every row matched, and the answer came back as a number. Found by asking
+  *what would make this check fail?* rather than *does this check pass?*
