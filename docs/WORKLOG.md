@@ -308,6 +308,68 @@ None of them found by reading:
 half real gaps, half checks that were hollow, overclaiming, or aimed at the
 wrong line.
 
+### The audit was pointing at finished work
+
+1,495 checks.
+
+`CAPABILITIES.md` was written on 13 Aug. By 19 Aug it named three things as
+missing that had all shipped — page parameters (its rank 1, and the whole of its
+Part 3), more input types, a date picker. **For six days the project's own
+planning document pointed at work that was already done**, which is precisely
+what its own opening paragraph warns about.
+
+Third audit written, and this time the counts are **asserted against the code**.
+Adding a block type or an action without updating the file turns the checks red.
+Only the counts — whether "a blog is possible now" is a judgement about walking a
+real site, and Part 5 says in its own words that nothing holds that up.
+
+It earned itself within the hour: adding migration 0008 without updating the file
+turned it red.
+
+### What the walk found: two people could book the same slot
+
+Booking gained dates, a picker and "must be in the future" — and **nothing
+anywhere enforced that a value is used once.** Not a column, not a condition, not
+the database. A slot could be booked twice and the page showed both as
+successful, because both were.
+
+A workflow cannot answer this. It can only check the rows the visitor's *browser*
+happens to hold — the wrong question asked of the wrong copy.
+
+Migration 0008: a column marked *used once*, enforced on insert and on update.
+
+**The lock is the whole difference between a rule and a hope.** Check-then-insert
+is not a guarantee: two transactions can both look, both find nothing, and both
+insert — the exact failure, merely made rarer and harder to reproduce. A
+guarantee that holds only when nobody is racing is not one, and shipping it as
+though it were would be worse than shipping nothing, because somebody would rely
+on it.
+
+### Three more drifts, and then the budget
+
+The **List block's rows** were duplicated character for character in both
+renderers — and both copies showed a date as `2026-08-19T18:30:00.000Z`. The
+**history chart's geometry** was forty lines of arithmetic in two places,
+unchecked in both. The **timer's whole behaviour** existed twice, and it is the
+only block that acts on its own: a workflow could fire on a published page and
+not while building it.
+
+Then the leverage move. `scripts/rendererDrift.ts` counts how much of the editor
+is written out a second time, and the checks hold it to a **budget of 131 lines**
+— all presentation now. It prints on every run, may shrink, and cannot grow
+without somebody changing the number where a diff shows it.
+
+### And one I introduced, an hour later
+
+The shared timer hook read its state once instead of subscribing. It **worked** —
+because both callers happened to subscribe to the same atom for their styling, so
+the component re-rendered and the hook re-read on the way past. A trap, not a
+bug: it would have stopped working for whoever used the hook next, and the timer
+would simply never notice it had been started.
+
+Extracting shared behaviour is supposed to make the next caller safe. That
+version made the next caller the one who finds out.
+
 ### Notes worth keeping
 
 - **An example printed in the UI is a promise.** The repeater panel prints a
