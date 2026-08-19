@@ -46,8 +46,8 @@ export function HealthPanel({ onClose }: { onClose: () => void }) {
   const problems = useMemo(() => {
     const states: Record<string, any> = {}
     for (const id of blockIds) states[id] = store.get(blockRuntimeAtom(id))
-    return sortProblems(diagnosePage({ blockIds, states, workflows, formulas, connections, pages: pagesList }))
-  }, [blockIds, workflows, formulas, connections, store])
+    return sortProblems(diagnosePage({ blockIds, states, workflows, formulas, connections, pages: pagesList, isPublished }))
+  }, [blockIds, workflows, formulas, connections, store, isPublished])
 
   const rowCount = useMemo(() => {
     let total = 0

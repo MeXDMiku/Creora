@@ -6653,5 +6653,99 @@ group('the whole journey: click a row, arrive, see that row');
 }
 
 
+
+group('a webhook address on a published page is said out loud');
+{
+  /**
+   * THE AUDIT'S ONE SECURITY HOLE, and the one thing on its list that cannot be
+   * closed from here.
+   *
+   * `get_page` returns a page's workflows WHOLE, and it has to: the wire is
+   * fired by the visitor's browser, so the address has to reach the browser.
+   * No arrangement of client-side code keeps it private -- it needs somewhere
+   * server-side to send from, which this project does not have yet.
+   *
+   * So this does not fix it. It says it out loud. A builder who pasted a Zapier
+   * or Discord hook in there has no way to find out from anywhere else, and
+   * naming a trade-off nobody can close is the honest half of having made it.
+   */
+  const BUTTON = 'buttonBlock__wh00000001';
+  const base = { value: '', visible: true, disabled: false, loading: false, error: null };
+  const facts = (isPublished: boolean, url = 'https://hooks.zapier.com/hooks/catch/123456/abcdefghijklmnop/') => ({
+    blockIds: [BUTTON],
+    states: { [BUTTON]: { ...base, blockName: 'Submit' } },
+    workflows: [{ id: 'w1', sourceId: BUTTON, sourceEvent: 'onClick', steps: [
+      { targetId: BUTTON, action: 'sendWebhook', webhookUrl: url },
+    ] }],
+    formulas: [], connections: [], pages: [{ id: 'page-1' }], isPublished,
+  } as any);
+  const leaks = (f: any) => diagnosePage(f).filter((p: any) => p.title.includes('this page is published'));
+
+  check('A PUBLISHED PAGE WITH A WEBHOOK ON IT IS REPORTED', leaks(facts(true)).length, 1);
+  check('and it names the block that sends', leaks(facts(true))[0].title.includes('"Submit"'), true);
+  check('a warning, not broken — it works exactly as intended',
+    leaks(facts(true))[0].severity, 'warning');
+  check('the message says what somebody could actually do with it',
+    leaks(facts(true))[0].detail.includes('send to it themselves'), true);
+  check('and why it is there rather than hidden',
+    leaks(facts(true))[0].detail.includes('the browser is what sends it'), true);
+
+  /**
+   * The address is SHORTENED. They are long and often carry a token in the
+   * middle, and printing the whole thing puts the secret on screen for whoever
+   * is standing behind them.
+   */
+  const shown = leaks(facts(true))[0].title;
+  check('THE ADDRESS IS TRUNCATED, not printed whole into the panel',
+    shown.includes('abcdefghijklmnop'), false);
+  check('but enough of it shows to recognise which one', shown.includes('hooks.zapier.com'), true);
+  check('a short address is shown whole, since there is nothing to hide in it',
+    leaks(facts(true, 'https://x.dev/h')).length === 1 && leaks(facts(true, 'https://x.dev/h'))[0].title.includes('https://x.dev/h'), true);
+
+  /**
+   * A PRIVATE PAGE IS NOT ACCUSED. Telling somebody their unpublished page is
+   * leaking would train them to ignore the panel, which costs more than this
+   * finding is worth.
+   */
+  check('A PAGE NOBODY CAN OPEN IS NOT LEAKING ANYTHING', leaks(facts(false)).length, 0);
+  const unknown = { ...facts(true) };
+  delete (unknown as any).isPublished;
+  check('and a caller that did not say gets no finding rather than a wrong one',
+    leaks(unknown).length, 0);
+
+  check('a wire with no address is not reported',
+    leaks(facts(true, '')).length, 0);
+  check('nor is a page with no webhook wires at all',
+    diagnosePage({ blockIds: [BUTTON], states: { [BUTTON]: { ...base, blockName: 'Submit' } },
+      workflows: [{ id: 'w1', sourceId: BUTTON, sourceEvent: 'onClick', steps: [{ targetId: BUTTON, action: 'increment' }] }],
+      formulas: [], connections: [], pages: [{ id: 'page-1' }], isPublished: true } as any)
+      .filter((p: any) => p.title.includes('this page is published')).length, 0);
+
+  /**
+   * One finding per ADDRESS, not per wire: five buttons pointed at the same
+   * hook is one thing to know, and five copies of it buries everything else.
+   */
+  const twice = {
+    ...facts(true),
+    workflows: [
+      { id: 'w1', sourceId: BUTTON, sourceEvent: 'onClick', steps: [{ targetId: BUTTON, action: 'sendWebhook', webhookUrl: 'https://x.dev/h' }] },
+      { id: 'w2', sourceId: BUTTON, sourceEvent: 'onChange', steps: [{ targetId: BUTTON, action: 'sendWebhook', webhookUrl: 'https://x.dev/h' }] },
+    ],
+  } as any;
+  check('ONE FINDING PER ADDRESS, not per wire', leaks(twice).length, 1);
+  const two = {
+    ...facts(true),
+    workflows: [
+      { id: 'w1', sourceId: BUTTON, sourceEvent: 'onClick', steps: [{ targetId: BUTTON, action: 'sendWebhook', webhookUrl: 'https://x.dev/a' }] },
+      { id: 'w2', sourceId: BUTTON, sourceEvent: 'onChange', steps: [{ targetId: BUTTON, action: 'sendWebhook', webhookUrl: 'https://x.dev/b' }] },
+    ],
+  } as any;
+  check('but two different addresses are two things to know', leaks(two).length, 2);
+
+  // And the panel has to actually pass the fact through, or none of this runs.
+  check('the panel tells the diagnosis whether the page is live',
+    readFileSync('src/components/HealthPanel.tsx', 'utf8').includes('isPublished }'), true);
+}
+
 say(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

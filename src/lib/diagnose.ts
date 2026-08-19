@@ -52,6 +52,19 @@ export interface PageFacts {
    * panel exists to catch, reproduced inside the panel itself.
    */
   pages: { id: string; name?: string }[];
+  /**
+   * Whether this page is live.
+   *
+   * Only one finding uses it, and that finding cannot be made without it: a
+   * webhook address is a private thing on a page nobody can open and a public
+   * thing the moment it is published, and the code cannot tell those apart by
+   * looking at the wire.
+   *
+   * Optional, unlike `pages`, and for the opposite reason: a caller that does
+   * not know gets FEWER findings rather than a wrong one, and telling somebody
+   * their private page is leaking would train them to ignore the panel.
+   */
+  isPublished?: boolean;
 }
 
 const IDENTIFIER = /[A-Za-z_$][A-Za-z0-9_$]*/g;
@@ -432,6 +445,48 @@ export function diagnosePage(facts: PageFacts): Problem[] {
           'That row sorts in the wrong place, and anything asking how many days away it is will refuse to run.',
         blockId,
       });
+    }
+  }
+
+  /**
+   * A webhook address on a page anyone can open.
+   *
+   * `get_page` returns a page's workflows WHOLE, and it has to: the wire is
+   * fired by the visitor's browser, so the address has to reach the browser.
+   * There is no arrangement of client-side code that keeps it private -- it
+   * needs somewhere server-side to send from, which this project does not have
+   * yet.
+   *
+   * SO THIS DOES NOT FIX IT. It says it out loud. The address is readable by
+   * anyone who opens the page, and a builder who pasted a Zapier or Discord
+   * hook in there has no way to find that out from anywhere else. Naming a
+   * trade-off nobody can close is the honest half of it -- the same choice
+   * migration 0005 makes about wires pointing at a deleted page.
+   *
+   * A warning rather than broken, because it works exactly as intended. What is
+   * wrong is what it costs, and only the builder can weigh that.
+   */
+  if (facts.isPublished) {
+    const seen = new Set<string>();
+    for (const workflow of facts.workflows || []) {
+      for (const step of workflow.steps || []) {
+        if (step.action !== 'sendWebhook') continue;
+        const url = String((step as any).webhookUrl || '').trim();
+        if (!url || seen.has(url)) continue;
+        seen.add(url);
+
+        // Shortened: an address is often long and often has a token in the
+        // middle of it, and printing the whole thing in a panel puts the secret
+        // on screen for anyone standing behind them.
+        const shown = url.length > 40 ? `${url.slice(0, 40)}…` : url;
+        problems.push({
+          severity: 'warning',
+          title: `"${nameOf(facts, workflow.sourceId)}" sends to ${shown}, and this page is published`,
+          detail:
+            'Anyone who opens the page can read that address and send to it themselves. It travels to the browser because the browser is what sends it — there is nowhere else yet.',
+          blockId: workflow.sourceId,
+        });
+      }
     }
   }
 

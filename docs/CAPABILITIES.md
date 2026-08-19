@@ -159,9 +159,15 @@ Five is too many to be a queue. It is the single largest gap between what this
 document claims and what a visitor would meet.
 
 **A published page still leaks its webhook URLs.** `get_page` returns the
-workflows whole, so anything a builder put in a `sendWebhook` step is readable by
-any visitor. That is rank 3's job and it is the one thing here that is a security
-hole rather than a missing feature.
+workflows whole, and it has to: the wire is fired by the visitor's browser, so
+the address has to reach the browser. No arrangement of client-side code closes
+this — it needs somewhere server-side to send from, which is rank 3.
+
+**The Health panel now says so out loud**, naming the block and truncating the
+address so the panel does not put the token on screen. That does not fix it. A
+builder who pasted a Zapier or Discord hook had no way to find out from anywhere
+else, and naming a trade-off nobody can close is the honest half of having made
+it.
 
 ---
 
