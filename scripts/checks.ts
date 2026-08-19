@@ -55,6 +55,7 @@ import { interpretSave, shouldKeepAutosaving, PageStamps } from '../src/lib/save
 import { describeRowWriteError, withoutRow } from '../src/lib/rowWrite';
 import { chartBars, MIN_BAR_HEIGHT } from '../src/lib/chartBars';
 import { timerStep, timerResetValue } from '../src/lib/useTimer';
+import { duplicatedRuns, duplicatedLineCount } from './rendererDrift';
 import { visibleRows, rowSlots, compareCells, slotNamesFor, rowMatchesSearch, MAX_RENDERED_ROWS, rowIndexesForStep, coerceForColumn, rowMatchesFormula, columnsUsedByFormula, calcExampleFor, calcExampleWithFilter, shareExampleFor, isoDate, isoToDateInput, dateInputToIso, displayCell, COLUMN_TYPE_LABELS, listRowLines, listIsEmpty } from '../src/lib/rows';
 import {
   parseSlot,
@@ -6007,6 +6008,60 @@ group('a timer behaves the same while building and once published');
     /useTimer\(\{ blockId: block\.id, store \}\)/.test(pubTimerSrc), true);
   check('and the data source block keeps its own refresh, which is not a timer',
     /setInterval\(run, secs \* 1000\)/.test(wholePub), true);
+}
+
+
+group('the editor and the published page are not drifting apart again');
+{
+  /**
+   * NINE SEPARATE BUGS IN THIS PROJECT HAVE BEEN THE SAME BUG: a decision made
+   * in two places that stopped agreeing. Each was found by hand, months apart,
+   * and each was invisible until somebody happened to look at both copies at
+   * once -- a chart drawn to different arithmetic, a timer firing different
+   * events, a cell shown raw on one side and formatted on the other.
+   *
+   * Finding the tenth by hand is not a plan. This measures the surface, so a
+   * new copy has to be argued for rather than merely not noticed.
+   *
+   * A BUDGET, NOT A TARGET OF ZERO. Two boxes with the same rounded corners are
+   * the same on purpose, and pulling every matching style into a shared
+   * component would make both harder to read for no gain. What is left is
+   * presentation; the arithmetic, the events, the formatting and the row
+   * selection have all been pulled out.
+   *
+   * IT MAY SHRINK. IT MAY NOT GROW without somebody deciding it should — and
+   * changing this number is that decision, made where it can be seen in a diff.
+   */
+  const BUDGET = 131;
+
+  const runs = duplicatedRuns();
+  const total = duplicatedLineCount();
+
+  check('THE EDITOR IS NOT BEING COPIED INTO THE PUBLISHED RENDERER AGAIN',
+    total <= BUDGET, true);
+  // Reported, not silent: a budget nobody can see the shape of is a number
+  // that drifts upward one line at a time.
+  if (total !== BUDGET) {
+    say(`        (duplication now ${total} lines across ${runs.length} runs; budget ${BUDGET})`);
+  }
+
+  check('and the scan is actually finding things, or the budget proves nothing',
+    runs.length > 0, true);
+  check('the biggest remaining copy is presentation, not a decision',
+    runs[0].lines <= 24, true);
+
+  /**
+   * The four that were pulled out, named so a future reader can tell what the
+   * remaining lines are NOT. Each of these was a real bug, in both copies or
+   * about to be.
+   */
+  const stillCopied = runs.map(r => r.file);
+  check('the timer’s behaviour is no longer among them',
+    stillCopied.filter(f => f === 'TimerBlock.tsx').length <= 1, true);
+  check('nor the chart’s arithmetic',
+    runs.some(r => r.starts.includes('baselineY') || r.starts.includes('maxVal')), false);
+  check('nor the list’s rows', runs.some(r => r.starts.includes("key !== 'id'")), false);
+  check('nor how a cell is displayed', runs.some(r => r.starts.includes('String(colVal)')), false);
 }
 
 say(`\n${passed} passed, ${failed} failed`);
