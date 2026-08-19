@@ -370,6 +370,57 @@ would simply never notice it had been started.
 Extracting shared behaviour is supposed to make the next caller safe. That
 version made the next caller the one who finds out.
 
+### Staying free, which turned out to be unmeasured
+
+1,561 checks. The builder said plainly that the bill has to be zero. Nothing in
+the code was measuring that, and four things were quietly spending it.
+
+**The page blob is written whole, 500ms after every keystroke.** So its size is
+not a storage question — it is **bandwidth × how fast you type**. Two things made
+pages big and both were invisible:
+
+- **collected rows were saved into the page.** They live in `database_rows`,
+  which is where every renderer reads them from. A table with 500 rows was
+  stored twice and re-uploaded on every keystroke. Now stripped before writing.
+- **an inlined photo.** `data:image/png;base64,...` is a real URL and the Image
+  block accepts one. The backlog has called this "the single biggest storage
+  risk in the product" since 11 Aug and nothing guarded it. Now: over 512 KB the
+  editor names the block and why, over 2 MB it refuses.
+
+**A page left open re-read every row every four seconds.** `list_database_rows`
+returns everything, so a thousand-row table is half a megabyte per poll —
+roughly **37 MB for one visitor sitting there five minutes**, against 5 GB a
+month. It now slows to sixty seconds when three answers in a row come back the
+same, and snaps back the instant anything changes. **It slows; it does not
+stop** — a table that quietly gave up is worse than a slow one.
+
+**The row cap was a number chosen before anyone checked the allowance.** 0007
+said 50,000 per page, which at 2 KB a row is 100 MB — a fifth of the entire free
+database from one abused page. The free database is 500 MB. It is 10,000 now,
+with the arithmetic written next to the constant, because a number with no
+reasoning attached gets raised by whoever hits it first.
+
+### Two rules that came out of it
+
+**Limits belong outside the product.** The Health panel now shows what a page
+costs — weight, rows, pages, any picture pasted in rather than linked, naming
+the block. It deliberately prints **no free-tier figure**, and a check fails if
+one is ever typed in: a number in a product goes stale silently and then lies
+with confidence, which is exactly what the capability audit did for six days.
+`docs/STAYING_FREE.md` holds them instead, dated and sourced.
+
+**Anything that grows without a ceiling needs one before it ships**, not after
+somebody notices the project paused. Every item above was found by asking *what
+grows, and who decides how much?* — not by watching a number go up, because by
+then a week of egress is gone.
+
+### And a check that could not fail
+
+It counted quiet polling rounds in terms of `POLL_PATIENCE`, so lowering the
+constant changed the check along with the code and it stayed green. **A check
+written in terms of the thing it checks is not a check.** Literals now, and a
+control in each direction.
+
 ### Notes worth keeping
 
 - **An example printed in the UI is a promise.** The repeater panel prints a
