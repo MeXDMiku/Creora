@@ -124,6 +124,63 @@ Two were real gaps, two were the harness lying:
 Running total: **six** green controls across two days. Every one was worth
 chasing, and only half were real.
 
+### Dates — and shipping functions for data the product could not store
+
+1,316 checks, from 1,239.
+
+`daysUntil`, `daysSince`, `daysBetween`, `dateAdd`, `isBefore`, `isAfter`,
+`isSameDay`, `year`, `month`, `day`, `weekday`, plus `today` and `now` as words.
+A date could be **shown** and shifted for showing, and that was the whole of it
+— nothing could ask a question about one. "Three days left", "overdue",
+"bookings this month": every one unsayable, on a product whose two worked
+examples are a booking form and a task list.
+
+**Then the sweep found the real hole: there was no date column.** A booking's
+date was TEXT, so it sorted alphabetically and every formula reading it depended
+on whoever typed it choosing a shape the parser happened to understand. So:
+a `date` column type, storing ISO, with a real picker.
+
+Choices, each one where the wrong answer is worse than the gap:
+
+- **whole days from midnight** — counting in 24-hour steps from `now` answers 2
+  in the afternoon and 3 in the morning to the same question
+- **month is 1–12, Monday is 1** — a formula is read by a person
+- **`dateAdd` hands back text** — a formula's answer gets stored, compared,
+  saved and formatted, and a Date survives none of that
+- **ISO, not a Date object** — and it sorts chronologically as plain text, so a
+  date column sorts right with no special case anywhere
+- **unreadable becomes empty, never today** — a booking silently dated now is
+  worse than one left blank
+
+### The fourth and sixth repeats
+
+**Fourth:** the Health panel scans formulas for identifiers and reports the ones
+that are not blocks, so every new *word* looks like a deleted block — `and` and
+`or` last cycle, `today` and `now` this one. Every date formula would have
+arrived with a false "block is gone". The note now lives at that list, not in
+this file, because that is where the fifth word gets added.
+
+**Sixth renderer drift:** the published table decided for itself how to show a
+cell and knew only about booleans, so a date column showed a visitor
+`2026-08-17T00:00:00.000Z`. Both renderers now call one function, and the type
+list is one `Record` so a seventh type cannot be added without every place that
+needs an opinion getting one.
+
+### One check cannot fail in this runner, and now says so
+
+The runner's clock is **UTC**, so local time and UTC are the same number and a
+timezone bug is invisible. A control swapped the date-picker reader to
+`toISOString().slice(0, 10)` — which loses a day for everyone east of Greenwich,
+this project's author included — and **broke nothing**.
+
+That check now verifies the decision at the source and carries the reason in its
+own name. A behavioural version needs the suite re-run under a forced `TZ`,
+worth doing the day anything else needs it too.
+
+**Running total: nine green controls.** Roughly half were real gaps; the rest
+were the control aimed at the wrong line, or the check overclaiming. Both are
+worth finding, and neither shows up by reading.
+
 ### Notes worth keeping
 
 - **An example printed in the UI is a promise.** The repeater panel prints a
