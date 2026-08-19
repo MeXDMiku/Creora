@@ -3,6 +3,7 @@ import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { useSetAtom, useAtom, useAtomValue, useStore } from 'jotai'
 import { PageStamps, interpretSave, shouldKeepAutosaving } from './lib/savePage'
+import { measurePage, verdictForPage } from './lib/pageSize'
 import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, slotNameOf, slotNameForNodeType, getCanvasBlocks, shapeRoleDataType, currentPageIdAtom, currentPageIsPublishedAtom, pagesListAtom, switchPageFnAtom, isPreviewModeAtom, canvasModeAtom, editingBreakpointAtom, canvasZoomAtom } from './state/atoms'
 import { summarisePageData, describeWhatWillBeLost, downloadPageData, deletePage } from './lib/pageDelete'
 import { newBlockId, defaultRuntimeForNodeType, defaultAttrsForNodeType, BLOCK_FOOTPRINT, nodeTypeFromBlockId, shortBlockId, isBlockNodeType, withoutVisitorState, portableTypeFromNodeType, nodeTypeFromPortableType, type BlockNodeType } from './lib/blockRegistry'
@@ -1772,6 +1773,15 @@ function App() {
    * rather than when the work is gone.
    */
   const [saveProblem, setSaveProblem] = useState<string | null>(null)
+  /**
+   * A page that is heavy but still saving.
+   *
+   * Separate from saveProblem because it is not a failure -- the save worked.
+   * It is the one number a builder on free infrastructure has no other way to
+   * see, and by the time it becomes a failure they have already been paying for
+   * it on every keystroke.
+   */
+  const [pageWeight, setPageWeight] = useState<string | null>(null)
   const autosavePausedRef = useRef(false)
   /**
    * Which version of each page this tab believes it holds. Per page, because
@@ -2746,6 +2756,33 @@ function App() {
         }
 
         /**
+         * HOW BIG IS THIS, AND WHAT IS MAKING IT BIG.
+         *
+         * The blob below is written WHOLE, 500ms after every keystroke. Its
+         * size is therefore a bandwidth question multiplied by how fast
+         * somebody types, and Creora has to run on free infrastructure -- which
+         * is the condition the project is built under and which nothing was
+         * measuring.
+         *
+         * A page over the refusal line has something inlined in it; there is no
+         * way to reach that with markup and settings. Refusing is the kinder
+         * answer, because the alternative is uploading it again on every pause
+         * for the rest of the session.
+         */
+        const size = measurePage(blocksPayload);
+        const verdict = verdictForPage(size, (id) => {
+          const st = store.get(blockRuntimeAtom(id));
+          return st?.blockName || slotNameOf(id, st);
+        });
+        if (!verdict.save) {
+          autosavePausedRef.current = true;
+          setSaveStatus('Not saved');
+          setSaveProblem(verdict.message);
+          return;
+        }
+        setPageWeight(verdict.message);
+
+        /**
          * Guarded save: the version this tab thinks it has goes with the write,
          * and the server refuses if somebody else moved the page on. Undefined
          * means this tab does not know, which saves unconditionally -- exactly
@@ -3670,6 +3707,27 @@ function App() {
             exist. Reload is listed first because it is the one that loses
             nothing.
           */}
+          {/*
+            A page that is heavy but still saving. Not an error -- the save
+            worked -- so it does not use the red panel. It is the one number a
+            builder on free infrastructure has no other way to see, and by the
+            time it becomes a refusal they have been paying for it on every
+            keystroke for hours.
+          */}
+          {!saveProblem && pageWeight && (
+            <span
+              title={pageWeight}
+              style={{
+                fontSize: '12px', color: '#92400e', background: '#fef3c7',
+                border: '1px solid #fde68a', padding: '4px 8px', borderRadius: '4px',
+                maxWidth: '320px', overflow: 'hidden', textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {pageWeight}
+            </span>
+          )}
+
           {saveProblem && (
             <div style={{
               position: 'fixed', top: '64px', right: '16px', zIndex: 3000, maxWidth: '380px',

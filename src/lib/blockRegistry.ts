@@ -312,6 +312,25 @@ export function withoutVisitorState<T extends Record<string, any>>(
    * true in the editor for a second, published for months.
    */
   delete next.error;
+  /**
+   * COLLECTED ROWS ARE NOT PART OF THE PAGE.
+   *
+   * They live in `database_rows`, which is where every renderer reads them
+   * from -- a Database block fetches on mount and polls while visible, and a
+   * List block reads the tracked block's state. The copy inside the page was a
+   * second store of the same data, and the page blob is written WHOLE by
+   * autosave 500ms after every keystroke.
+   *
+   * So a table with 500 rows in it was stored twice and re-uploaded on every
+   * pause for thought. On free infrastructure -- which is the condition this
+   * whole project runs under -- that is not a rounding error, it is the largest
+   * avoidable cost in the product.
+   *
+   * What this gives up: before migration 0001 there was no rows table, and the
+   * saved copy was the fallback. That migration has been run; the fallback is
+   * for a database that no longer exists.
+   */
+  delete next.rows;
   next.loading = false;
 
   /**

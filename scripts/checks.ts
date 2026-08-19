@@ -56,6 +56,7 @@ import { describeRowWriteError, withoutRow } from '../src/lib/rowWrite';
 import { chartBars, MIN_BAR_HEIGHT } from '../src/lib/chartBars';
 import { timerStep, timerResetValue } from '../src/lib/useTimer';
 import { duplicatedRuns, duplicatedLineCount } from './rendererDrift';
+import { measurePage, verdictForPage, byteLength, describeBytes } from '../src/lib/pageSize';
 import { BLOCK_DISPLAY_NAMES } from '../src/lib/blockRegistry';
 import { RULE_TYPES as AUDIT_RULES } from '../src/lib/validation';
 import { TABLE_FUNCTION_NAMES, DATE_FUNCTION_NAMES } from '../src/lib/formula';
@@ -5781,7 +5782,21 @@ group('a moment’s error is not saved into the page');
     ['validationError', 'touched', 'fetchError', 'uploadError'].some(k => k in saved), false);
   check('loading is reset rather than removed, as it always was', saved.loading, false);
   check('and the things that ARE the page survive',
-    [saved.value, saved.blockName, (saved as any).rows.length], [5, 'Orders', 1]);
+    [saved.value, saved.blockName], [5, 'Orders']);
+
+  /**
+   * COLLECTED ROWS ARE NOT PART OF THE PAGE EITHER.
+   *
+   * They live in `database_rows`, which is where every renderer reads them
+   * from. The copy inside the page was a second store of the same data, and the
+   * page blob is written WHOLE by autosave 500ms after every keystroke -- so a
+   * table with 500 rows was stored twice and re-uploaded on every pause for
+   * thought. On free infrastructure, which is the condition this project runs
+   * under, that is the largest avoidable cost in the product.
+   */
+  check('A TABLE’S ROWS ARE NOT WRITTEN INTO THE PAGE', 'rows' in saved, false);
+  check('and a block that has none is unaffected',
+    'rows' in withoutVisitorState({ value: 1, blockName: 'Count' } as any, 'numberDisplayBlock'), false);
 }
 
 
@@ -6207,6 +6222,76 @@ group('two people cannot take the same slot');
     readFileSync('src/types/creora.ts', 'utf8').includes('unique?: boolean'), true);
   check('and the panel says where it is enforced, not just what it does',
     inspector.includes('enforced in the DATABASE'), true);
+}
+
+
+group('a page that would cost money says so');
+{
+  /**
+   * CREORA HAS TO RUN ON FREE INFRASTRUCTURE. That is the condition the project
+   * is built under, and nothing in the code was measuring it.
+   *
+   * The page blob is written WHOLE by autosave, 500ms after every keystroke. Its
+   * size is therefore not a storage question but a BANDWIDTH question multiplied
+   * by how fast somebody types: a 3MB page is 3MB uploaded per pause for
+   * thought, for the whole session, and nothing said so.
+   */
+  const small = { documentContent: { type: 'doc' }, runtimeStates: { a: { value: 1 } } };
+  check('an ordinary page says nothing', verdictForPage(measurePage(small)).message, null);
+  check('and saves', verdictForPage(measurePage(small)).save, true);
+
+  const photo = 'data:image/png;base64,' + 'A'.repeat(700 * 1024);
+  const withPhoto = {
+    documentContent: { type: 'doc' },
+    runtimeStates: {
+      imageBlock__x: { blockName: 'Hero photo', value: photo },
+      buttonBlock__y: { blockName: 'Submit', value: false },
+    },
+  };
+  const heavy = measurePage(withPhoto);
+  check('the biggest part is found', heavy.biggest?.name, 'imageBlock__x');
+  check('AND WHY IT IS BIG, which is the only part anybody can act on',
+    heavy.biggest?.reason, 'a picture pasted into the page instead of linked');
+
+  const warn = verdictForPage(heavy, () => 'Hero photo');
+  check('a heavy page still saves', warn.save, true);
+  check('but it names the block', (warn.message || '').includes('Hero photo'), true);
+  check('and says the cost is per keystroke, not per page',
+    (warn.message || '').includes('every time you pause typing'), true);
+
+  const huge = { runtimeStates: { imageBlock__x: { blockName: 'Hero', value: 'data:image/png;base64,' + 'A'.repeat(3 * 1024 * 1024) } } };
+  const refuse = verdictForPage(measurePage(huge), () => 'Hero');
+  check('A PAGE WITH A PHOTO INLINED IN IT IS REFUSED', refuse.save, false);
+  check('and it says nothing was lost, because that is the fear',
+    (refuse.message || '').includes('Nothing has been lost'), true);
+  check('and that fixing it brings the save back',
+    (refuse.message || '').includes('save again'), true);
+
+  /**
+   * The other thing that makes a page big, and the one nobody would guess:
+   * collected rows were held in the block's state and saved with it.
+   */
+  const rows = Array.from({ length: 400 }, (_, i) => ({ id: `r${i}`, Name: 'Somebody', Note: 'x'.repeat(200) }));
+  const withRows = measurePage({ runtimeStates: { databaseBlock__d: { blockName: 'Signups', rows } } });
+  check('rows are named as the reason when they are the reason',
+    withRows.biggest?.reason, '400 collected rows held inside the page');
+
+  check('bytes are counted as UTF-8, which is what actually travels',
+    byteLength('£'), 2);
+  check('and an empty page is not a crash', measurePage({}).biggest, null);
+  check('nor is nothing at all', measurePage(null).bytes >= 0, true);
+
+  check('sizes read as sizes', [describeBytes(900), describeBytes(2048), describeBytes(3 * 1024 * 1024)],
+    ['900 bytes', '2 KB', '3.0 MB']);
+
+  /**
+   * And the editor has to actually do it, and actually show it.
+   */
+  const appSrc = readFileSync('src/App.tsx', 'utf8');
+  check('THE SAVE PATH MEASURES BEFORE IT WRITES', appSrc.includes('measurePage(blocksPayload)'), true);
+  check('and stops when the verdict says stop', /if \(!verdict\.save\)/.test(appSrc), true);
+  check('and a heavy-but-saving page is shown, not just logged',
+    appSrc.includes('{pageWeight}'), true);
 }
 
 say(`\n${passed} passed, ${failed} failed`);
