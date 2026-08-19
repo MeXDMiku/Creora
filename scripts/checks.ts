@@ -6747,5 +6747,96 @@ group('a webhook address on a published page is said out loud');
     readFileSync('src/components/HealthPanel.tsx', 'utf8').includes('isPublished }'), true);
 }
 
+
+group('the server checks WHAT is written, not only who writes it');
+{
+  /**
+   * THE BACKEND'S REAL WEAKNESS. `add_database_row` takes `row_data jsonb` and
+   * inserts it. It checks WHO is writing and never WHAT. Every rule in the
+   * product -- required, must be a number, must be a date, must be an email --
+   * lives in the browser, so it is advice to whoever uses the form and nothing
+   * at all to whoever calls the RPC directly. The anon key is in the published
+   * page; calling it is one line of fetch.
+   *
+   * A stranger could put a column that does not exist into your table, a
+   * paragraph into your number column, and a megabyte into a field meant for a
+   * name -- and the editor would show all of it as though a person had typed it.
+   */
+  const shape = readFileSync('supabase/migrations/0009_row_shape.sql', 'utf8');
+
+  check('it runs before the row is written', /before insert on public\.database_rows/.test(shape), true);
+  check('and on updates too, since a row can be edited into the same mess',
+    /before update of row_data on public\.database_rows/.test(shape), true);
+  check('A KEY THAT IS NOT A COLUMN IS DROPPED', shape.includes('new.row_data := v_clean;'), true);
+  check('a number column refuses a paragraph', /has to be a number/.test(shape), true);
+  check('a date column refuses something that is not a date', /has to be a date/.test(shape), true);
+  check('AND A ROW HAS A CEILING', /v_max_bytes constant integer := 16384;/.test(shape), true);
+  check('with the arithmetic written where somebody would change it',
+    shape.includes('10000 x 16 KB is 160 MB'), true);
+  check('and the allowance it came from, dated',
+    /500 MB \(supabase\.com\/pricing, checked/.test(shape), true);
+
+  /**
+   * COERCED, NOT REFUSED, wherever the browser would have accepted it.
+   * Refusing anything the browser accepts turns a working form into a broken
+   * one -- and the browser sends "5" for a number column in some paths and 5 in
+   * others. This is the same drift problem the two renderers have had nine
+   * times, here across a network instead of between two files.
+   */
+  check('a blank number stays blank rather than becoming zero',
+    shape.includes('a number field left blank is blank, not zero'), true);
+  check('a table whose page has not finished saving is left alone',
+    shape.includes('No declared columns means nothing can be judged'), true);
+  check('and a date is stored as the client stored it, not re-derived',
+    shape.includes('re-deriving here would move the day'), true);
+
+  /**
+   * WHAT IT DELIBERATELY DOES NOT ENFORCE, which matters as much: `required`
+   * and `email` live on the BLOCK that feeds a column, not on the column, and
+   * the server cannot see which input fed which field. Guessing would refuse
+   * honest submissions.
+   */
+  check('it says what it cannot know, rather than guessing at it',
+    shape.includes('the server cannot see which input fed which field'), true);
+
+  /**
+   * THE TRIGGER ORDER IS LOAD-BEARING AND IS DECIDED BY NAMES. Postgres runs
+   * BEFORE triggers alphabetically, which happens to give limits, then shape,
+   * then unique. Shape before unique is the one that matters: uniqueness
+   * compares the stored value, so " 10am" and "10am" would be two different
+   * bookings if they were compared before being tidied.
+   *
+   * Three names chosen separately in three migrations. Renaming one would
+   * reorder the pipeline silently, and the symptom would be a double booking
+   * nobody could reproduce.
+   */
+  const triggerNames: string[] = [];
+  for (const file of migrationFiles()) {
+    const sql = readFileSync(`supabase/migrations/${file}`, 'utf8');
+    for (const m of sql.matchAll(/^create trigger\s+(\S+)/gm)) triggerNames.push(m[1]);
+  }
+  const inserts = triggerNames.filter(n => !n.includes('update')).sort();
+  check('there are triggers to order at all', inserts.length >= 3, true);
+  check('LIMITS RUN FIRST, refusing the cheapest case before any work',
+    inserts[0].includes('limits'), true);
+  check('THEN SHAPE, so a value is tidied before anything compares it',
+    inserts[1].includes('shape'), true);
+  check('THEN UNIQUE, comparing what will actually be stored',
+    inserts[2].includes('unique'), true);
+  check('and the coupling is written down where a rename would be considered',
+    shape.includes('THE ORDER THESE TRIGGERS FIRE IN IS LOAD-BEARING'), true);
+
+  /**
+   * And the messages, which reach a visitor who has done nothing wrong.
+   */
+  const badNumber = describeRowWriteError({ message: 'Price has to be a number', code: 'P0006' });
+  check('a refused value names the column', badNumber.message.includes('Price'), true);
+  check('and says nothing was saved', badNumber.message.includes('Nothing was saved'), true);
+  check('retrying the same value would fail the same way', badNumber.retryable, false);
+  const tooLong = describeRowWriteError({ message: 'that entry is too long (99999 characters)', code: 'P0007' });
+  check('an oversized entry says to shorten it', tooLong.message.includes('Shorten it'), true);
+  check('rather than printing the byte count at somebody', tooLong.message.includes('99999'), false);
+}
+
 say(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

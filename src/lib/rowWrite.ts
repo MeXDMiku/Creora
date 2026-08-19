@@ -71,6 +71,27 @@ export function describeRowWriteError(error: unknown): RowWriteFailure {
     };
   }
 
+  /**
+   * The server refusing a value's SHAPE (migration 0009).
+   *
+   * These reach a visitor who typed something the column cannot hold. The
+   * server names the column, which is the whole value of the message -- the
+   * browser's own rules already said this in nicer words, so anybody seeing
+   * THIS message either has an old page open or is not using the form.
+   */
+  if (code === 'P0006' || / has to be a (number|date)$/.test(message.trim())) {
+    return {
+      message: `${message.charAt(0).toUpperCase()}${message.slice(1)}. Nothing was saved.`,
+      retryable: false,
+    };
+  }
+  if (code === 'P0007' || lower.includes('too long')) {
+    return {
+      message: 'That entry is too long to store. Shorten it and try again — nothing was saved.',
+      retryable: false,
+    };
+  }
+
   if (lower.includes('failed to fetch') || lower.includes('network')) {
     return {
       message: 'Could not reach the server, so this was not saved. Check the connection and try again.',

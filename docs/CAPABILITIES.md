@@ -62,7 +62,7 @@ so `if(...)` and `Price > 100` both silently answered **0**.
 
 **4 column types** — text, number, boolean, **date**.
 
-**8 migrations**, all `SECURITY DEFINER` with RLS on and no policies, so every
+**9 migrations**, all `SECURITY DEFINER` with RLS on and no policies, so every
 read and write goes through one function.
 
 **1,480 runnable checks**, each with a negative control.
@@ -145,18 +145,28 @@ claim about code held up by 1,480 checks and by nothing on the real domain. The
 most likely place for that to be wrong is not the logic — it is the editor:
 dragging, selecting, the panel, the slash menu.
 
-**Five migrations are `UNPROVED`.** 0004 (per-visitor rows), 0005 (delete a
-page), 0006 (two tabs overwriting each other), 0007 (row limits) and 0008
-(used-once columns) are written, documented and never run. Until they are:
+**Six migrations are `UNPROVED`.** 0004 (per-visitor rows), 0005 (delete a
+page), 0006 (two tabs overwriting each other), 0007 (row limits), 0008
+(used-once columns) and 0009 (row shape) are written, documented and never run.
+Until they are:
 
 - a shop is blocked on more than payments
 - deleting a page explains itself instead of working
 - **two tabs still overwrite each other**
 - **a published form can still be filled by a script**
 - **a slot can still be booked twice**
+- **the server still checks who is writing and never what**
 
-Five is too many to be a queue. It is the single largest gap between what this
-document claims and what a visitor would meet.
+Six is too many to be a queue. It is the single largest gap between what this
+document claims and what a visitor would meet — which is why they are now one
+paste: `supabase/RUN_ALL_MIGRATIONS.sql`.
+
+**Every rule in the validation panel is advice until 0009 is run.** `required`,
+`email`, `must be a number` — all of it lives in the browser, and the anon key
+is in the published page. Calling the RPC directly is one line of `fetch`. 0009
+enforces what the *column* can know (its type, its size, that a key is a column
+at all); `required` and `email` belong to the block feeding the column and stay
+client-side, because the server cannot see which input fed which field.
 
 **A published page still leaks its webhook URLs.** `get_page` returns the
 workflows whole, and it has to: the wire is fired by the visitor's browser, so
