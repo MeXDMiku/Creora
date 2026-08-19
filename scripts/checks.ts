@@ -6556,5 +6556,85 @@ group('every migration in one paste, and that paste stays true');
   check('and where to paste it', bundle.includes('SQL Editor'), true);
 }
 
+
+group('the whole journey: click a row, arrive, see that row');
+{
+  /**
+   * THE CLAIM THE AUDIT STAKES TWO SITE TYPES ON.
+   *
+   * "A blog is possible now. A directory is possible now." Both moved from
+   * blocked to possible on one sentence -- a page can be opened WITH a row --
+   * and every piece of that was checked on its own while the journey was
+   * checked nowhere. Four correct functions in a row can still fail to be a
+   * road: the value that leaves the repeater has to be the value the detail
+   * page filters on, spelled the same way, surviving encoding on the way.
+   *
+   * So this walks it: click, link, arrive, read, filter. The way a visitor
+   * would, using the real functions in the real order.
+   */
+  const ROWS = [
+    { id: 'r1', Title: 'First post', Body: 'Hello' },
+    { id: 'r7', Title: 'Tea & Coffee', Body: 'The one with an ampersand' },
+    { id: 'r9', Title: 'Last post', Body: 'Bye' },
+  ];
+
+  // 1. A row is clicked. The repeater builds the link from its template.
+  const clicked = ROWS[1];
+  const query = buildParamsFromTemplate('id={{Row id}}&title={{Title}}', {
+    'Row id': clicked.id,
+    Title: clicked.Title,
+  });
+  check('the link carries the row', query.includes('id=r7'), true);
+  check('AND AN AMPERSAND IN THE TITLE DOES NOT BECOME A SECOND PARAMETER',
+    query.includes('Tea%20%26%20Coffee') || query.includes('Tea+%26+Coffee'), true);
+
+  // 2. The visitor arrives. The address is read.
+  const params = parseParams(query);
+  check('the id survives the trip', params.id, 'r7');
+  check('AND SO DOES THE AMPERSAND, whole', params.title, 'Tea & Coffee');
+
+  // 3. A Page value block on the detail page reads it.
+  const pageValue = resolvePageValue(params, { paramName: 'id', previewValue: 'r1', fallbackValue: '' });
+  check('the Page value block holds the row that was clicked', pageValue, 'r7');
+
+  // 4. The detail page's repeater filters on it. `Row id` is the spelling used
+  //    everywhere else, and cellFor knows it.
+  const shown = visibleRows(ROWS, { filterColumn: 'Row id', filterValue: pageValue });
+  check('THE DETAIL PAGE SHOWS EXACTLY ONE ROW', shown.rows.length, 1);
+  check('and it is the one that was clicked', shown.rows[0].Title, 'Tea & Coffee');
+
+  /**
+   * The two ways this journey ends badly, which are the reason it is walked
+   * rather than assumed.
+   */
+  const noParam = resolvePageValue({}, { paramName: 'id', previewValue: 'r1', fallbackValue: '' });
+  check('ARRIVING WITH NO ROW DOES NOT SHOW THE PREVIEW ROW TO EVERYBODY', noParam, '');
+  const empty = visibleRows(ROWS, { filterColumn: 'Row id', filterValue: noParam });
+  /**
+   * And a blank filter shows EVERYTHING, which is the honest failure: a bare
+   * link to the detail page is a list, not somebody else's row. Hiding all of
+   * them would read as "this post was deleted".
+   */
+  check('a bare link shows the list rather than a wrong row', empty.rows.length, 3);
+
+  const gone = visibleRows(ROWS, { filterColumn: 'Row id', filterValue: 'r404' });
+  check('a link to a row that has been deleted shows nothing, not something else',
+    gone.rows.length, 0);
+
+  // The other direction: the journey has to work for a row whose id needs
+  // escaping, because ids are not always tidy.
+  const awkward = { id: 'a b/c?d#e', Title: 'Awkward' };
+  const trip = parseParams(buildParamsFromTemplate('id={{Row id}}', { 'Row id': awkward.id }));
+  check('AN ID WITH A SLASH, A QUESTION MARK AND A HASH IN IT SURVIVES', trip.id, 'a b/c?d#e');
+  check('and still finds its row',
+    visibleRows([awkward, ...ROWS], { filterColumn: 'Row id', filterValue: trip.id }).rows.length, 1);
+
+  // And the value is still untrusted at the far end -- it was typed by whoever
+  // sent the link, not by the builder.
+  const nasty = parseParams(buildParamsFromTemplate('t={{Title}}', { Title: '<img src=x onerror=alert(1)>' }));
+  check('a link can carry markup, and it is still text when shown',
+    fillSlots('<p>{{T}}</p>', { T: nasty.t }).includes('&lt;img'), true);
+}
+
 say(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
