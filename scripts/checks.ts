@@ -5416,6 +5416,14 @@ group('a column can hold a date');
     tz.csv, '2026-08-20,Ada');
 
   /**
+   * The last link, and the only one a stranger sees: picked, stored, exported,
+   * shown. Reading UTC parts here shows a visitor the 19th for a booking on the
+   * 20th, on the published page itself.
+   */
+  check('A VISITOR IS SHOWN THE DAY THAT WAS PICKED', tz.shown, '<p>20 Aug 2026</p>');
+  check('and a countdown in markup agrees with it', tz.shownInCalc, '<p>3</p>');
+
+  /**
    * ONE PATH, NOT TWO. A Database cell built the date locally; a visitor's form
    * field went through toDate and got UTC midnight. The same date picked in the
    * two places was stored as two different instants, and in some timezones as

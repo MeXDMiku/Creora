@@ -18,6 +18,7 @@ import { isoDate, isoToDateInput, dateInputToIso, coerceForColumn } from '../src
 import { evaluateExpression } from '../src/lib/formula';
 import { validateValue } from '../src/lib/validation';
 import { toCsv } from '../src/lib/csv';
+import { fillSlots } from '../src/lib/sanitizeHtml';
 
 const picked = '2026-08-20';
 
@@ -90,4 +91,17 @@ console.log(JSON.stringify({
     [{ name: 'Due', type: 'date' }, { name: 'Who', type: 'text' }],
     [{ id: 'r1', Due: dateInputToIso('2026-08-20'), Who: 'Ada' }],
   ).split('\r\n')[1],
+
+  /**
+   * And what a VISITOR reads. The display filter is the last link in the chain
+   * -- picked, stored, exported, shown -- and it is the one a stranger actually
+   * sees. Reading UTC parts here shows them the 19th for a booking on the 20th.
+   */
+  shown: fillSlots('<p>{{Due | date: D MMM YYYY}}</p>', { Due: dateInputToIso('2026-08-20') }),
+  shownInCalc: fillSlots(
+    '<p>{{calc: daysUntil(Due)}}</p>',
+    { Due: dateInputToIso('2026-08-20') },
+    [],
+    { now: new Date(2026, 7, 17, 23, 30) },
+  ),
 }));
