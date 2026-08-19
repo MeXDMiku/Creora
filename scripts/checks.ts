@@ -6003,6 +6003,26 @@ group('a timer behaves the same while building and once published');
    * when the running state changes, and the published page does not, because a
    * visitor pressing play must not write to somebody else's page.
    */
+  /**
+   * THE HOOK SUBSCRIBES, rather than reading the value once.
+   *
+   * A source check, and the reason is the same as everywhere else here: a hook
+   * cannot be run by this suite. But the decision is worth pinning, because the
+   * first version read `store.get(...)` and WORKED -- only because both callers
+   * happened to subscribe to the same atom themselves for their styling, so the
+   * component re-rendered and the hook re-read on the way past.
+   *
+   * That is a trap rather than a bug. It works today and stops working the
+   * moment somebody uses the hook in a component that does not separately
+   * subscribe: the timer would never notice it had been started, and nothing on
+   * screen would say why.
+   */
+  const hookSrc = readFileSync('src/lib/useTimer.ts', 'utf8');
+  check('THE TIMER HOOK SUBSCRIBES TO ITS BLOCK, IT DOES NOT READ IT ONCE',
+    /useAtomValue\(blockRuntimeAtom\(blockId\), \{ store \}\)/.test(hookSrc), true);
+  check('and does not fall back to a bare read for the state it watches',
+    /const runtimeState = store\.get\(/.test(hookSrc), false);
+
   check('THE EDITOR SAVES WHEN THE TIMER CHANGES', timerSrc.includes('onStateChanged'), true);
   check('AND THE PUBLISHED PAGE DELIBERATELY DOES NOT',
     /useTimer\(\{ blockId: block\.id, store \}\)/.test(pubTimerSrc), true);

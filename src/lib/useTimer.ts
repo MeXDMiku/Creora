@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useAtomValue } from 'jotai';
 import { blockRuntimeAtom } from '../state/atoms';
 import { executeWorkflow } from './bindingEngine';
 
@@ -75,7 +76,20 @@ export interface UseTimerOptions {
 }
 
 export function useTimer({ blockId, store, onStateChanged }: UseTimerOptions) {
-  const runtimeState = store.get(blockRuntimeAtom(blockId));
+  /**
+   * SUBSCRIBED, not read once.
+   *
+   * The first version of this called `store.get(...)`, which reads the value
+   * and hears nothing afterwards. It worked -- but only because both callers
+   * happened to subscribe to the same atom themselves for their styling, so
+   * the component re-rendered and the hook re-read on the way past.
+   *
+   * That is a trap rather than a bug: it works today and stops working the
+   * moment somebody uses this hook in a component that does not separately
+   * subscribe. The timer would then never notice it had been started, and
+   * nothing on screen would say why.
+   */
+  const runtimeState = useAtomValue(blockRuntimeAtom(blockId), { store });
   const isRunning = !!runtimeState?.value;
   const mode: TimerMode = runtimeState?.mode ?? 'countdown';
   const duration: number = runtimeState?.duration ?? 10;
