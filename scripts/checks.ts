@@ -6686,9 +6686,35 @@ group('a webhook address on a published page is said out loud');
   check('a warning, not broken — it works exactly as intended',
     leaks(facts(true))[0].severity, 'warning');
   check('the message says what somebody could actually do with it',
-    leaks(facts(true))[0].detail.includes('send to it themselves'), true);
+    leaks(facts(true))[0].detail.includes('use it themselves'), true);
   check('and why it is there rather than hidden',
-    leaks(facts(true))[0].detail.includes('the browser is what sends it'), true);
+    leaks(facts(true))[0].detail.includes('the browser is what calls it'), true);
+
+  /**
+   * A LIVE DATA BLOCK'S ADDRESS, for exactly the same reason: it is fetched by
+   * the visitor's browser, which is the whole reason Live Data works without a
+   * server. A builder who pasted an endpoint with a key in the query string has
+   * published the key, and this is the only place that would ever say so.
+   */
+  const SOURCE = 'dataSourceBlock__wh10000001';
+  const withSource = (isPublished: boolean, url: string) => ({
+    blockIds: [SOURCE],
+    states: { [SOURCE]: { ...base, blockName: 'Prices feed', url } },
+    workflows: [], formulas: [], connections: [], pages: [{ id: 'page-1' }], isPublished,
+  } as any);
+
+  check('A LIVE DATA ADDRESS ON A PUBLISHED PAGE IS REPORTED TOO',
+    leaks(withSource(true, 'https://api.example.com/rates?key=sk_live_9f2a8c7b1d')).length, 1);
+  check('and it names the block',
+    leaks(withSource(true, 'https://api.example.com/rates?key=sk_live_9f2a8c7b1d'))[0].title.includes('"Prices feed"'), true);
+  check('THE KEY IN THE QUERY STRING IS NOT PRINTED WHOLE',
+    leaks(withSource(true, 'https://api.example.com/rates?key=sk_live_9f2a8c7b1d'))[0].title.includes('sk_live_9f2a8c7b1d'), false);
+  check('a private page with a feed on it is not accused',
+    leaks(withSource(false, 'https://api.example.com/rates?key=x')).length, 0);
+  check('and a feed with no address yet is not either',
+    leaks(withSource(true, '')).length, 0);
+  check('the wording covers reading as well as sending',
+    leaks(withSource(true, 'https://api.example.com/rates'))[0].title.includes('reads from'), true);
 
   /**
    * The address is SHORTENED. They are long and often carry a token in the

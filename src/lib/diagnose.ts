@@ -468,25 +468,43 @@ export function diagnosePage(facts: PageFacts): Problem[] {
    */
   if (facts.isPublished) {
     const seen = new Set<string>();
+
+    // Shortened: an address is often long and often has a token in the middle
+    // of it, and printing the whole thing in a panel puts the secret on screen
+    // for anyone standing behind them.
+    const shorten = (url: string) => (url.length > 40 ? `${url.slice(0, 40)}…` : url);
+
+    const exposed = (blockId: string, url: string, verb: string) => {
+      const clean = url.trim();
+      if (!clean || seen.has(clean)) return;
+      seen.add(clean);
+      problems.push({
+        severity: 'warning',
+        title: `"${nameOf(facts, blockId)}" ${verb} ${shorten(clean)}, and this page is published`,
+        detail:
+          'Anyone who opens the page can read that address and use it themselves. It travels to the browser because the browser is what calls it — there is nowhere else yet.',
+        blockId,
+      });
+    };
+
     for (const workflow of facts.workflows || []) {
       for (const step of workflow.steps || []) {
         if (step.action !== 'sendWebhook') continue;
-        const url = String((step as any).webhookUrl || '').trim();
-        if (!url || seen.has(url)) continue;
-        seen.add(url);
-
-        // Shortened: an address is often long and often has a token in the
-        // middle of it, and printing the whole thing in a panel puts the secret
-        // on screen for anyone standing behind them.
-        const shown = url.length > 40 ? `${url.slice(0, 40)}…` : url;
-        problems.push({
-          severity: 'warning',
-          title: `"${nameOf(facts, workflow.sourceId)}" sends to ${shown}, and this page is published`,
-          detail:
-            'Anyone who opens the page can read that address and send to it themselves. It travels to the browser because the browser is what sends it — there is nowhere else yet.',
-          blockId: workflow.sourceId,
-        });
+        exposed(workflow.sourceId, String((step as any).webhookUrl || ''), 'sends to');
       }
+    }
+
+    /**
+     * A Live Data block's address, for exactly the same reason.
+     *
+     * It is fetched by the visitor's browser -- that is the whole reason Live
+     * Data works without a server -- so the address is as public as the page.
+     * A builder who pasted an endpoint with a key in the query string has
+     * published the key, and this is the only place that would ever tell them.
+     */
+    for (const blockId of facts.blockIds || []) {
+      if (nodeTypeFromBlockId(blockId) !== 'dataSourceBlock') continue;
+      exposed(blockId, String((facts.states[blockId] as any)?.url || ''), 'reads from');
     }
   }
 

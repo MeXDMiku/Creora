@@ -173,11 +173,15 @@ workflows whole, and it has to: the wire is fired by the visitor's browser, so
 the address has to reach the browser. No arrangement of client-side code closes
 this — it needs somewhere server-side to send from, which is rank 3.
 
-**The Health panel now says so out loud**, naming the block and truncating the
-address so the panel does not put the token on screen. That does not fix it. A
-builder who pasted a Zapier or Discord hook had no way to find out from anywhere
-else, and naming a trade-off nobody can close is the honest half of having made
-it.
+**The same is true of a Live Data address**, and for the same reason: the
+visitor's browser does the fetching, which is the whole reason Live Data works
+without a server. An endpoint with a key in its query string is a published key.
+
+**The Health panel now says both out loud**, naming the block and truncating the
+address so the panel does not put the token on screen. That does not fix either
+of them. A builder who pasted a Zapier hook or a keyed API endpoint had no way to
+find out from anywhere else, and naming a trade-off nobody can close is the
+honest half of having made it.
 
 ---
 
