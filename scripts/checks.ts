@@ -534,6 +534,22 @@ group('every block type is registered everywhere it has to be');
   check('every type can be inserted', missingInsert, []);
   check('every type is a TipTap extension', missingExtension, []);
   check('every type renders when published', missingPublished, []);
+
+  /**
+   * And the other direction, which the four above cannot see.
+   *
+   * An inspector for a type that no longer exists is dead weight that still
+   * looks maintained -- and the day somebody renames a block type it is how the
+   * old name survives: the new one gets its four registrations, the old file
+   * sits there being imported by the glob, and nothing anywhere disagrees.
+   */
+  const expectedInspectors = new Set(
+    BLOCK_NODE_TYPES.map(t => `${t.charAt(0).toUpperCase()}${t.slice(1)}.inspector.tsx`),
+  );
+  const orphanInspectors = readdirSync('src/blocks')
+    .filter(f => f.endsWith('.inspector.tsx'))
+    .filter(f => !expectedInspectors.has(f));
+  check('NO INSPECTOR IS LEFT BEHIND FOR A TYPE THAT NO LONGER EXISTS', orphanInspectors, []);
 }
 
 // -------------------------------------------------------------------- images
@@ -6635,6 +6651,7 @@ group('the whole journey: click a row, arrive, see that row');
   check('a link can carry markup, and it is still text when shown',
     fillSlots('<p>{{T}}</p>', { T: nasty.t }).includes('&lt;img'), true);
 }
+
 
 say(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
