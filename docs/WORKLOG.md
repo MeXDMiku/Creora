@@ -166,16 +166,27 @@ cell and knew only about booleans, so a date column showed a visitor
 list is one `Record` so a seventh type cannot be added without every place that
 needs an opinion getting one.
 
-### One check cannot fail in this runner, and now says so
+### A check that could not fail in this runner — and then could
 
 The runner's clock is **UTC**, so local time and UTC are the same number and a
 timezone bug is invisible. A control swapped the date-picker reader to
 `toISOString().slice(0, 10)` — which loses a day for everyone east of Greenwich,
 this project's author included — and **broke nothing**.
 
-That check now verifies the decision at the source and carries the reason in its
-own name. A behavioural version needs the suite re-run under a forced `TZ`,
-worth doing the day anything else needs it too.
+First attempt was a source check: match the shape of the code instead of its
+behaviour. That was no better. Shape-matching text survives the break that
+matters, and the same control went green again.
+
+**Second thing depending on local-vs-UTC arrived within the hour** — a visitor's
+form date and a table cell were storing the same day as two different instants —
+so the instrument got fixed instead. `scripts/tz-probe.ts` runs in a **separate
+process with `TZ=Asia/Kolkata`** (+05:30, so a half-hour offset catches
+whole-hour assumptions too) and the suite compares what comes back. The control
+that had been green three times now turns four checks red, including two at year
+boundaries, where losing a day loses a year.
+
+**A check that cannot fail is not a check.** Source-shape checks are reassurance;
+a different process with a different clock is evidence.
 
 **Running total: nine green controls.** Roughly half were real gaps; the rest
 were the control aimed at the wrong line, or the check overclaiming. Both are

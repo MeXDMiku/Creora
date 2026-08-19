@@ -306,8 +306,34 @@ export function coerceForColumn(value: any, column: ColumnDef | undefined): any 
  * write a booking for now, which is worse than a blank in every direction.
  */
 export function isoDate(value: any): string {
-  if (value === null || value === undefined || String(value).trim() === '') return '';
-  const d = toDate(value);
+  const text = String(value ?? '').trim();
+  if (text === '') return '';
+
+  /**
+   * A BARE YYYY-MM-DD IS READ AS A LOCAL DAY, NOT AS UTC MIDNIGHT.
+   *
+   * This is the whole reason the two paths had to be merged. `new Date(
+   * "2026-08-20")` is UTC midnight by specification, while
+   * `<input type="date">` means "the 20th, where I am". Store the first and
+   * read it back as local parts and the date moves: 19 Aug for anyone west of
+   * Greenwich.
+   *
+   * There were two ways into this function -- a Database cell, which built the
+   * date locally, and a visitor's form field, which went through toDate and got
+   * UTC -- so the SAME date picked in the two places was stored as two
+   * different instants, and in some timezones as two different days. Neither
+   * was wrong on its own; having both was.
+   *
+   * A value with a time on it is left alone: that one already says which
+   * instant it means.
+   */
+  const bare = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (bare) {
+    const d = new Date(Number(bare[1]), Number(bare[2]) - 1, Number(bare[3]));
+    return isNaN(d.getTime()) ? '' : d.toISOString();
+  }
+
+  const d = toDate(text);
   return d ? d.toISOString() : '';
 }
 
@@ -539,15 +565,18 @@ export function isoToDateInput(value: any): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+/**
+ * What the date picker gives, stored.
+ *
+ * Now just `isoDate`, which is the point: this used to be the only place that
+ * read a bare YYYY-MM-DD as a LOCAL day, while a visitor's form field went
+ * through toDate and got UTC midnight. Same date, two instants, and in some
+ * timezones two different days. Kept as a name because the call site reads
+ * better for it, and because deleting it would invite somebody to write the
+ * local-parts version again by hand.
+ */
 export function dateInputToIso(value: string): string {
-  const text = String(value ?? '').trim();
-  if (!text) return '';
-  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
-  if (!parts) return isoDate(text);
-  // Built local, to match the reader above. new Date("2026-08-17") would be
-  // parsed as UTC midnight and land on the 16th in half the world.
-  const d = new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]));
-  return isNaN(d.getTime()) ? '' : d.toISOString();
+  return isoDate(value);
 }
 
 /**

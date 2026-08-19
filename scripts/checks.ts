@@ -9,6 +9,7 @@
  *   npm run check
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { createStore } from 'jotai';
 import { validateValue, isValidPattern, RULE_TYPES } from '../src/lib/validation';
 import type { ValidationRule } from '../src/lib/validation';
@@ -5337,13 +5338,57 @@ group('a column can hold a date');
    * suite re-run under a forced TZ, which is worth doing the day anything else
    * needs it too.
    */
-  const rowsSrc = readFileSync('src/lib/rows.ts', 'utf8');
-  check('THE DATE INPUT IS READ IN LOCAL PARTS, NOT UTC (source check — see comment)',
-    /getFullYear\(\)[\s\S]{0,120}getMonth\(\)[\s\S]{0,60}getDate\(\)/.test(rowsSrc), true);
-  check('and written back from local parts too, which is the half that has to match',
-    /new Date\(Number\(parts\[1\]\), Number\(parts\[2\]\) - 1, Number\(parts\[3\]\)\)/.test(rowsSrc), true);
-  check('neither half reaches for toISOString to build the picker value',
-    /isoToDateInput[\s\S]{0,400}toISOString\(\)\.slice/.test(rowsSrc), false);
+  /**
+   * RUN IN A DIFFERENT TIMEZONE, in a separate process, because this one cannot
+   * see the bug.
+   *
+   * Node reads TZ once at start, and this suite runs in UTC -- where local time
+   * and UTC are the same number, so every timezone mistake gives an identical
+   * answer. That is not a guess: a control swapped the date-picker reader to
+   * `toISOString().slice(0, 10)`, which loses a day for everyone east of
+   * Greenwich, and NOTHING went red. A source check was tried instead and was
+   * no better, because shape-matching text survives the break that matters.
+   *
+   * Asia/Kolkata is +05:30 -- a half-hour offset, which also catches anything
+   * assuming whole-hour zones.
+   */
+  const tz = JSON.parse(
+    execFileSync(
+      process.execPath,
+      ['--experimental-strip-types', '--import', './scripts/register.mjs', 'scripts/tz-probe.ts'],
+      { env: { ...process.env, TZ: 'Asia/Kolkata' }, encoding: 'utf8' },
+    ).trim().split('\n').pop() as string,
+  );
+
+  check('THE PROBE REALLY IS IN ANOTHER TIMEZONE, or it proves nothing',
+    tz.offsetMinutes !== 0, true);
+  check('A PICKED DATE COMES BACK AS THE SAME DAY IN +05:30', tz.roundTrip, '2026-08-20');
+  check('AND SO DOES ONE THAT ARRIVED THROUGH A DATE COLUMN', tz.viaColumn, '2026-08-20');
+  check('THE TWO WRITE PATHS AGREE TO THE MILLISECOND', tz.storedByCell, tz.storedByColumn);
+  check('and they store local midnight, which is what the picker means',
+    tz.storedByCell, '2026-08-19T18:30:00.000Z');
+  // A day lost at a year boundary is a year lost.
+  check('new year does not slip into the old one', tz.newYear, '2026-01-01');
+  check('nor new year’s eve into the next', tz.newYearEve, '2026-12-31');
+
+  /**
+   * ONE PATH, NOT TWO. A Database cell built the date locally; a visitor's form
+   * field went through toDate and got UTC midnight. The same date picked in the
+   * two places was stored as two different instants, and in some timezones as
+   * two different days. Neither was wrong alone; having both was.
+   */
+  check('A FORM FIELD AND A TABLE CELL STORE THE SAME DATE IDENTICALLY',
+    coerceForColumn('2026-08-20', { name: 'Due', type: 'date' }),
+    dateInputToIso('2026-08-20'));
+  check('and a picker value round-trips through the column path too',
+    isoToDateInput(coerceForColumn('2026-08-20', { name: 'Due', type: 'date' })), '2026-08-20');
+  check('a value that already carries a time is left as the instant it says',
+    isoDate('2026-08-20T15:00:00.000Z'), '2026-08-20T15:00:00.000Z');
+  check('only the exact bare shape takes the local reading',
+    isoDate('20 Aug 2026').length > 0, true);
+  // The source check that used to stand here is gone: shape-matching text
+  // survived the break that mattered, so it was reassurance rather than
+  // evidence. The probe above is the evidence.
   check('a stored date with a time on it still fills the picker',
     isoToDateInput('2026-08-17T23:30:00'), '2026-08-17');
   check('an empty picker stores nothing', dateInputToIso(''), '');
