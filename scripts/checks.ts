@@ -5372,6 +5372,25 @@ group('a column can hold a date');
   check('nor new year’s eve into the next', tz.newYearEve, '2026-12-31');
 
   /**
+   * The formula language and the form rules have the same exposure, and the
+   * clock in these two is late in the local evening -- the window where a UTC
+   * reading and a local one fall on different days.
+   */
+  check('"THREE DAYS LEFT" IS STILL THREE AT HALF PAST ELEVEN IN +05:30', tz.daysUntil, 3);
+  check('and the same first thing in the morning', tz.daysUntilEarly, 3);
+  check('today is still zero days away late at night', tz.todayIsZero, 0);
+  check('A BOOKING MADE LATE AT NIGHT FOR TOMORROW IS NOT REFUSED', tz.tomorrowIsAllowed, null);
+  /**
+   * The discriminating one, and it took a failed control to find: "tomorrow is
+   * allowed" passes under either reading, because a UTC midnight is only ever
+   * more permissive. Asking whether TODAY is refused is the question where they
+   * differ -- and getting that wrong lets somebody book a slot that has already
+   * started.
+   */
+  check('AND ONE FOR TODAY IS STILL REFUSED, which is where the two readings differ',
+    tz.todayIsRefused, true);
+
+  /**
    * ONE PATH, NOT TWO. A Database cell built the date locally; a visitor's form
    * field went through toDate and got UTC midnight. The same date picked in the
    * two places was stored as two different instants, and in some timezones as
