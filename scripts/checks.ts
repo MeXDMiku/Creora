@@ -63,7 +63,7 @@ import { startingPace, nextPace, rowsFingerprint, POLL_FAST_MS, POLL_SLOW_MS, PO
 import { BLOCK_DISPLAY_NAMES } from '../src/lib/blockRegistry';
 import { RULE_TYPES as AUDIT_RULES } from '../src/lib/validation';
 import { TABLE_FUNCTION_NAMES, DATE_FUNCTION_NAMES } from '../src/lib/formula';
-import { visibleRows, rowFormulaValue, rowSlots, compareCells, slotNamesFor, rowMatchesSearch, MAX_RENDERED_ROWS, rowIndexesForStep, coerceForColumn, rowMatchesFormula, columnsUsedByFormula, calcExampleFor, calcExampleWithFilter, shareExampleFor, isoDate, isoToDateInput, dateInputToIso, displayCell, COLUMN_TYPE_LABELS, listRowLines, listIsEmpty } from '../src/lib/rows';
+import { visibleRows, rowFormulaValue, rowSlots, compareCells, slotNamesFor, rowMatchesSearch, MAX_RENDERED_ROWS, rowIndexesForStep, coerceForColumn, rowMatchesFormula, columnsUsedByFormula, calcExampleFor, calcExampleWithFilter, shareExampleFor, styleExampleFor, isoDate, isoToDateInput, dateInputToIso, displayCell, COLUMN_TYPE_LABELS, listRowLines, listIsEmpty } from '../src/lib/rows';
 import {
   parseSlot,
   applyFilters,
@@ -7388,6 +7388,106 @@ group('a list can be filtered and ordered by something worked out');
 }
 
 
+group('a card can colour itself from a value');
+{
+  /**
+   * RANK 7 FROM docs/BUILT_ONE_TO_FIND_OUT.md -- "a full card is greyed, a low
+   * one is amber" -- and the answer turned out to be that IT ALREADY WORKED.
+   *
+   * A calculated slot fills anywhere in the markup, attributes included. So the
+   * last item on that list needed no new anything, and NOTHING ANYWHERE SAID
+   * SO. A capability nobody can find is worth about what one that does not
+   * exist is worth, and this is the least guessable one left: every other
+   * example in the panel shows a slot standing on its own between tags.
+   *
+   * These checks exist because "it already works" is exactly the sort of thing
+   * that stops being true in a refactor nobody connects to it. Now it cannot.
+   */
+  const CARD = `<div class="card {{calc: if(Left > 0, 'open', 'full')}}" style="background: {{calc: if(Left > 0, '#dcfce7', '#fee2e2')}}"><h3>{{Title}}</h3><p>{{Left}} left</p></div>`;
+  const open = fillSlots(CARD, rowSlots({ id: 'c1', Title: 'Wheel throwing', Left: 3 } as any, 0));
+  const full = fillSlots(CARD, rowSlots({ id: 'c2', Title: 'Glazing', Left: 0 } as any, 1));
+  check('A CARD WITH ROOM COLOURS ITSELF ONE WAY', open.includes('background: #dcfce7'), true);
+  check('and a full one the other', full.includes('background: #fee2e2'), true);
+  check('the class name comes from the value too', open.includes('class="card open"'), true);
+  check('and the other card gets its own', full.includes('class="card full"'), true);
+  check('while the rest of the card is unchanged', full.includes('<h3>Glazing</h3>'), true);
+
+  /**
+   * THE SAME THING DRIVEN BY ANOTHER TABLE, which is the mockup's actual case:
+   * a class is full when the bookings pointing at it fill its capacity.
+   */
+  const tables = {
+    Bookings: {
+      rows: [{ id: 'b1', ClassId: 'c2' }, { id: 'b2', ClassId: 'c2' }],
+      columns: ['ClassId'],
+    },
+  };
+  const RELATED = `<div style="opacity: {{calc: if(Capacity - countOf("Bookings", '{{ClassId}} == RowId') > 0, 1, 0.5)}}">{{Title}}</div>`;
+  check('A FULL CARD GREYS ITSELF, counting rows in another table',
+    fillSlots(RELATED, rowSlots({ id: 'c2', Title: 'Glazing', Capacity: 2 } as any, 0), [], { tables }),
+    '<div style="opacity: 0.5">Glazing</div>');
+  check('and one with room does not',
+    fillSlots(RELATED, rowSlots({ id: 'c2', Title: 'Glazing', Capacity: 9 } as any, 0), [], { tables }),
+    '<div style="opacity: 1">Glazing</div>');
+
+  /**
+   * AND A VALUE STILL CANNOT BREAK OUT OF THE ATTRIBUTE IT LANDS IN.
+   *
+   * This is the reason styling from a value is safe to encourage rather than
+   * merely possible. A row's cells can come from a form a stranger filled in,
+   * so a value carrying a quote must not be able to close the attribute and
+   * start an event handler. It is escaped, and these say so where somebody
+   * changing the filler will see them.
+   */
+  check('a quote in a value cannot close a style attribute',
+    fillSlots(`<div style="color: {{C}}">x</div>`, { C: `red" onmouseover="alert(1)` }),
+    '<div style="color: red&quot; onmouseover=&quot;alert(1)">x</div>');
+  check('nor a class attribute',
+    fillSlots(`<div class="card {{C}}">x</div>`, { C: `a" onclick="alert(1)` }),
+    '<div class="card a&quot; onclick=&quot;alert(1)">x</div>');
+  check('and a calculated one is escaped the same way',
+    fillSlots(`<div style="color: {{calc: C}}">x</div>`, { C: `red" onmouseover="x` }),
+    '<div style="color: red&quot; onmouseover=&quot;x">x</div>');
+
+  /**
+   * THE PANEL'S EXAMPLE, RUN. It is printed where somebody will paste it, so
+   * "it looks right" is not enough -- the other worked examples in this file
+   * are checked the same way, and one of them was wrong when it was written.
+   */
+  const example = styleExampleFor(['Left', 'Title']);
+  check('the panel offers an example built from the builder’s own column',
+    example, `<div style="background: {{calc: if(Left > 0, '#dcfce7', '#fee2e2')}}">`);
+  check('and its slot fills to the colour it promises',
+    fillSlots(String(example) + '</div>', rowSlots({ id: 'c1', Left: 2 } as any, 0)),
+    '<div style="background: #dcfce7"></div>');
+  check('both ways round', fillSlots(String(example) + '</div>', rowSlots({ id: 'c1', Left: 0 } as any, 0)),
+    '<div style="background: #fee2e2"></div>');
+  check('a column whose name cannot be a bare word is not offered',
+    styleExampleFor(['Row total']), null);
+  check('nor is nothing at all', styleExampleFor([]), null);
+
+  /**
+   * SINGLE QUOTES INSIDE THE FORMULA, and this is the part that had to be got
+   * right rather than guessed: the slot sits in a double-quoted attribute, so a
+   * double quote in the formula ends the attribute early and spills the rest of
+   * the card onto the page as text.
+   *
+   * WHAT THIS FILE CANNOT CHECK, SAID OUT LOUD. The damage happens in
+   * sanitizeHtml, which parses the markup with a real DOM and is not runnable
+   * here -- it returns an empty string in node. A control confirmed the gap the
+   * hard way: swapping the example's quotes for double ones left the fillSlots
+   * checks above perfectly green, because fillSlots is a text substitution and
+   * never sees an attribute at all. So the rule is checked as a RULE, on the
+   * text of the example, which is the part that is checkable without a browser.
+   */
+  const insideTheSlot = String(example).slice(String(example).indexOf('{{'), String(example).indexOf('}}'));
+  check('the example is in a double-quoted attribute', String(example).includes('style="'), true);
+  check('AND THE FORMULA INSIDE IT USES NO DOUBLE QUOTES, or the attribute ends early',
+    insideTheSlot.includes('"'), false);
+  check('and it does use single ones, so it is quoting something', insideTheSlot.includes("'"), true);
+}
+
+
 group('hiding something is not withholding it');
 {
   /**
@@ -7625,7 +7725,7 @@ group('a slot can contain a slot');
  * Raise it in the same commit that adds the checks, the way the drift budget
  * above is raised: a number changed where it can be seen in a diff.
  */
-const EXPECTED_CHECKS = 1774;
+const EXPECTED_CHECKS = 1792;
 reachedTheEnd = true;
 if (passed + failed !== EXPECTED_CHECKS) {
   failed++;

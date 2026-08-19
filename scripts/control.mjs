@@ -169,6 +169,13 @@ const CONTROLS = [
     expect: ['nor a hide that is just interface'],
   },
   {
+    name: 'style: the panel offers an example that does not render',
+    file: 'src/lib/rows.ts',
+    find: `  return \`<div style="background: {{calc: if(\${simple[0]} > 0, '#dcfce7', '#fee2e2')}}">\`;`,
+    with: `  return \`<div style="background: {{calc: if(\${simple[0]} > 0, "#dcfce7", "#fee2e2")}}">\`;`,
+    expect: ['THE FORMULA INSIDE IT USES NO DOUBLE QUOTES'],
+  },
+  {
     name: 'the harness itself: a check that throws must be red, not silent',
     file: 'scripts/checks.ts',
     find: `  const card = (row: any, f: string) => ran(() => evaluateExpression(f, { ...row, RowId: row.id }, tables));`,

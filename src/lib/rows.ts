@@ -734,6 +734,39 @@ export function calcExampleWithFilter(example: string | null, symbol = '£'): st
 }
 
 /**
+ * A worked example of STYLE DRIVEN BY A VALUE, in the builder's own columns.
+ *
+ * WHY THIS IS AN EXAMPLE RATHER THAN A FEATURE
+ * It already worked. A calculated slot fills anywhere in the markup, including
+ * inside a `style` or `class` attribute, so "a full card is greyed and a low one
+ * is amber" needed no new anything -- and NOTHING ANYWHERE SAID SO. A capability
+ * nobody can find is worth about as much as one that does not exist, and this is
+ * the least guessable one left: every other slot in the panel is shown standing
+ * on its own between tags.
+ *
+ * Same rule as the other examples here: it is printed in a panel and somebody
+ * will paste it, so it is only useful if it is RIGHT, and the only way to know
+ * that is to run it. There is a check that renders this one and compares the
+ * markup that comes out.
+ *
+ * Returns null with no usable column, because an example naming nothing teaches
+ * nothing.
+ */
+export function styleExampleFor(columns: string[] | undefined | null): string | null {
+  const simple = (columns || [])
+    .map(c => String(c ?? '').trim())
+    .filter(c => /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(c));
+  if (!simple.length) return null;
+  /**
+   * Single quotes inside, and this is the part that has to be got right rather
+   * than guessed: the slot sits inside a double-quoted HTML attribute, so a
+   * double quote in the formula would end the attribute early and the rest of
+   * the card would become stray text.
+   */
+  return `<div style="background: {{calc: if(${simple[0]} > 0, '#dcfce7', '#fee2e2')}}">`;
+}
+
+/**
  * A worked example of a row's share of the whole, in the builder's own names.
  *
  * Same reasoning as calcExampleFor: printed in the panel, so it is checked by

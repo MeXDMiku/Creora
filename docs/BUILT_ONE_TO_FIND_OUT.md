@@ -106,7 +106,7 @@ Ordered by how many of the fifteen it unblocks.
 | 4 | **act on the oldest matching row** | the waitlist promotion | small | **done** |
 | 5 | **uniqueness across two columns** | one person, one booking | small, extends 0008 | needs the database |
 | 6 | **show something by role** | the owner's dashboard | medium | **done, with a warning** |
-| 7 | **style driven by a value** | full/low/open cards | medium, and touches layout | |
+| 7 | **style driven by a value** | full/low/open cards | medium, and touches layout | **already worked** |
 
 Ranks 1, 2, 4 and 5 are all small, and together they are eleven of the fifteen.
 None of them is a new block type. **The engine does not need more nodes; it
@@ -165,8 +165,46 @@ published page that hides by who is looking, because from the outside it looks
 exactly like it worked. Actually withholding a row is migration 0004, which has
 never been run.
 
-Rank 7 (style driven by a value) is next, and it touches the part of the app
-this project has deliberately left until last.
+### Rank 7 was never missing
+
+"A full card is greyed, a low one is amber" was written down as *medium, and
+touches layout*. It touches nothing. A calculated slot fills anywhere in the
+markup, attributes included:
+
+```html
+<div class="card {{calc: if(Left > 0, 'open', 'full')}}"
+     style="background: {{calc: if(Left > 0, '#dcfce7', '#fee2e2')}}">
+```
+
+It worked the whole time and **nothing anywhere said so**, which is worth about
+as much as not working. The panel now offers a worked example built from the
+builder's own column names, and the example is checked by being run — every
+other example in that panel is, and one of them was wrong when it was written.
+
+Two things came out of pinning it. A value carrying a quote cannot break out of
+the attribute it lands in — already true, now named, because that is what makes
+this safe to *encourage* rather than merely possible when a row's cells come
+from a form a stranger filled in. And the example must use single quotes inside
+the formula, since the slot sits in a double-quoted attribute: a control proved
+`fillSlots` cannot catch that mistake, because it is a text substitution that
+never sees an attribute. The damage happens in `sanitizeHtml`, which needs a
+real DOM and does not run in `npm run check` at all. So the rule is checked as a
+rule, on the text of the example.
+
+**All fifteen behaviours from the top of this document are now expressible,
+except the two that need the database** — per-visitor rows (0004) and uniqueness
+across two columns (0008 extended). Both are migrations that exist and have
+never been run.
+
+### What building a site taught that reading one did not
+
+Seven of the eleven things this document called missing were **one sentence**
+each, and the sentence was the same shape every time: two parts of the engine
+that could not see each other. Not one of the fifteen wanted a new block type.
+
+The method is worth repeating on a different site — a shop, a class register, a
+repair-tracker. Build it so it works, *then* translate. Every gap here came from
+translating something that already ran; none came from listing features.
 
 ---
 
