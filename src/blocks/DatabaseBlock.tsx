@@ -5,6 +5,7 @@ import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
 import type { NodeViewProps } from '@tiptap/react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { executeWorkflow, recalculateAllFormulas } from '../lib/bindingEngine';
+import { describeRowWriteError, withoutRow } from '../lib/rowWrite';
 import { computeDatabaseOutput } from '../lib/databaseOutput';
 import { blockRuntimeAtom, activeWireAtom, snapTargetAtom, triggerSaveAtom, contextMenuAtom, getPortBadge, getBlockTypeDisplayName } from '../state/atoms';
 import { useMemo, useRef, useState, useEffect, useCallback } from 'react';
@@ -99,6 +100,22 @@ const DatabaseBlockComponent = (props: NodeViewProps) => {
   // Rows can arrive from anyone using the published page, so keep looking.
   usePollWhileVisible(() => loadRowsRef.current());
 
+  /**
+   * Say that a write did not land, on the block itself.
+   *
+   * Every write in this file used to console.warn and carry on -- three of
+   * them: a cell edit, a new row, a delete. The builder saw the table change,
+   * the database did not, and the next reload put it back with no explanation.
+   * A console message is not telling somebody; it is telling nobody.
+   *
+   * The engine's row actions made the same choice at the same time; this is the
+   * editor's half of it, and it shares the wording.
+   */
+  const reportWriteFailure = useCallback((error: unknown) => {
+    const current = store.get(atomInstance);
+    store.set(atomInstance, { ...current, error: describeRowWriteError(error).message });
+  }, [store, atomInstance]);
+
   // Debounced cell edit save
   const debouncedSaveRef = useRef<Record<string, any>>({});
   const saveCellToSupabase = useCallback((rowId: string, rowData: any) => {
@@ -109,14 +126,21 @@ const DatabaseBlockComponent = (props: NodeViewProps) => {
       try {
         const { error } = await supabase
           .rpc('update_database_row', { p_id: rowId, p_row_data: rowData });
-        if (error) {
-          console.warn('[Supabase save info]: Could not update row, falling back to local state.', error.message);
-        }
+        /**
+         * A failed cell edit is NOT rolled back, and that is the one place this
+         * file differs from the others.
+         *
+         * By the time a debounced save answers, the builder has typed on.
+         * Yanking the cell back to its old value under their cursor would lose
+         * whatever they wrote since, which is worse than the wrong value being
+         * on screen while the message says it did not save.
+         */
+        if (error) reportWriteFailure(error);
       } catch (err) {
-        console.error('Error saving cell to Supabase:', err);
+        reportWriteFailure(err);
       }
     }, 500);
-  }, []);
+  }, [reportWriteFailure]);
 
   const handleCellEdit = (rowId: string, colName: string, val: any) => {
     const updatedRows = rows.map(r => {
@@ -184,15 +208,45 @@ const DatabaseBlockComponent = (props: NodeViewProps) => {
           p_block_id: blockId,
           p_row_data: defaultData
         });
+      // The row comes back off the table if it was not stored, so the count
+      // and the table agree with the database rather than with the click.
       if (error) {
-        console.warn('[Supabase save info]: Could not insert row, falling back to local state.', error.message);
+        const current = store.get(atomInstance);
+        const kept = withoutRow(current?.rows || [], rowId);
+        store.set(atomInstance, {
+          ...current,
+          rows: kept,
+          value: computeDatabaseOutput(kept, current),
+          error: describeRowWriteError(error).message,
+        });
       }
     } catch (err) {
-      console.error('Error inserting row in Supabase:', err);
+      const current = store.get(atomInstance);
+      const kept = withoutRow(current?.rows || [], rowId);
+      store.set(atomInstance, {
+        ...current,
+        rows: kept,
+        value: computeDatabaseOutput(kept, current),
+        error: describeRowWriteError(err).message,
+      });
     }
   };
 
+  const restoreDeletedRow = (row: any, failure: string) => {
+    if (!row) return;
+    const current = store.get(atomInstance);
+    const already = (current?.rows || []).some((r: any) => r?.id === row.id);
+    const back = already ? (current?.rows || []) : [...(current?.rows || []), row];
+    store.set(atomInstance, {
+      ...current,
+      rows: back,
+      value: computeDatabaseOutput(back, current),
+      error: failure,
+    });
+  };
+
   const handleDeleteRow = async (rowId: string) => {
+    const doomedRow = rows.find(r => r.id === rowId);
     const updatedRows = rows.filter(r => r.id !== rowId);
 
     let nextValue = 0;
@@ -214,11 +268,11 @@ const DatabaseBlockComponent = (props: NodeViewProps) => {
     try {
       const { error } = await supabase
         .rpc('delete_database_row', { p_id: rowId });
-      if (error) {
-        console.warn('[Supabase save info]: Could not delete row, falling back to local state.', error.message);
-      }
+      // A row that would not delete comes back, rather than sitting deleted on
+      // screen and reappearing on the next reload.
+      if (error) restoreDeletedRow(doomedRow, describeRowWriteError(error).message);
     } catch (err) {
-      console.error('Error deleting row in Supabase:', err);
+      restoreDeletedRow(doomedRow, describeRowWriteError(err).message);
     }
   };
 

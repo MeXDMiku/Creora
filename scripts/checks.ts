@@ -5680,6 +5680,47 @@ group('a row that was not saved does not stay on the page');
     (engineSrc.match(/console\.warn\('\[Supabase execute info\]/g) || []).length, 0);
   check('and the read that updateRow depends on reports its own failure',
     /describeRowWriteError\(selectError\)/.test(engineSrc), true);
+
+  /**
+   * THE EDITOR'S OWN TABLE HAD THE SAME THREE. A cell edit, a new row and a
+   * delete each warned to the console and carried on: the builder saw the table
+   * change, the database did not, and the next reload put it back with no
+   * explanation. A console message is not telling somebody; it is telling
+   * nobody.
+   *
+   * Counting again rather than naming, because naming one is how the other two
+   * survived the first pass through the engine.
+   */
+  const blockSrc = readFileSync('src/blocks/DatabaseBlock.tsx', 'utf8');
+  check('NO WRITE IN THE EDITOR TABLE STILL JUST WARNS AND CARRIES ON',
+    (blockSrc.match(/console\.warn\('\[Supabase save info\]/g) || []).length, 0);
+  check('and none of them swallows a thrown one either',
+    (blockSrc.match(/console\.error\('Error (inserting|deleting|saving)/g) || []).length, 0);
+  check('all three say what happened, where a person can see it',
+    (blockSrc.match(/describeRowWriteError/g) || []).length >= 5, true);
+  /**
+   * COUNTED, not matched. Each of these has two failure branches -- the
+   * rejected call and the thrown one -- and a control proved that `includes`
+   * stays green when one of them is removed, because the other still matches.
+   * Third time that exact hollow check has been written in this file.
+   */
+  check('a row that would not be stored comes off the table, in both branches',
+    (blockSrc.match(/withoutRow\(current\?\.rows \|\| \[\], rowId\)/g) || []).length, 2);
+  check('and one that would not delete comes back, in both branches',
+    (blockSrc.match(/restoreDeletedRow\(doomedRow/g) || []).length, 2);
+  /**
+   * Except a cell edit, deliberately: by the time a debounced save answers, the
+   * builder has typed on, and yanking the cell back under their cursor would
+   * lose what they wrote since.
+   */
+  check('A CELL EDIT IS NOT ROLLED BACK, WHICH IS THE ONE EXCEPTION',
+    /debouncedSaveRef[\s\S]{0,900}reportWriteFailure\(error\)/.test(blockSrc), true);
+  check('and the reason for that exception is written down',
+    blockSrc.includes('would lose'), true);
+  // Loading is still allowed to fall back quietly: nothing was written, so
+  // nothing is being misreported.
+  check('reading rows may still fall back quietly, since nothing was written',
+    blockSrc.includes('[Supabase load info]'), true);
   check('so a workflow writing a date stores what a table cell would',
     coerceForColumn('2026-08-20', { name: 'Due', type: 'date' }),
     dateInputToIso('2026-08-20'));
