@@ -971,7 +971,9 @@ export function executeWorkflow(
            * save a page's data before the page is deleted. It was inline here
            * until that second caller appeared.
            */
-          const cols = (currentTargetState?.columns || []) as { name: string }[];
+          // Types included, not just names: a date column has to be written
+          // as the day the builder picked rather than the instant it stores as.
+          const cols = (currentTargetState?.columns || []) as { name: string; type?: string }[];
           const rows = (currentTargetState?.rows || []) as Record<string, any>[];
           downloadCsv(csvFileName(currentTargetState?.blockName), toCsv(cols, rows));
           break;

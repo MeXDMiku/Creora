@@ -17,6 +17,7 @@
 import { isoDate, isoToDateInput, dateInputToIso, coerceForColumn } from '../src/lib/rows';
 import { evaluateExpression } from '../src/lib/formula';
 import { validateValue } from '../src/lib/validation';
+import { toCsv } from '../src/lib/csv';
 
 const picked = '2026-08-20';
 
@@ -79,4 +80,14 @@ console.log(JSON.stringify({
     [{ type: 'dateAfter', value: 'today' }] as any,
     { fieldName: 'Date', now: new Date(2026, 7, 17, 1, 0) },
   ) !== null,
+
+  /**
+   * And the export. Dates store as LOCAL midnight, so a booking picked for the
+   * 20th is 2026-08-19T18:30:00.000Z here -- correct to the millisecond, and
+   * the 19th to anybody who opens the file.
+   */
+  csv: toCsv(
+    [{ name: 'Due', type: 'date' }, { name: 'Who', type: 'text' }],
+    [{ id: 'r1', Due: dateInputToIso('2026-08-20'), Who: 'Ada' }],
+  ).split('\r\n')[1],
 }));

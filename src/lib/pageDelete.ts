@@ -18,7 +18,7 @@ import { toCsv, csvFileName, downloadCsv } from './csv';
 
 export interface PageDataSummary {
   /** Every Database block on the page, with what it holds. */
-  tables: { blockId: string; name: string; columns: { name: string }[]; rows: Record<string, any>[] }[];
+  tables: { blockId: string; name: string; columns: { name: string; type?: string }[]; rows: Record<string, any>[] }[];
   rowCount: number;
   tableCount: number;
   /**
@@ -47,7 +47,8 @@ export function summarisePageData(
     tables.push({
       blockId,
       name: String(state?.blockName || 'Table'),
-      columns: (state?.columns || []) as { name: string }[],
+      // Types too -- see toCsv: a date column is written as a day.
+      columns: (state?.columns || []) as { name: string; type?: string }[],
       rows: Array.isArray(rows) ? rows : [],
     });
   }

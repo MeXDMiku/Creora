@@ -11,8 +11,18 @@
  * without doubling quotes one comma in a message shifts every column after it.
  */
 
+import { isoToDateInput } from './rows';
+
 export interface CsvColumn {
   name: string;
+  /**
+   * Carried so a date column can be written as a plain day.
+   *
+   * Optional because a caller without types still works -- but a caller that
+   * HAS them and does not pass them exports the wrong thing silently, so both
+   * call sites pass them and a check makes sure they keep doing it.
+   */
+  type?: string;
 }
 
 /** One field, quoted only when it has to be. */
@@ -30,10 +40,28 @@ export function csvCell(value: any): string {
  * without mangling accents and without putting every row into one cell, and
  * that was checked with a round trip when the export action was first written.
  */
+/**
+ * One cell, as a CSV should carry it.
+ *
+ * A DATE COLUMN IS WRITTEN AS THE DAY, NOT AS THE INSTANT. Dates are stored as
+ * local midnight in ISO, so a booking picked for the 20th is
+ * `2026-08-19T18:30:00.000Z` in Delhi -- and a builder who exports their
+ * bookings and opens the file sees the 19th. Correct to the millisecond, wrong
+ * to the person, and wrong in the one direction that gets acted on.
+ *
+ * `YYYY-MM-DD` is what the picker showed them, sorts correctly in a
+ * spreadsheet, and is read as a date by every spreadsheet there is.
+ */
+function csvValue(value: any, column: CsvColumn): any {
+  if (column?.type !== 'date') return value;
+  if (value === null || value === undefined || value === '') return '';
+  return isoToDateInput(value) || value;
+}
+
 export function toCsv(columns: CsvColumn[], rows: Record<string, any>[]): string {
   const header = (columns || []).map(c => csvCell(c.name)).join(',');
   const body = (rows || [])
-    .map(r => (columns || []).map(c => csvCell(r[c.name])).join(','))
+    .map(r => (columns || []).map(c => csvCell(csvValue(r[c.name], c))).join(','))
     .join('\r\n');
   return '﻿' + header + '\r\n' + body;
 }

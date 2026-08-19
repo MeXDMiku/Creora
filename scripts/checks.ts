@@ -4646,6 +4646,23 @@ group('a page can get more than one number out of a table');
 
   // A long value is trimmed so one runaway cell cannot fill the panel.
   const long = { Orders: { rows: [{ id: 'a', Total: 'x'.repeat(120) }], columns: ['Total'] } };
+  // And the same thing in this runner, where it is only the shape being checked.
+  check('a date column exports as a plain day',
+    toCsv([{ name: 'Due', type: 'date' }], [{ Due: '2026-08-20T00:00:00.000Z' }]).split('\r\n')[1],
+    '2026-08-20');
+  check('a column with no type is written as it is stored',
+    toCsv([{ name: 'Due' }], [{ Due: '2026-08-20T00:00:00.000Z' }]).split('\r\n')[1],
+    '2026-08-20T00:00:00.000Z');
+  check('an empty date cell exports as empty, not as a fallback day',
+    toCsv([{ name: 'Due', type: 'date' }], [{ Due: '' }]).split('\r\n')[1], '');
+  check('AND AN UNREADABLE ONE IS EXPORTED AS STORED, so nothing is invented',
+    toCsv([{ name: 'Due', type: 'date' }], [{ Due: 'whenever' }]).split('\r\n')[1], 'whenever');
+  // Both call sites hand over the types, or the fix is only half applied.
+  check('the export action passes column types',
+    /columns \|\| \[\]\) as \{ name: string; type\?: string \}/.test(readFileSync('src/lib/bindingEngine.ts', 'utf8')), true);
+  check('and so does the page-delete download',
+    /name: string; type\?: string/.test(readFileSync('src/lib/pageDelete.ts', 'utf8')), true);
+
   check('a very long value is trimmed in the message',
     (() => { try { evaluateExpression('sumOf("Orders", "Total")', {}, long); return ''; } catch (e: any) { return String(e.message); } })().length < 120, true);
 
@@ -5389,6 +5406,14 @@ group('a column can hold a date');
    */
   check('AND ONE FOR TODAY IS STILL REFUSED, which is where the two readings differ',
     tz.todayIsRefused, true);
+
+  /**
+   * The export, which is where being right to the millisecond is most clearly
+   * wrong to the person: a builder downloads their bookings and reads a day
+   * that is not the day they picked.
+   */
+  check('A DATE EXPORTS AS THE DAY THAT WAS PICKED, NOT THE INSTANT IT STORES AS',
+    tz.csv, '2026-08-20,Ada');
 
   /**
    * ONE PATH, NOT TWO. A Database cell built the date locally; a visitor's form
