@@ -251,6 +251,63 @@ client — the check says so in its own name.
 were the control aimed at the wrong line, the check overclaiming, or the check
 being hollow. None of the three shows up by reading.
 
+### The drift, finally measured
+
+1,467 checks, from 1,395.
+
+Nine separate bugs in this project have been **the same bug**: a decision made
+in two places that stopped agreeing. Three more turned up in one sweep:
+
+| what was written twice | what it cost |
+| :--- | :--- |
+| the **List block's rows** | both copies showed a date as `2026-08-19T18:30:00.000Z` and a boolean as `true` |
+| the **history chart's geometry** | forty lines of arithmetic, unchecked in both |
+| the **timer's whole behaviour** | the only block that acts on its own — a workflow could fire on a published page and not while building it |
+
+The chart's maths carried three decisions that look like details and are not:
+zero is always in range (a chart of 100, 101, 102 otherwise draws as a cliff and
+reads as a tripling); a bar is never thinner than 2px, so a zero is a line rather
+than nothing; negatives hang below the baseline instead of being flipped up.
+
+**Then the leverage move.** Finding the tenth by hand is not a plan.
+`scripts/rendererDrift.ts` counts how much of the editor is written out a second
+time, and the checks hold it to a **budget of 131 lines across 11 runs** — all
+of it presentation now. It may shrink; it may not grow without somebody deciding
+it should, and changing the number is that decision, made where a diff shows it.
+The figure prints on every run, because a budget nobody can see the shape of
+creeps up one line at a time.
+
+### The component that could not be checked
+
+`ListRowsView` was shared between both renderers — and then three controls showed
+the checks around it were nearly worthless. Node's type-stripping cannot read
+`.tsx`, so a component cannot be imported by this suite at all, and breaking its
+rendering left every behavioural check green: they were all calling `displayCell`
+directly rather than going through anything the component used.
+
+So the **decisions** moved out to `rows.ts` where they can be run, and the
+component draws what they return and decides nothing. The same four controls now
+turn thirteen checks red.
+
+The same reasoning shaped `useTimer`: the hook is shared, but the second-by-second
+decision is a pure function beside it, because a hook cannot be run here either.
+
+### Three more checks that were wrong on the way in
+
+None of them found by reading:
+
+- one scanned the whole published renderer for `setInterval` and went red on the
+  **data source** block's refresh — correct code, nothing to do with timers. A
+  check that reads too widely costs the same trust as one that misses.
+- "lands on zero" used `countdown(1)`, where `1 - 1` is 0 whether or not
+  anything clamps it. The discriminating case is a timer already at zero.
+- one used the instant a +05:30 picker actually stores, in the runner whose
+  clock is UTC. That half moved to `tz-probe.ts`, which is what it is for.
+
+**Running total: twenty green controls.** The proportion has not changed: about
+half real gaps, half checks that were hollow, overclaiming, or aimed at the
+wrong line.
+
 ### Notes worth keeping
 
 - **An example printed in the UI is a promise.** The repeater panel prints a
