@@ -13,6 +13,7 @@ import { runPageLoadWorkflows } from '../lib/bindingEngine';
 import { computeDatabaseOutput } from '../lib/databaseOutput';
 import { CustomHtmlView } from '../blocks/CustomHtmlBlock';
 import { RepeatView } from '../blocks/RepeatBlock';
+import { ListRowsView } from '../blocks/ListBlock';
 import { FieldView, FieldError } from '../blocks/FieldView';
 import { refreshPageValue, buildParamsFromTemplate } from '../lib/pageValue';
 import { parseParams } from '../lib/pageParams';
@@ -580,38 +581,16 @@ function PublishedListBlock({ block }: { block: ExtractedBlock }) {
           overflowY: 'auto',
         }}
       >
-        {!trackedBlockId || displayRows.length === 0 ? (
-          <div style={{ textAlign: 'center', color: '#94a3b8', fontStyle: 'italic', fontSize: '12px', padding: '16px' }}>
-            No data
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {displayRows.map((row: any, idx: number) => (
-              <div
-                key={row.id || idx}
-                style={{
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '6px',
-                  padding: '8px 12px',
-                  background: '#f8fafc',
-                  boxShadow: '0 1px 2px rgba(0,0,0,0.02)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '4px',
-                }}
-              >
-                {Object.entries(row)
-                  .filter(([key]) => key !== 'id')
-                  .map(([colName, colVal]) => (
-                    <div key={colName} style={{ display: 'flex', gap: '8px', fontSize: '12px' }}>
-                      <span style={{ fontWeight: 600, color: '#475569', minWidth: '60px' }}>{colName}:</span>
-                      <span style={{ color: '#0f172a' }}>{String(colVal)}</span>
-                    </div>
-                  ))}
-              </div>
-            ))}
-          </div>
-        )}
+        {/*
+          The editor's own rows component. It used to be a character-for-
+          character copy of this, including the String(colVal) that showed a
+          visitor a raw ISO timestamp for a date column.
+        */}
+        <ListRowsView
+          rows={displayRows}
+          columns={dbState?.columns}
+          trackedBlockId={trackedBlockId}
+        />
       </div>
     </div>
   );

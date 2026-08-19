@@ -620,3 +620,49 @@ export const COLUMN_TYPE_LABELS: Record<ColumnType, string> = {
   boolean: 'Boolean',
   date: 'Date',
 };
+
+/**
+ * What a List block SHOWS for one row: the label and text of each line.
+ *
+ * WHY THE DECISIONS ARE OUT HERE AND THE DRAWING IS NOT
+ * The component is shared between the editor and the published page, which is
+ * what stopped the two drifting -- but a component cannot be checked in this
+ * suite at all. Node's type-stripping does not read `.tsx`, so importing it
+ * fails outright, and a source-shape check is what is left. Three negative
+ * controls proved how little that is worth: breaking the component's rendering
+ * left every behavioural check green, because they were all calling
+ * `displayCell` directly rather than going through anything.
+ *
+ * So the DECISIONS live here, where they can be run: which lines a row has,
+ * what each one reads as, and which column type each is read with. The
+ * component draws what this returns and decides nothing.
+ */
+export function listRowLines(
+  row: Record<string, any> | undefined | null,
+  columns?: { name: string; type?: string }[] | null,
+): { name: string; text: string }[] {
+  // `id` is the row's handle, not a field somebody typed. Every other key is
+  // shown, because a List has no column picker -- it shows what the row holds.
+  return Object.entries(row || {})
+    .filter(([key]) => key !== 'id')
+    .map(([name, value]) => ({
+      name,
+      // By name against the tracked table's columns. A column that table does
+      // not declare reads as text, which is what an undeclared column is.
+      text: displayCell(value, (columns || []).find(c => c?.name === name)?.type),
+    }));
+}
+
+/**
+ * Whether a List has anything to show.
+ *
+ * Tracking nothing and holding nothing are the same on screen -- "No data" --
+ * but they are different situations, and keeping the test in one place means
+ * the two renderers cannot disagree about which counts as empty.
+ */
+export function listIsEmpty(
+  rows: Record<string, any>[] | undefined | null,
+  trackedBlockId: string | undefined | null,
+): boolean {
+  return !trackedBlockId || (rows || []).length === 0;
+}

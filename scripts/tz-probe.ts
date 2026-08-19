@@ -19,6 +19,7 @@ import { evaluateExpression } from '../src/lib/formula';
 import { validateValue } from '../src/lib/validation';
 import { toCsv } from '../src/lib/csv';
 import { fillSlots } from '../src/lib/sanitizeHtml';
+import { displayCell } from '../src/lib/rows';
 
 const picked = '2026-08-20';
 
@@ -104,4 +105,11 @@ console.log(JSON.stringify({
     [],
     { now: new Date(2026, 7, 17, 23, 30) },
   ),
+
+  /**
+   * A table cell and a List row, which share one rule and used to share one
+   * bug. The stored instant here is what a +05:30 picker actually writes for
+   * the 20th, so reading UTC parts shows the 19th.
+   */
+  cell: displayCell(dateInputToIso('2026-08-20'), 'date'),
 }));

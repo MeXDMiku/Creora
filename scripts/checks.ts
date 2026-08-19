@@ -53,7 +53,7 @@ import { slotValuesFrom } from '../src/lib/useSlotValues';
 import { slotNameOf, slotNameForNodeType } from '../src/state/atoms';
 import { interpretSave, shouldKeepAutosaving, PageStamps } from '../src/lib/savePage';
 import { describeRowWriteError, withoutRow } from '../src/lib/rowWrite';
-import { visibleRows, rowSlots, compareCells, slotNamesFor, rowMatchesSearch, MAX_RENDERED_ROWS, rowIndexesForStep, coerceForColumn, rowMatchesFormula, columnsUsedByFormula, calcExampleFor, calcExampleWithFilter, shareExampleFor, isoDate, isoToDateInput, dateInputToIso, displayCell, COLUMN_TYPE_LABELS } from '../src/lib/rows';
+import { visibleRows, rowSlots, compareCells, slotNamesFor, rowMatchesSearch, MAX_RENDERED_ROWS, rowIndexesForStep, coerceForColumn, rowMatchesFormula, columnsUsedByFormula, calcExampleFor, calcExampleWithFilter, shareExampleFor, isoDate, isoToDateInput, dateInputToIso, displayCell, COLUMN_TYPE_LABELS, listRowLines, listIsEmpty } from '../src/lib/rows';
 import {
   parseSlot,
   applyFilters,
@@ -5423,6 +5423,7 @@ group('a column can hold a date');
    */
   check('A VISITOR IS SHOWN THE DAY THAT WAS PICKED', tz.shown, '<p>20 Aug 2026</p>');
   check('and a countdown in markup agrees with it', tz.shownInCalc, '<p>3</p>');
+  check('A TABLE CELL AND A LIST ROW SHOW THE PICKED DAY TOO', tz.cell, '20 Aug 2026');
 
   /**
    * ONE PATH, NOT TWO. A Database cell built the date locally; a visitor's form
@@ -5775,6 +5776,88 @@ group('a moment’s error is not saved into the page');
   check('loading is reset rather than removed, as it always was', saved.loading, false);
   check('and the things that ARE the page survive',
     [saved.value, saved.blockName, (saved as any).rows.length], [5, 'Orders', 1]);
+}
+
+
+group('the List block is drawn once, not twice');
+{
+  /**
+   * SEVENTH DRIFT, and this one was in BOTH copies at the same time.
+   *
+   * The List block's rows were duplicated character for character between the
+   * editor and the published renderer, down to the `String(colVal)` -- so a
+   * date column read "2026-08-19T18:30:00.000Z" and a boolean read "true", to
+   * a builder and a visitor alike. Fixing one copy would have fixed it for one
+   * of them, which is how a divergence starts.
+   *
+   * The copies are gone. Both call the editor's component, and it uses the same
+   * displayCell rule the two database tables use.
+   */
+  const listSrc = readFileSync('src/blocks/ListBlock.tsx', 'utf8');
+  const pubSrc = readFileSync('src/components/PublishedRenderer.tsx', 'utf8');
+
+  check('the editor draws its rows through the shared component',
+    listSrc.includes('<ListRowsView'), true);
+  check('AND SO DOES THE PUBLISHED PAGE', pubSrc.includes('<ListRowsView'), true);
+  check('THE COPY IS GONE, not kept in step by hand',
+    pubSrc.includes("filter(([key]) => key !== 'id')"), false);
+  check('and the raw stringify with it',
+    /<span style=\{\{ color: '#0f172a' \}\}>\{String\(colVal\)\}/.test(listSrc + pubSrc), false);
+  check('and the component decides nothing about a value itself',
+    /displayCell\(/.test(listSrc), false);
+  check('the shared component asks rows.ts what a line reads as',
+    listSrc.includes('listRowLines(row, columns)'), true);
+
+  /**
+   * AND NOW THE BEHAVIOUR, not the shape.
+   *
+   * Three controls proved the source checks above were nearly worthless on
+   * their own: breaking the component's rendering left every behavioural check
+   * green, because they all called `displayCell` directly rather than going
+   * through anything the component uses. A component cannot be imported here at
+   * all -- Node's type-stripping does not read `.tsx` -- so the DECISIONS moved
+   * out to rows.ts where they can actually be run.
+   */
+  const line = listRowLines(
+    { id: 'r1', Due: '2026-08-20T12:00:00.000Z', Paid: true, Who: 'Ada' },
+    [{ name: 'Due', type: 'date' }, { name: 'Paid', type: 'boolean' }, { name: 'Who', type: 'text' }],
+  );
+  check('a row becomes one line per field', line.map(l => l.name), ['Due', 'Paid', 'Who']);
+  check('THE ROW ID IS NOT A FIELD SOMEBODY TYPED, so it is not shown',
+    line.some(l => l.name === 'id'), false);
+  check('A DATE READS LIKE A DATE', line[0].text, '20 Aug 2026');
+  check('a boolean reads like a word', line[1].text, 'Yes');
+  check('and text is itself', line[2].text, 'Ada');
+
+  check('a column the tracked table does not declare reads as text',
+    listRowLines({ id: 'r1', Extra: 'x' }, [{ name: 'Due', type: 'date' }])[0].text, 'x');
+  check('no columns at all is still readable',
+    listRowLines({ id: 'r1', Who: 'Ada' }, undefined).map(l => l.text), ['Ada']);
+  check('a row with nothing but an id has no lines',
+    listRowLines({ id: 'r1' }, []), []);
+  check('and no row at all is not a crash', listRowLines(null, []), []);
+
+  check('tracking nothing is empty', listIsEmpty([{ id: 'r1' }], ''), true);
+  check('holding nothing is empty too', listIsEmpty([], 'databaseBlock__x'), true);
+  check('and holding something is not', listIsEmpty([{ id: 'r1' }], 'databaseBlock__x'), false);
+  check('nor is a missing rows array a crash', listIsEmpty(undefined, 'databaseBlock__x'), true);
+
+  /**
+   * Which means a List now shows what a table shows. That is the property that
+   * matters, and it is the one that was false in both places at once.
+   */
+  /**
+   * Deliberately a value that reads the same in every timezone. The first
+   * version of this used the instant a +05:30 picker actually stores
+   * (2026-08-19T18:30Z, which is the 20th there) and failed here, in a runner
+   * whose clock is UTC -- the exact trap this file documents two groups above.
+   * The timezone-dependent half lives in tz-probe.ts, where it can be true.
+   */
+  check('A DATE IN A LIST READS LIKE A DATE, not an ISO timestamp',
+    displayCell('2026-08-20T12:00:00.000Z', 'date'), '20 Aug 2026');
+  check('and a boolean reads like a word', displayCell(true, 'boolean'), 'Yes');
+  check('a column the tracked table does not declare still reads as text',
+    displayCell('anything', undefined), 'anything');
 }
 
 say(`\n${passed} passed, ${failed} failed`);

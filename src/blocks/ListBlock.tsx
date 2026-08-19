@@ -1,6 +1,7 @@
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
 import type { NodeViewProps } from '@tiptap/react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
+import { listRowLines, listIsEmpty } from '../lib/rows';
 import { blockRuntimeAtom, contextMenuAtom, getBlockTypeDisplayName } from '../state/atoms';
 import { useMemo, useRef, useState, useEffect, useCallback } from 'react';
 import { useBlockDrag } from '../hooks/useBlockDrag';
@@ -153,42 +154,84 @@ const ListBlockComponent = (props: NodeViewProps) => {
           overflowY: 'auto',
         }}
       >
-        {!trackedBlockId || displayRows.length === 0 ? (
-          <div style={{ textAlign: 'center', color: '#94a3b8', fontStyle: 'italic', fontSize: '12px', padding: '16px' }}>
-            No data
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {displayRows.map((row, idx) => (
-              <div
-                key={row.id || idx}
-                style={{
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '6px',
-                  padding: '8px 12px',
-                  background: '#f8fafc',
-                  boxShadow: '0 1px 2px rgba(0,0,0,0.02)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '4px',
-                }}
-              >
-                {Object.entries(row)
-                  .filter(([key]) => key !== 'id')
-                  .map(([colName, colVal]) => (
-                    <div key={colName} style={{ display: 'flex', gap: '8px', fontSize: '12px' }}>
-                      <span style={{ fontWeight: 600, color: '#475569', minWidth: '60px' }}>{colName}:</span>
-                      <span style={{ color: '#0f172a' }}>{String(colVal)}</span>
-                    </div>
-                  ))}
-              </div>
-            ))}
-          </div>
-        )}
+        <ListRowsView
+          rows={displayRows}
+          columns={dbState?.columns}
+          trackedBlockId={trackedBlockId}
+        />
       </div>
     </NodeViewWrapper>
   );
 };
+
+
+/**
+ * The rows of a List, drawn once for both renderers.
+ *
+ * WHY THIS IS A SHARED COMPONENT AND NOT TWO COPIES
+ * It WAS two copies -- character for character, down to the `String(colVal)` --
+ * one here and one in PublishedRenderer. Both carried the same bug, and the
+ * bug is the one this codebase has now found six times: a cell shown raw. A
+ * date column read `2026-08-19T18:30:00.000Z` and a boolean read `true`, to a
+ * builder and to a visitor alike.
+ *
+ * Fixing that in one copy would have fixed it for one of them. So the copies
+ * are gone instead, and the shared cell-display rule (`displayCell`, the same
+ * one both database tables use) is what decides how a value reads.
+ *
+ * The two renderers still differ in their WRAPPER -- one has a drag handle and
+ * a hover border, the other does not -- and that is fine. What must not differ
+ * is what the data says.
+ */
+export function ListRowsView({
+  rows,
+  columns,
+  trackedBlockId,
+}: {
+  rows: Record<string, any>[];
+  /** The tracked table's columns, for their types. Absent means show as text. */
+  columns?: { name: string; type?: string }[];
+  trackedBlockId?: string;
+}) {
+  // Both questions are answered in rows.ts, where a check can run them: a
+  // component cannot be imported by this project's checks at all (Node's
+  // type-stripping does not read .tsx), and three controls proved how little a
+  // source-shape check is worth in its place.
+  if (listIsEmpty(rows, trackedBlockId)) {
+    return (
+      <div style={{ textAlign: 'center', color: '#94a3b8', fontStyle: 'italic', fontSize: '12px', padding: '16px' }}>
+        No data
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      {rows.map((row: any, idx: number) => (
+        <div
+          key={row.id || idx}
+          style={{
+            border: '1px solid #e2e8f0',
+            borderRadius: '6px',
+            padding: '8px 12px',
+            background: '#f8fafc',
+            boxShadow: '0 1px 2px rgba(0,0,0,0.02)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '4px',
+          }}
+        >
+          {listRowLines(row, columns).map(line => (
+            <div key={line.name} style={{ display: 'flex', gap: '8px', fontSize: '12px' }}>
+              <span style={{ fontWeight: 600, color: '#475569', minWidth: '60px' }}>{line.name}:</span>
+              <span style={{ color: '#0f172a' }}>{line.text}</span>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export const ListBlock = Node.create({
   name: 'listBlock',
