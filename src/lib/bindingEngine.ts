@@ -158,7 +158,31 @@ export function runPageLoadWorkflows(store: ReturnType<typeof getDefaultStore>):
  * impossible; arithmetic coerces inside the operator instead.
  */
 export function formulaScope(store: ReturnType<typeof getDefaultStore>): Record<string, any> {
-  const scope: Record<string, any> = {};
+  /**
+   * BY NAME AND BY ID, and the same way round as tableScope: names first, ids
+   * on top, so an id always wins.
+   *
+   * Ids are what the editor writes and what survives a rename, so they have to
+   * work. But a person typing a condition by hand is looking at a block with a
+   * name printed on it, and `formulaScope` answered only to
+   * `inputBlock__e0000001`. Typing `Email` -- the name on the block, in front of
+   * them -- got "Referenced block Email does not exist", about a block that
+   * plainly does exist. Markup has always resolved names; a condition and a
+   * formula did not, so the same sentence meant different things in two boxes
+   * three inches apart.
+   *
+   * That gap is what made "show this only to the owner" unsayable in practice:
+   *
+   *     countOf("Staff", '{{Email}} == VisitorEmail') > 0
+   *
+   * is one condition on a hide step, and every part of it existed except the
+   * ability to say `VisitorEmail` -- the name of the Visitor block sitting on
+   * the page.
+   *
+   * The name resolution is blockValuesByName rather than a second copy of the
+   * rule. There were five copies of it once.
+   */
+  const scope: Record<string, any> = { ...blockValuesByName({ get: (a: any) => store.get(a) }) };
   for (const blockId of store.get(allBlockIdsAtom)) {
     scope[blockId] = store.get(blockRuntimeAtom(blockId))?.value ?? 0;
   }

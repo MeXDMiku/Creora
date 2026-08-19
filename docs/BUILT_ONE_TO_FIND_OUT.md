@@ -105,7 +105,7 @@ Ordered by how many of the fifteen it unblocks.
 | 3 | **per-visitor rows** — migration 0004 | 2 | written | **needs the database** |
 | 4 | **act on the oldest matching row** | the waitlist promotion | small | **done** |
 | 5 | **uniqueness across two columns** | one person, one booking | small, extends 0008 | needs the database |
-| 6 | **show something by role** | the owner's dashboard | medium | |
+| 6 | **show something by role** | the owner's dashboard | medium | **done, with a warning** |
 | 7 | **style driven by a value** | full/low/open cards | medium, and touches layout | |
 
 Ranks 1, 2, 4 and 5 are all small, and together they are eleven of the fifteen.
@@ -141,8 +141,32 @@ reading the code:
 **Ranks 3 and 5 are not code.** Both are migrations that exist and have never
 been run against the database. Nothing more can be done about them from here.
 
-Rank 6 (show by role) and rank 7 (style driven by a value) are next, and both
-touch the parts of the app this project has deliberately left until last.
+### Rank 6 turned out to be one missing word
+
+"Show the Studio tab only to the owner" needed no new concept. A hide step, a
+condition, a Visitor block and a table of staff all existed. What did not exist
+was the ability to name a block **by the name printed on it** inside a
+condition — `formulaScope` answered only to ids, so typing `VisitorEmail` got
+*"Referenced block VisitorEmail does not exist"* about a block plainly sitting
+on the page, while the same name in a piece of markup three inches away worked.
+
+```
+hide the Studio tab when   VisitorEmail != "" and countOf("Staff", '{{Email}} == VisitorEmail') == 0
+```
+
+Who counts as staff is a row in a table the builder controls, not a concept in
+the engine — so "the owner", "moderators", "paid members" and "the beta list"
+are the same sentence with a different table.
+
+**And it does not protect anything.** Every row a Database block loads is
+downloaded into the visitor's browser before any workflow runs; hiding the block
+changes what is drawn and nothing else. The Health panel now says so on any
+published page that hides by who is looking, because from the outside it looks
+exactly like it worked. Actually withholding a row is migration 0004, which has
+never been run.
+
+Rank 7 (style driven by a value) is next, and it touches the part of the app
+this project has deliberately left until last.
 
 ---
 

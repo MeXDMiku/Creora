@@ -338,6 +338,34 @@ run and obvious from a control.
 it is a comment.**
 
 
+## The instrument lied a second time, quieter
+
+`npm run control` prints `SUITE STOPPED EARLY` when a run was cut short. It only
+printed it on the *passing* branch. So a control that crashed the suite reported
+
+```
+  1 failed
+  ✗ went red, but not where it should
+```
+
+with no red lines under it — which reads exactly like a decorative check, and
+was a crash. Half an hour was spent looking for the wrong thing.
+
+Same mistake as the `'passed,'` substring, in a new costume: **the instrument
+leaving out the one word that explains the result.** The rule that comes out of
+doing it twice is not about substrings or branches. It is:
+
+> **Whatever explains an outcome has to be printed on every path that can
+> produce that outcome, including the paths you think are boring.**
+
+There is also now a difference between *the suite crashed* and *the machine
+died*. This VM aborts node outright every so often (`Fatal error … unreachable
+code`), which skips even the exit handler that guarantees a tally, and looks
+identical to a crash from the outside. Told apart by the words V8 prints on the
+way down: a VM abort is retried three times and, if it keeps happening, reported
+as **unproven** rather than as either a pass or a failure.
+
+
 ## Sweep the sibling, then sweep it again
 
 The relation work rewrote `{{Column}}` slots into invented names. `rows.ts` did

@@ -528,6 +528,49 @@ export function diagnosePage(facts: PageFacts): Problem[] {
     }
   }
 
+  /**
+   * HIDING SOMETHING IS NOT WITHHOLDING IT.
+   *
+   * "Show the Studio tab only to the owner" is now sayable -- a hide step with a
+   * condition -- and the moment it is sayable somebody will use it to protect
+   * something. It does not protect anything. Every row a Database block loads is
+   * downloaded into the visitor's browser BEFORE any workflow runs; hiding the
+   * block that displays them changes what is drawn and nothing else. The data is
+   * two keystrokes away in any browser's network tab.
+   *
+   * This is the kind of thing a builder cannot possibly discover on their own,
+   * because from the outside it looks like it worked.
+   *
+   * Only said when the page is published and only when the condition looks like
+   * it is about WHO is looking -- a hide step driven by a toggle is a perfectly
+   * ordinary bit of interface design and warning about it would train somebody
+   * to ignore this panel.
+   */
+  if (facts.isPublished) {
+    const looksPersonal = (text: string) =>
+      /visitor|signedin|email|owner|admin|staff|member|role|login|logged/i.test(text);
+    const saidAlready = new Set<string>();
+    for (const workflow of facts.workflows || []) {
+      for (const step of workflow.steps || []) {
+        if (step.action !== 'setHidden' && step.action !== 'setVisible') continue;
+        const conditionText = (step.conditions || [])
+          .map((c: any) => `${c?.expression ?? ''} ${c?.fieldId ? nameOf(facts, String(c.fieldId)) : ''} ${c?.value ?? ''}`)
+          .join(' ');
+        if (!conditionText.trim() || !looksPersonal(conditionText)) continue;
+        const target = String(step.targetId || workflow.sourceId || '');
+        if (saidAlready.has(target)) continue;
+        saidAlready.add(target);
+        problems.push({
+          severity: 'warning',
+          title: `"${nameOf(facts, target)}" is hidden from some visitors, which is not the same as keeping it from them`,
+          detail:
+            'Rows are downloaded into the browser before any workflow runs, so hiding the block changes what is drawn and nothing else — the data is still there in the browser’s network tab. Only the database can actually withhold a row. See docs/MIGRATION_0004.md.',
+          blockId: target || undefined,
+        });
+      }
+    }
+  }
+
   // --- formulas referring to nothing ---
   for (const binding of facts.formulas || []) {
     if (!exists(facts, binding.targetBlockId)) {

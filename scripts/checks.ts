@@ -2904,12 +2904,72 @@ group('formulas and conditions look at the same values');
   store.set(blockRuntimeAtom(B), { value: 'paid', visible: true, disabled: false, loading: false, error: null });
 
   const scope = formulaScope(store);
-  check('every block is in scope', Object.keys(scope).sort(), [A, B].sort());
+  check('every block is in scope by its id', [A, B].every(id => id in scope), true);
   check('a number arrives as a number', scope[A], 12);
   // The old scope ran everything through Number(), so "paid" arrived as 0 --
   // which is exactly why text could never be compared.
   check('and text arrives as text, not as zero', scope[B], 'paid');
   check('a condition sees what a formula sees', stepConditionResult({ fieldId: '', operator: 'equals', expression: `${B} == "paid"` } as any, store).pass, true);
+
+  /**
+   * AND BY THE NAME PRINTED ON THE BLOCK.
+   *
+   * Ids are what the editor writes and what survives a rename, so they have to
+   * work. But a person typing a condition by hand is looking at a block with a
+   * name on it, and this answered only to `inputBlock__bbb000000001`. Typing
+   * the name got "Referenced block Status does not exist" about a block that
+   * plainly does exist — while the same name in a piece of markup three inches
+   * away worked, because markup has always resolved names.
+   *
+   * That is the gap that made "show this only to the owner" unsayable in
+   * practice. Every part of
+   *
+   *     countOf("Staff", '{{Email}} == VisitorEmail') > 0
+   *
+   * existed except being able to say `VisitorEmail` — the name of the Visitor
+   * block sitting on the page.
+   */
+  store.set(blockRuntimeAtom(B), { value: 'paid', blockName: 'Status', visible: true, disabled: false, loading: false, error: null });
+  check('A BLOCK IS IN SCOPE UNDER THE NAME A PERSON CAN SEE', formulaScope(store)['Status'], 'paid');
+  check('and a condition typed that way works',
+    stepConditionResult({ fieldId: '', operator: 'equals', expression: `Status == "paid"` } as any, store).pass, true);
+  check('the id still works, because that is what the editor writes',
+    stepConditionResult({ fieldId: '', operator: 'equals', expression: `${B} == "paid"` } as any, store).pass, true);
+
+  /**
+   * SHOW BY ROLE, WHICH IS THE POINT OF THE ABOVE. Who counts as staff is a
+   * row in a table the builder controls, not a concept baked into the engine --
+   * so "the owner", "moderators", "paid members" and "people on the beta list"
+   * are all the same sentence with a different table.
+   */
+  const staff = {
+    Staff: { rows: [{ id: 's1', Email: 'owner@example.com' }], columns: ['Email'] },
+  };
+  const asRole = (email: string, tables: any, f = `countOf("Staff", '{{Email}} == VisitorEmail') > 0`) =>
+    ran(() => evaluateExpression(f, { VisitorEmail: email }, tables));
+  check('SHOW BY ROLE: is the visitor in a table the builder controls',
+    asRole('owner@example.com', staff), true);
+  check('and somebody else is not', asRole('ada@example.com', staff), false);
+  /**
+   * THE TRAP, WRITTEN DOWN RATHER THAN DISCOVERED.
+   *
+   * A signed-out visitor has an empty email, and an empty email EQUALS an empty
+   * cell. So one blank row in the staff table makes every stranger staff, in
+   * total silence, permanently, and the wrong way round. The engine cannot know
+   * which table means "staff", so it cannot refuse this for you.
+   *
+   * This check asserts the dangerous answer on purpose, because pretending it
+   * says something else would be worse. The way to write the sentence safely is
+   * to require the visitor to be signed in first.
+   */
+  const blankStaff = { Staff: { rows: [{ id: 's1', Email: '' }], columns: ['Email'] } };
+  const SAFE = `VisitorEmail != "" and countOf("Staff", '{{Email}} == VisitorEmail') > 0`;
+  check('A BLANK ROW IN THE STAFF TABLE MAKES EVERY STRANGER STAFF',
+    asRole('', blankStaff), true);
+  check('and the safe spelling, which asks whether they are signed in first',
+    asRole('', blankStaff, SAFE), false);
+  check('and still lets a real member of staff through',
+    asRole('owner@example.com', staff, SAFE), true);
 }
 
 group('an expression condition actually gates the step');
@@ -7328,6 +7388,65 @@ group('a list can be filtered and ordered by something worked out');
 }
 
 
+group('hiding something is not withholding it');
+{
+  /**
+   * The moment "show this only to the owner" became sayable, somebody was
+   * going to use it to protect something -- and it protects nothing. Every row
+   * a Database block loads is downloaded into the visitor's browser BEFORE any
+   * workflow runs. Hiding the block changes what is drawn and nothing else; the
+   * data is two keystrokes away in any browser's network tab.
+   *
+   * A builder cannot discover this on their own, because from the outside it
+   * looks exactly like it worked. So the Health panel says it.
+   */
+  const facts = (isPublished: boolean, condition: any) => ({
+    blockIds: ['textBlock__studio0001', 'visitorBlock__v000000001'],
+    states: {
+      textBlock__studio0001: { blockName: 'Studio tab' } as any,
+      visitorBlock__v000000001: { blockName: 'Visitor email' } as any,
+    },
+    workflows: [{
+      id: 'wf_1',
+      sourceId: 'visitorBlock__v000000001',
+      sourceEvent: 'onLoad',
+      steps: [{ targetId: 'textBlock__studio0001', action: 'setHidden', conditions: [condition] }],
+    }],
+    formulas: [],
+    connections: [],
+    pages: [],
+    isPublished,
+  } as any);
+
+  const gated = diagnosePage(facts(true, { fieldId: '', operator: 'equals', expression: `countOf("Staff", '{{Email}} == VisitorEmail') == 0` }));
+  check('A PUBLISHED PAGE THAT HIDES BY WHO IS LOOKING IS TOLD THE TRUTH',
+    gated.some(p => p.title.includes('not the same as keeping it from them')), true);
+  check('and it names the block, not the workflow',
+    gated.some(p => p.title.startsWith('"Studio tab"')), true);
+  check('and points at the migration that would actually do it',
+    gated.some(p => (p.detail || '').includes('MIGRATION_0004')), true);
+  check('it is a warning, not a breakage — the page works, it just does not protect',
+    gated.find(p => p.title.includes('not the same as keeping it'))?.severity, 'warning');
+
+  /**
+   * NOT SAID WHEN IT WOULD BE NOISE. An unpublished page is not exposing
+   * anything to anybody, and a hide driven by a toggle is ordinary interface
+   * design. A panel that warns about both is a panel people learn to skip.
+   */
+  check('an unpublished page is not accused',
+    diagnosePage(facts(false, { fieldId: '', operator: 'equals', expression: `countOf("Staff", '{{Email}} == VisitorEmail') == 0` }))
+      .some(p => p.title.includes('not the same as keeping it from them')), false);
+  check('nor a hide that is just interface — a toggle, a tab, an accordion',
+    diagnosePage(facts(true, { fieldId: 'toggleBlock__t000000001', operator: 'equals', value: 'false' }))
+      .some(p => p.title.includes('not the same as keeping it from them')), false);
+  check('nor a hide with no condition at all',
+    diagnosePage(facts(true, {}))
+      .some(p => p.title.includes('not the same as keeping it from them')), false);
+  check('and it is said once per block, not once per step',
+    gated.filter(p => p.title.includes('not the same as keeping it from them')).length, 1);
+}
+
+
 group('a step can act on the oldest row that matches');
 {
   /**
@@ -7506,7 +7625,7 @@ group('a slot can contain a slot');
  * Raise it in the same commit that adds the checks, the way the drift budget
  * above is raised: a number changed where it can be seen in a diff.
  */
-const EXPECTED_CHECKS = 1758;
+const EXPECTED_CHECKS = 1774;
 reachedTheEnd = true;
 if (passed + failed !== EXPECTED_CHECKS) {
   failed++;

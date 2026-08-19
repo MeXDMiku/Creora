@@ -27,6 +27,8 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 
 const TALLY = /^(\d+) passed, (\d+) failed/m;
+/** What this VM prints when it aborts node from under us. Not about the code. */
+const VM_DIED = /Fatal error in|FailureMessage Object|Segmentation fault|Illegal instruction/;
 const FAIL_LINE = /^ {2}FAIL {2}(.+)$/gm;
 
 /**
@@ -144,6 +146,27 @@ const CONTROLS = [
     find: `    if (String(draft.matchFormula ?? '').trim()) {`,
     with: `    if (false) {`,
     expect: ['A FORMULA-ONLY STEP IS ALLOWED'],
+  },
+  {
+    name: 'role: a formula stops knowing blocks by the name printed on them',
+    file: 'src/lib/bindingEngine.ts',
+    find: `  const scope: Record<string, any> = { ...blockValuesByName({ get: (a: any) => store.get(a) }) };`,
+    with: `  const scope: Record<string, any> = {};`,
+    expect: ['A BLOCK IS IN SCOPE UNDER THE NAME A PERSON CAN SEE'],
+  },
+  {
+    name: 'role: the panel stops saying that hiding is not withholding',
+    file: 'src/lib/diagnose.ts',
+    find: `        if (step.action !== 'setHidden' && step.action !== 'setVisible') continue;`,
+    with: `        continue;`,
+    expect: ['A PUBLISHED PAGE THAT HIDES BY WHO IS LOOKING IS TOLD THE TRUTH'],
+  },
+  {
+    name: 'role: the panel says it about every hide, including ordinary ones',
+    file: 'src/lib/diagnose.ts',
+    find: `        if (!conditionText.trim() || !looksPersonal(conditionText)) continue;`,
+    with: `        // control: everything looks personal`,
+    expect: ['nor a hide that is just interface'],
   },
   {
     name: 'the harness itself: a check that throws must be red, not silent',
@@ -266,6 +289,15 @@ function attempt(control) {
     const out = runChecks();
     const tally = out.match(TALLY);
     const reds = [...out.matchAll(FAIL_LINE)].map(m => m[1].trim());
+    /**
+     * THE MACHINE DYING IS NOT THE CODE FAILING, and they look identical from
+     * here: both produce a run with no tally. This VM aborts node outright
+     * every so often -- `Fatal error ... unreachable code`, a V8 abort, which
+     * skips even the exit handler that guarantees a tally. Told apart by the
+     * words V8 prints on the way down, so a flake is retried and a real crash
+     * is reported.
+     */
+    if (!tally && VM_DIED.test(out)) return { kind: 'vm-died', out, reds };
     if (!tally) return { kind: 'no-tally', out, reds };
 
     const failedCount = Number(tally[2]);
@@ -300,23 +332,41 @@ for (const control of chosen) {
    * Only bad results are retried, deliberately. Retrying a red one until it
    * goes green is how a flake becomes a habit.
    */
-  let retried = false;
-  if (result.kind !== 'ok') {
-    retried = true;
+  let retried = 0;
+  // The VM aborting gets more patience than a disagreement does, because it is
+  // not about the code at all -- but it is still bounded, or a genuinely
+  // crashing suite would be retried for ever.
+  while (result.kind !== 'ok' && retried < (result.kind === 'vm-died' ? 3 : 1)) {
+    retried++;
     result = attempt(control);
   }
 
   console.log(`\n${control.name}`);
-  const note = retried ? '  (on the second try — the first disagreed)' : '';
+  /**
+   * SUITE STOPPED EARLY is printed WHATEVER the verdict, and that is a fix.
+   *
+   * It used to be mentioned only when the control passed, so a control that
+   * crashed the suite reported "1 failed, but not where it should" with no
+   * reds -- which reads as a decorative check and is actually a crash. Same
+   * mistake as the `'passed,' in out` one at the top of this file, in a new
+   * costume: the instrument leaving out the one word that explains the result.
+   */
+  const stopped = result.stoppedEarly ? '  (SUITE STOPPED EARLY — something threw, see ran() in checks.ts)' : '';
+  const note = (retried ? `  (after ${retried} retr${retried === 1 ? 'y' : 'ies'} — the earlier run disagreed)` : '') + stopped;
   switch (result.kind) {
     case 'ok':
-      console.log(`  ${result.failedCount} failed${result.stoppedEarly ? '  (SUITE STOPPED EARLY)' : ''}${note}`);
+      console.log(`  ${result.failedCount} failed${note}`);
       break;
     case 'cannot-apply':
       // A control aimed at a line that no longer exists is not a control. This
       // used to print and not count, which is how a control quietly stops
       // testing anything while the summary still says all clear.
       console.log(`  CANNOT APPLY — the line it breaks is not in ${result.file} any more, so this control is testing nothing.${note}`);
+      suspicious++;
+      break;
+    case 'vm-died':
+      console.log('  THE VM ABORTED node, three times running. That is this machine, not this code —');
+      console.log('  but nothing can be concluded from it, so the control is unproven. Run it alone.');
       suspicious++;
       break;
     case 'no-tally':
