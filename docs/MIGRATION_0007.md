@@ -17,11 +17,22 @@ A `BEFORE INSERT` trigger on `database_rows`, with two limits:
 | limit | number | what it is for |
 | :--- | :--- | :--- |
 | per page, per minute | 60 | a person managing a form does one or two; sixty is a machine |
-| per page, ever | 50,000 | a runaway backstop, far above any free tier |
+| per page, ever | 10,000 | a runaway backstop — see the arithmetic below |
 
 **The owner is exempt.** Seeding a table, importing a spreadsheet or restoring a
 backup is not abuse, and being throttled on your own page would be
 indefensible.
+
+**Where 10,000 comes from**, since a number with no reasoning behind it gets
+raised by whoever hits it first: the free database is 500 MB
+([Supabase pricing](https://supabase.com/pricing), checked 19 Aug 2026). A row
+with a few short answers is roughly 500 bytes; one with a long message is closer
+to 2 KB. So 10,000 × 2 KB ≈ 20 MB — a single abused page can take about 4% of
+the whole allowance and no more.
+
+The first draft of this file said 50,000, which at 2 KB is 100 MB: **a fifth of
+everything, from one page.** That number was chosen before anybody had looked up
+what the allowance actually was.
 
 **These are runaway protection, not a pricing tier.** The free-tier row
 allowance is a product decision and is deliberately not encoded here. To change

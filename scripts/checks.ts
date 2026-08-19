@@ -6211,6 +6211,26 @@ group('two people cannot take the same slot');
     sql.includes('database_rows_block_idx'), true);
 
   /**
+   * The row cap, and the arithmetic behind it -- because a number with no
+   * reasoning attached gets raised by whoever hits it first.
+   *
+   * The free database is 500 MB. A row with a long message is about 2 KB, so a
+   * cap of 10,000 bounds one abused page at roughly 4% of everything. The first
+   * draft said 50,000, which is 100 MB -- a FIFTH of the allowance from a single
+   * page -- and that number was chosen before anybody had looked the allowance
+   * up.
+   */
+  const limits = readFileSync('supabase/migrations/0007_row_limits.sql', 'utf8');
+  check('THE ROW CAP BOUNDS ONE PAGE TO A SMALL SHARE OF THE FREE DATABASE',
+    /v_total constant integer := 10000;/.test(limits), true);
+  check('and the arithmetic is written where somebody would change it',
+    limits.includes('10000 x 2 KB'), true);
+  check('with the allowance it was derived from, and the date it was checked',
+    /500 MB \(supabase\.com\/pricing, checked/.test(limits), true);
+  check('the per-minute cap still lets a room full of people submit at once',
+    /v_per_minute constant integer := 60;/.test(limits), true);
+
+  /**
    * And the builder can actually turn it on -- a rule nobody can reach is the
    * same as no rule.
    */

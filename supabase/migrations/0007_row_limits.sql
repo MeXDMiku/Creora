@@ -21,9 +21,21 @@
 -- reaches them in seconds.
 --
 --   60 rows per page per minute  -- a person filling in a form manages one or
---                                   two a minute; sixty is a machine
---   50000 rows per page total    -- far above any free tier, and still a
---                                   ceiling rather than a cliff
+--                                   two a minute; sixty is a machine. Thirty
+--                                   students submitting at once still get
+--                                   through, which is why it is not twenty.
+--   10000 rows per page total    -- see the arithmetic below
+--
+-- WHERE 10000 COMES FROM, since a number with no reasoning behind it gets
+-- raised by whoever hits it first:
+--   the free database is 500 MB (supabase.com/pricing, checked 19 Aug 2026)
+--   a row with a few short answers is roughly 500 bytes; one with a long
+--   message is closer to 2 KB
+--   10000 x 2 KB = 20 MB, so a single abused page can take about 4% of the
+--   whole allowance and no more
+-- The first draft of this file said 50000, which at 2 KB is 100 MB -- a FIFTH
+-- of everything, from one page, and the number was chosen before anybody had
+-- looked up what the allowance actually was.
 --
 -- THE OWNER IS EXEMPT. A builder seeding a table, importing a spreadsheet or
 -- restoring a backup is not abuse, and being throttled while doing it on your
@@ -39,8 +51,9 @@ returns trigger language plpgsql security definer set search_path to 'public' as
 declare
   -- Per page, per minute. A person manages one or two; sixty is a machine.
   v_per_minute constant integer := 60;
-  -- Per page, ever. Runaway protection, not a pricing tier.
-  v_total constant integer := 50000;
+  -- Per page, ever. Runaway protection, not a pricing tier: 10000 x 2 KB is
+  -- about 4% of the free 500 MB, which bounds the damage one abused page can do.
+  v_total constant integer := 10000;
   v_recent integer;
   v_count integer;
 begin

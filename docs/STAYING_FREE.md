@@ -51,8 +51,9 @@ monthly egress.
 ### 2. Rows collected from strangers
 
 A published form writes a row for anyone who submits it. **Migration 0007** caps
-that at 60 per page per minute and 50,000 per page total — runaway protection,
-not a pricing tier. The owner is exempt.
+that at 60 per page per minute and 10,000 per page total — about 4% of the 500 MB
+at 2 KB a row, so one abused page cannot take the lot. Runaway protection, not a
+pricing tier. The owner is exempt.
 
 Without it, one script pointed at a live page fills the 500 MB.
 
