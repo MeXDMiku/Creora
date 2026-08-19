@@ -12,6 +12,97 @@ the record.
 
 ---
 
+## 19 August 2026 — built a site to find out what was missing
+
+**1,792 checks, from 1,706. `tsc` clean. 20 negative controls, every one caught
+by the check that names it.** Six commits, unpushed.
+
+The method this time was different and it is worth keeping. Instead of walking a
+site in my head and writing down where it stops — which is what
+`docs/CAPABILITIES.md` did — I **built a working pottery-studio booking site**
+from scratch, ran it, and then translated it feature by feature into Creora.
+
+The two methods disagree usefully. The audit said a blog and a directory were
+possible; they are. What it could not see is that **almost every interesting
+thing on a real site needed one primitive that did not exist, in five different
+disguises.** Fifteen behaviours, three of which worked. Details in
+`docs/BUILT_ONE_TO_FIND_OUT.md`.
+
+### Shipped
+
+**A row can ask about another table** — the missing primitive, and nine of the
+twelve broken behaviours were this one sentence wearing different clothes: a
+formula could not refer to the row it was standing in while asking about another
+table. The fix is one line — the condition gets the calling scope underneath —
+and it bought places-left, who-teaches-it, average-rating, is-it-full,
+how-many-waiting and what-one-booking-is-worth at once.
+
+**A list can be filtered and ordered by something worked out** — "hide full" and
+"best rated first" are neither of them columns; one is a count of rows in another
+table and the other an average of them. No dropdown could ever have contained
+them.
+
+**A step can act on the oldest row that matches** — the waiting-list promotion.
+Two conditions at once, and a spelling for "the oldest", which rests on the
+server returning rows `order by created_at asc` and is now checked against the
+SQL rather than assumed.
+
+**Show something by role** — and the Health panel says plainly that hiding is not
+withholding, because from the outside it looks exactly like it worked.
+
+**Style driven by a value** — already worked, and nothing said so.
+
+### What it broke elsewhere
+
+**A slot inside a quoted condition was being rewritten by the outer scan.**
+`{{Capacity}} - countOf("Bookings", '{{ClassId}} == RowId')` has two kinds of
+slot in it: the card's, and the other table's. The scan rewrote both, so the
+condition compared nothing to something and **kept every row** — no error, list
+unchanged, the filter apparently ignored. This is the bug the whole feature
+turned on, and every check written before it passed.
+
+**The invented name a slot is rewritten to was a constant.** A caller value of
+that name became `X == X` and matched everything. Found by asking what would
+make a check fail rather than whether it passed — and the same rewrite existed
+twice, five hundred lines apart, so it was fixed twice until the two were merged.
+
+**A row's id was spelled `Row id`, with a space,** and could not be typed in an
+expression at all. The relation would have looked perfect in every check here and
+said "Referenced block RowId does not exist" on a real page.
+
+**A filter formula's error was computed and dropped on the floor.** Nothing
+displayed it, so a broken filter kept every row and said nothing. Shipped and
+unreachable — the exact shape the checks exist to catch.
+
+**`formulaScope` answered only to block ids.** Typing the name printed on a block
+into a condition got "Referenced block X does not exist" about a block plainly
+sitting on the page, while the same name in markup three inches away worked.
+
+### The instrument lied, twice
+
+The control harness decided a run had finished by asking whether the output
+contained `'passed,'` — which is also in the **name of a check**. A suite that
+crashed read as *finished, zero failed*. Two controls had been cleared by that
+green: one was hiding a crash, the other a check that could not fail.
+
+Then, after being rebuilt, it printed `SUITE STOPPED EARLY` only on the branch
+where the control passed — so a control that crashed the suite reported "went
+red, but not where it should" with no reds under it, which reads as a decorative
+check. Same mistake in a new costume.
+
+The rule from doing it twice is not about substrings. It is: **whatever explains
+an outcome has to be printed on every path that can produce that outcome,
+including the boring ones.** `npm run control` is a file now rather than
+something I did by hand, so the lesson is in the repository instead of my head.
+
+**And the suite counts itself.** Two runs an hour apart reported 1737 and 1736
+with nothing red either time — one check had silently not run. Several groups
+build their checks by looping over what is on disk, and this is a network mount.
+A suite that quietly shrinks is the worst failure available, because the summary
+line still says the reassuring thing.
+
+---
+
 ## 17 August 2026
 
 Continuing the same session. 1,091 checks, from 1,011. `tsc` clean. Every fix

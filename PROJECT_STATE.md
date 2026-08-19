@@ -1,3 +1,15 @@
+> **STALE — written 13 Aug, and wrong in ways that matter.** It lists eleven
+> block types (there are seventeen) and knows nothing about tables that can see
+> each other, dates, relations, row limits or the Health panel. It is kept
+> because its per-block detail is still accurate for the blocks it names.
+>
+> **For where things actually stand, read `docs/WHERE_IT_STANDS.md`.**
+>
+> This project has been bitten twice by a planning document that could only be
+> checked by reading it. `docs/CAPABILITIES.md` has its counts asserted by
+> `npm run check` for that reason; this file does not, so it gets a warning
+> instead.
+
 # Project State Snapshot
 
 This document provides a factual, verified snapshot of the current codebase of the Creora project. Every statement is based directly on the actual files present in the repository.
