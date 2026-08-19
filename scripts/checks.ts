@@ -52,6 +52,7 @@ import { fillSlots, leadingSlotName, findSlots as findSlotsForCheck } from '../s
 import { slotValuesFrom } from '../src/lib/useSlotValues';
 import { slotNameOf, slotNameForNodeType } from '../src/state/atoms';
 import { interpretSave, shouldKeepAutosaving, PageStamps } from '../src/lib/savePage';
+import { describeRowWriteError, withoutRow } from '../src/lib/rowWrite';
 import { visibleRows, rowSlots, compareCells, slotNamesFor, rowMatchesSearch, MAX_RENDERED_ROWS, rowIndexesForStep, coerceForColumn, rowMatchesFormula, columnsUsedByFormula, calcExampleFor, calcExampleWithFilter, shareExampleFor, isoDate, isoToDateInput, dateInputToIso, displayCell, COLUMN_TYPE_LABELS } from '../src/lib/rows';
 import {
   parseSlot,
@@ -5568,6 +5569,120 @@ group('a form can insist on a real date');
     RULE_TYPES.find((r: any) => r.type === 'date')?.needsValue, false);
   check('and the hint tells a builder that today is allowed there',
     (RULE_TYPES.find((r: any) => r.type === 'dateAfter')?.hint || '').includes('today'), true);
+}
+
+
+group('a row that was not saved does not stay on the page');
+{
+  /**
+   * A visitor pressed Submit, watched their row appear, and nothing had been
+   * stored. The insert was fired into the background and a failure logged a
+   * warning: the count went up, the table filled in, the data was not there,
+   * and neither they nor the builder had any way to know.
+   *
+   * Row limits (migration 0007) make that reachable on purpose rather than only
+   * when the network fails, so it had to stop being silent first.
+   */
+  const rows = [{ id: 'r1', Name: 'Ada' }, { id: 'r2', Name: 'Bo' }, { id: 'r3', Name: 'Cy' }];
+  check('the row that failed is taken back', withoutRow(rows, 'r2').map(r => r.id), ['r1', 'r3']);
+  check('BY ID, NOT BY POSITION — other rows arrive while an answer is in flight',
+    withoutRow(rows, 'r1').map(r => r.id), ['r2', 'r3']);
+  check('taking back one that is already gone changes nothing',
+    withoutRow(rows, 'nope').length, 3);
+  check('and no rows at all is not a crash', withoutRow(undefined, 'r1'), []);
+
+  /**
+   * The messages a VISITOR reads. They are on somebody else's page, have done
+   * nothing wrong, and can fix nothing — so the wording says what to do, not
+   * what went wrong.
+   */
+  const tooFast = describeRowWriteError({ message: 'too many submissions in a short time', code: 'P0003' });
+  check('a rate limit says to wait, not that they are blocked',
+    tooFast.message.includes('Wait a moment'), true);
+  check('and it is worth trying again', tooFast.retryable, true);
+
+  const full = describeRowWriteError({ message: 'this page has reached its limit of collected rows', code: 'P0004' });
+  check('A FULL FORM SAYS NOTHING WAS SAVED, which is the part that matters',
+    full.message.includes('nothing was saved'), true);
+  check('and gives the visitor something useful to do about it',
+    full.message.includes('site owner'), true);
+  check('trying again would not help, so it does not say to',
+    full.retryable, false);
+
+  const offline = describeRowWriteError({ message: 'Failed to fetch' });
+  check('a network failure is retryable', offline.retryable, true);
+  check('and admits nothing was saved', offline.message.includes('not saved'), true);
+
+  const denied = describeRowWriteError({ message: 'not allowed', code: '42501' });
+  check('a refusal does not invite a retry that will fail the same way', denied.retryable, false);
+  check('an unknown failure is passed on rather than swallowed',
+    describeRowWriteError({ message: 'deadlock detected' }).message.includes('deadlock detected'), true);
+
+  /**
+   * The engine has to actually do it, not just be able to.
+   */
+  const engineSrc = readFileSync('src/lib/bindingEngine.ts', 'utf8');
+  /**
+   * A SOURCE COUNT, and the reason is worth stating: the engine imports
+   * supabase directly, so this path cannot be driven headless — there is no
+   * seam to hand it a failing client. What can be checked is that BOTH failure
+   * branches (the rejected promise and the thrown call) take the row back, in
+   * both the rows list and the recomputed output. Four call sites.
+   *
+   * The first version of this check used `includes` and a control proved it
+   * hollow: removing one of the four left the others matching, and it stayed
+   * green.
+   */
+  check('THE ADD-ROW PATH TAKES THE ROW BACK ON FAILURE, IN BOTH BRANCHES',
+    (engineSrc.match(/withoutRow\(now\?\.rows, rowId\)/g) || []).length, 4);
+  check('and puts the reason where a person can see it',
+    /error: failure\.message/.test(engineSrc), true);
+  check('and no longer just logs and carries on',
+    engineSrc.includes('falling back to local state'), false);
+
+  /**
+   * And the duplicate that caused a separate bug: this coercion was a copy of
+   * coerceForColumn written before it existed, so when a `date` column type was
+   * added the shared function learned about it and the copy did not.
+   */
+  /**
+   * ALL THREE COPIES. The check that used to stand here named one and caught
+   * three: addRow's, updateRow's, and the one updateRow uses for what it sends
+   * to the SERVER -- which could disagree with what it had already shown on the
+   * page. Counting them is the point; naming one would have let the other two
+   * stay.
+   */
+  check('EVERY ROW-WRITING ACTION USES THE SHARED COERCION',
+    (engineSrc.match(/coerceForColumn\(evaluatedValue, col\)/g) || []).length, 3);
+  check('and no copy of it is left anywhere in the engine',
+    /evaluatedValue = evaluatedValue === 'true' \|\| evaluatedValue === true;/.test(engineSrc), false);
+  check('nor the number half of it',
+    /const num = Number\(evaluatedValue\)/.test(engineSrc), false);
+
+  /**
+   * And the same sweep for silence. A delete that would not land used to leave
+   * the row gone from the page: the builder watched it disappear, the row was
+   * still in the database, and it came back on the next reload with no
+   * explanation.
+   */
+  check('A DELETE THAT DID NOT LAND PUTS THE ROW BACK',
+    engineSrc.includes('restoreRow(row, describeRowWriteError(error).message)'), true);
+  check('an update that did not land at least says so',
+    /error: describeRowWriteError\(updateError\)\.message/.test(engineSrc), true);
+  /**
+   * Counting rather than naming, again. This found a THIRD silence the first
+   * two checks missed, and the quietest of them: updateRow reads the rows in
+   * order to merge onto them, so a failure there meant the update never reached
+   * the server at all. The page showed the change and the database never heard
+   * about it.
+   */
+  check('NOTHING IN THE ENGINE STILL JUST WARNS AND CARRIES ON ABOUT A ROW',
+    (engineSrc.match(/console\.warn\('\[Supabase execute info\]/g) || []).length, 0);
+  check('and the read that updateRow depends on reports its own failure',
+    /describeRowWriteError\(selectError\)/.test(engineSrc), true);
+  check('so a workflow writing a date stores what a table cell would',
+    coerceForColumn('2026-08-20', { name: 'Due', type: 'date' }),
+    dateInputToIso('2026-08-20'));
 }
 
 say(`\n${passed} passed, ${failed} failed`);

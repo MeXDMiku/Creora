@@ -7,11 +7,12 @@ import { validateValue } from './validation';
 // Re-exported so every existing import of evaluateCondition from this file
 // keeps working. The definition now lives in conditions.ts.
 import { nodeTypeFromBlockId } from './blockRegistry';
-import { rowIndexesForStep } from './rows';
+import { rowIndexesForStep, coerceForColumn } from './rows';
 import { safeUrl } from './urls';
 import { toCsv, csvFileName, downloadCsv } from './csv';
 import { evaluateCondition } from './conditions';
 import { evaluateExpression, truthy, type FormulaValue, explainUnreadableFormula, type TableScope } from './formula';
+import { describeRowWriteError, withoutRow } from './rowWrite';
 export { evaluateCondition };
 import { renderTemplate } from './format';
 import { supabase } from './supabase';
@@ -544,16 +545,17 @@ export function executeWorkflow(
               evaluatedValue = refState?.value;
             }
 
-            if (col.type === 'number') {
-              const num = Number(evaluatedValue);
-              evaluatedValue = isNaN(num) ? 0 : num;
-            } else if (col.type === 'boolean') {
-              evaluatedValue = evaluatedValue === 'true' || evaluatedValue === true;
-            } else {
-              evaluatedValue = String(evaluatedValue === undefined || evaluatedValue === null ? '' : evaluatedValue);
-            }
-
-            defaultData[col.name] = evaluatedValue;
+            /**
+             * The shared coercion, not a copy of it.
+             *
+             * This WAS a copy -- number, boolean, else-string -- written before
+             * coerceForColumn existed. When a `date` column type was added, the
+             * shared function learned about it and this did not, so a workflow
+             * writing a date stored whatever text it was handed while a table
+             * cell stored ISO. Same column, two shapes, and sorting and
+             * daysUntil both wrong on half the rows.
+             */
+            defaultData[col.name] = coerceForColumn(evaluatedValue, col);
           });
 
           const updatedRows = [...currentRows, { id: rowId, ...defaultData }];
@@ -567,7 +569,18 @@ export function executeWorkflow(
             value: nextValue
           });
 
-          // Insert into Supabase
+          /**
+           * Optimistic insert, and -- new -- an optimistic insert that is TAKEN
+           * BACK when the server says no.
+           *
+           * This used to log a warning and leave the row on the page. A visitor
+           * pressed Submit, watched their row appear, and nothing had been
+           * stored: the count went up, the table filled in, and the data was
+           * not there. Neither they nor the builder had any way to know.
+           *
+           * Row limits (migration 0007) make that reachable on purpose rather
+           * than only when the network fails, so it had to stop being silent.
+           */
           try {
             supabase
               .rpc('add_database_row', {
@@ -576,12 +589,25 @@ export function executeWorkflow(
                 p_row_data: defaultData
               })
               .then(({ error }: any) => {
-                if (error) {
-                  console.warn('[Supabase execute info]: Could not insert row via workflow action, falling back to local state.', error.message);
-                }
+                if (!error) return;
+                const failure = describeRowWriteError(error);
+                const now = store.get(targetAtom);
+                store.set(targetAtom, {
+                  ...now,
+                  rows: withoutRow(now?.rows, rowId),
+                  value: computeDatabaseOutput(withoutRow(now?.rows, rowId), now),
+                  error: failure.message,
+                });
               });
           } catch (err) {
-            console.error('Error inserting row in Supabase via workflow:', err);
+            const failure = describeRowWriteError(err);
+            const now = store.get(targetAtom);
+            store.set(targetAtom, {
+              ...now,
+              rows: withoutRow(now?.rows, rowId),
+              value: computeDatabaseOutput(withoutRow(now?.rows, rowId), now),
+              error: failure.message,
+            });
           }
           break;
         }
@@ -652,16 +678,9 @@ export function executeWorkflow(
               evaluatedValue = refState?.value;
             }
 
-            if (col.type === 'number') {
-              const num = Number(evaluatedValue);
-              evaluatedValue = isNaN(num) ? 0 : num;
-            } else if (col.type === 'boolean') {
-              evaluatedValue = evaluatedValue === 'true' || evaluatedValue === true;
-            } else {
-              evaluatedValue = String(evaluatedValue === undefined || evaluatedValue === null ? '' : evaluatedValue);
-            }
-
-            columnChanges[col.name] = evaluatedValue;
+            // Shared, for the same reason as addRow above: this copy predates
+            // coerceForColumn and never learned about `date`.
+            columnChanges[col.name] = coerceForColumn(evaluatedValue, col);
           });
 
           /**
@@ -690,7 +709,18 @@ export function executeWorkflow(
               .rpc('list_database_rows', { p_block_id: step.targetId })
               .then(({ data: dbRows, error: selectError }: any) => {
                 if (selectError) {
-                  console.warn('[Supabase execute info]: Could not fetch current row from Supabase.', selectError.message);
+                  /**
+                   * The worst of the three, and the quietest: this reads the
+                   * rows in order to merge onto them, so failing here means the
+                   * update NEVER REACHES THE SERVER AT ALL. It used to warn and
+                   * return -- the page showed the change, the database never
+                   * heard about it, and it came undone on the next reload.
+                   */
+                  const now = store.get(targetAtom);
+                  store.set(targetAtom, {
+                    ...now,
+                    error: describeRowWriteError(selectError).message,
+                  });
                   return;
                 }
 
@@ -726,16 +756,10 @@ export function executeWorkflow(
                     evaluatedValue = refState?.value;
                   }
 
-                  if (col.type === 'number') {
-                    const num = Number(evaluatedValue);
-                    evaluatedValue = isNaN(num) ? 0 : num;
-                  } else if (col.type === 'boolean') {
-                    evaluatedValue = evaluatedValue === 'true' || evaluatedValue === true;
-                  } else {
-                    evaluatedValue = String(evaluatedValue === undefined || evaluatedValue === null ? '' : evaluatedValue);
-                  }
-
-                  serverChanges[col.name] = evaluatedValue;
+                  // Third copy of the same four lines. Shared now, so what a
+                  // workflow writes to the SERVER cannot disagree with what it
+                  // showed on the page -- which is what a third copy invites.
+                  serverChanges[col.name] = coerceForColumn(evaluatedValue, col);
                 });
 
                 // One write per matched row, each merged onto that row's own
@@ -749,8 +773,20 @@ export function executeWorkflow(
                       p_row_data: mergedData
                     })
                     .then(({ error: updateError }: any) => {
+                      /**
+                       * An update that did not land says so. It cannot be
+                       * undone the way an insert or a delete can -- the page
+                       * has moved on and the old value may have been the point
+                       * of the change -- so the honest thing left is to name
+                       * it, rather than leave the page showing a change the
+                       * database never took.
+                       */
                       if (updateError) {
-                        console.warn('[Supabase execute info]: Could not update row via workflow action.', updateError.message);
+                        const now = store.get(targetAtom);
+                        store.set(targetAtom, {
+                          ...now,
+                          error: describeRowWriteError(updateError).message,
+                        });
                       }
                     });
                 }
@@ -812,21 +848,39 @@ export function executeWorkflow(
             value: nextValue
           });
 
-          // Delete from Supabase. One call per row, because delete_database_row
-          // takes one id -- a failure on any of them leaves the others deleted,
-          // which is why each reports separately rather than as one outcome.
+          /**
+           * Delete from Supabase, one call per row because delete_database_row
+           * takes one id -- so a failure on any of them leaves the others gone,
+           * and each has to answer for itself.
+           *
+           * A ROW THAT WOULD NOT DELETE COMES BACK. It used to log a warning
+           * and stay gone from the page: the builder saw it disappear, the row
+           * was still in the database, and it returned on the next reload with
+           * no explanation. Putting it back where it was is the honest answer,
+           * and the same decision addRow makes in the other direction.
+           */
+          const restoreRow = (row: any, failure: string) => {
+            const now = store.get(targetAtom);
+            const already = (now?.rows || []).some((r: any) => r?.id === row?.id);
+            const rows = already ? (now?.rows || []) : [...(now?.rows || []), row];
+            store.set(targetAtom, {
+              ...now,
+              rows,
+              value: computeDatabaseOutput(rows, now),
+              error: failure,
+            });
+          };
           try {
             for (const row of targetRows) {
               supabase
                 .rpc('delete_database_row', { p_id: row.id })
                 .then(({ error }: any) => {
-                  if (error) {
-                    console.warn('[Supabase execute info]: Could not delete row via workflow action, falling back to local state.', error.message);
-                  }
+                  if (error) restoreRow(row, describeRowWriteError(error).message);
                 });
             }
           } catch (err) {
-            console.error('Error deleting row in Supabase via workflow:', err);
+            const failure = describeRowWriteError(err).message;
+            for (const row of targetRows) restoreRow(row, failure);
           }
           break;
         }
