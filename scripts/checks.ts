@@ -6152,5 +6152,62 @@ group('this audit still describes the product');
   check('nor a date picker', /\| 10 \| \*\*Date and time picker/.test(audit), false);
 }
 
+
+group('two people cannot take the same slot');
+{
+  /**
+   * THE HOLE THE THIRD AUDIT'S WALK FOUND. Booking gained dates, a picker and
+   * "must be in the future" -- and nothing anywhere enforced that a value is
+   * used once. Not a column, not a condition, not the database. A slot could be
+   * booked twice, a ticket sold twice, a username claimed twice, and the page
+   * showed both as successful because both were.
+   *
+   * A workflow cannot answer this. It can only check the rows the visitor's
+   * BROWSER happens to hold, which is the wrong question asked of the wrong
+   * copy.
+   */
+  const taken = describeRowWriteError({ message: 'that Slot is already taken', code: 'P0005' });
+  check('a taken value is recognised', taken.message.includes('already taken'), true);
+  check('AND THE COLUMN IS NAMED, or a visitor is guessing which of five fields to change',
+    taken.message.includes('That Slot'), true);
+  check('and it says nothing was saved', taken.message.includes('nothing was saved'), true);
+  check('RETRYING THE SAME VALUE WOULD FAIL THE SAME WAY, so it does not invite one',
+    taken.retryable, false);
+  check('a message with no column name still reads',
+    describeRowWriteError({ code: 'P0005', message: 'duplicate' }).message.includes('already taken'), true);
+
+  /**
+   * The migration is the enforcement, and the two things in it that make it a
+   * guarantee rather than a hope.
+   */
+  const sql = readFileSync('supabase/migrations/0008_unique_columns.sql', 'utf8');
+  check('THE RULE IS ENFORCED WHERE THE WRITE HAPPENS',
+    /before insert on public\.database_rows/.test(sql), true);
+  check('and on an update too, since changing a value into a taken one is the same collision',
+    /before update of row_data on public\.database_rows/.test(sql), true);
+  check('IT TAKES A LOCK, because check-then-insert is not a guarantee',
+    sql.includes('pg_advisory_xact_lock'), true);
+  check('keyed on the block, the column and the value, not on the whole table',
+    /hashtext\(new\.database_block_id \|\| ':' \|\| v_name\)/.test(sql), true);
+  check('a blank never collides, or an optional field could not be left empty twice',
+    sql.includes("length(v_value #>> '{}') = 0"), true);
+  check('and the lookup is indexed, or the guarantee slows down as a table fills',
+    sql.includes('database_rows_block_idx'), true);
+
+  /**
+   * And the builder can actually turn it on -- a rule nobody can reach is the
+   * same as no rule.
+   */
+  const inspector = readFileSync('src/blocks/DatabaseBlock.inspector.tsx', 'utf8');
+  check('THE CHECKBOX EXISTS, or the rule is unreachable',
+    inspector.includes('handleToggleColumnUnique'), true);
+  check('and it writes the flag the database reads',
+    /\{ \.\.\.c, unique: used \}/.test(inspector), true);
+  check('the column type carries it',
+    readFileSync('src/types/creora.ts', 'utf8').includes('unique?: boolean'), true);
+  check('and the panel says where it is enforced, not just what it does',
+    inspector.includes('enforced in the DATABASE'), true);
+}
+
 say(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

@@ -193,6 +193,25 @@ export default function DatabaseBlockInspector({ blockId }: { blockId: string; e
     recalculateAllFormulas(store);
   };
 
+  /**
+   * Mark a column as used-once, or stop.
+   *
+   * This only records the builder's intention. The rule is ENFORCED in the
+   * database (migration 0008), because a check the browser does before writing
+   * is not a rule: two visitors submitting the same value in the same second
+   * would both look, both find it free, and both get it. Recording it here and
+   * enforcing it there is the same split as collection privacy in 0004.
+   *
+   * No back-fill of existing rows. Turning this on for a column that already
+   * holds duplicates does not delete anything -- the builder decides what to do
+   * about the rows they already have, and new writes are refused from now on.
+   */
+  const handleToggleColumnUnique = (index: number, used: boolean) => {
+    const newCols = columns.map((c, i) => (i === index ? { ...c, unique: used } : c));
+    setRuntimeState(prev => ({ ...prev, columns: newCols }));
+    triggerSave(prev => prev + 1);
+  };
+
   const handleDeleteColumn = (index: number) => {
     const colName = columns[index].name;
     const newCols = columns.filter((_, i) => i !== index);
@@ -310,7 +329,8 @@ export default function DatabaseBlockInspector({ blockId }: { blockId: string; e
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
           {columns.map((col, idx) => (
-            <div key={col.name} style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <div key={col.name}>
+            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
               <input
                 type="text"
                 value={col.name}
@@ -351,6 +371,25 @@ export default function DatabaseBlockInspector({ blockId }: { blockId: string; e
                 -
               </button>
             </div>
+            {/*
+              "Used once" is enforced in the DATABASE, not here -- see migration
+              0008. A checkbox that only asked the browser to look before writing
+              would be no protection at all: two visitors submitting the same
+              slot in the same second would both look, both find it free, and
+              both get it. That is the failure it exists to stop, merely made
+              harder to reproduce.
+            */}
+            <label
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#475569', margin: '2px 0 8px 2px' }}
+            >
+              <input
+                type="checkbox"
+                checked={!!(col as any).unique}
+                onChange={(e) => handleToggleColumnUnique(idx, e.target.checked)}
+              />
+              Used once — no two rows may share this value
+            </label>
+          </div>
           ))}
         </div>
 

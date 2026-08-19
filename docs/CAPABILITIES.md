@@ -62,7 +62,7 @@ so `if(...)` and `Price > 100` both silently answered **0**.
 
 **4 column types** — text, number, boolean, **date**.
 
-**7 migrations**, all `SECURITY DEFINER` with RLS on and no policies, so every
+**8 migrations**, all `SECURITY DEFINER` with RLS on and no policies, so every
 read and write goes through one function.
 
 **1,480 runnable checks**, each with a negative control.
@@ -81,7 +81,7 @@ Same ten as both previous audits, so all three can be compared.
 | 4 | **Portfolio / gallery** | blocked | possible | **possible** | — |
 | 5 | **Blog** | blocked | PART — no detail page | **possible** | page parameters shipped; a row can open a page |
 | 6 | **Directory / listing** | blocked | PART — no detail page | **possible** | same |
-| 7 | **Booking** | blocked | blocked | **PART** | date picker, date column and date maths all exist. **No conflict prevention** — nothing stops two people booking one slot |
+| 7 | **Booking** | blocked | blocked | **PART** | dates all exist; a slot can be marked used-once — but that is migration 0008, `UNPROVED` |
 | 8 | **Shop** | blocked | blocked on payments | **blocked on payments** | cart is possible; money is not |
 | 9 | **Community** | blocked | blocked | **blocked** | no accounts for visitors |
 | 10 | **Internal dashboard** | blocked | PART | **PART** | numbers are strong now — several figures from one table, dates, totals. Roles and login still missing |
@@ -90,26 +90,32 @@ Same ten as both previous audits, so all three can be compared.
 
 ---
 
-## Part 3 — The hole this audit found
+## Part 3 — The hole this audit found, and what was done about it
 
-### Two people can book the same slot.
+### Two people could book the same slot.
 
 Booking moved from `blocked` to `PART` because dates arrived — a date column, a
-picker, `daysUntil`, "must be in the future". A visitor can now choose a slot
-and it is stored correctly.
+picker, `daysUntil`, "must be in the future". A visitor could choose a slot and
+it was stored correctly.
 
-**Nothing stops the next visitor choosing the same one.** There is no uniqueness
-anywhere: not on a column, not in a condition, not in the database. A workflow
-can check "is this slot taken" only against the rows the browser happens to have
-loaded, which is the wrong question asked of the wrong copy — two people pressing
-Submit within the same second both see a free slot and both get it.
+**Nothing stopped the next visitor choosing the same one.** There was no
+uniqueness anywhere: not on a column, not in a condition, not in the database. A
+workflow can check "is this slot taken" only against the rows the browser happens
+to hold, which is the wrong question asked of the wrong copy — two people
+pressing Submit within the same second both see a free slot and both get it.
 
-This is the same shape as the save race fixed in migration 0006, one layer up,
-and it is not a client-side problem: it can only be answered where the write
-happens.
+Same shape as the save race that migration 0006 fixed, one layer up, and not a
+client-side problem: answerable only where the write happens.
 
-It blocks booking outright, and it quietly blocks anything with a limited
-quantity — tickets, appointments, stock.
+**Migration 0008 answers it.** A column can be marked *used once* in the panel,
+and the rule is enforced by a trigger — with a transaction-scoped advisory lock
+on the block, column and value, because check-then-insert is not a guarantee.
+Two transactions can both look, both find nothing, and both insert; that is the
+exact failure, merely made rarer and harder to reproduce, and shipping it as
+though it were a guarantee would be worse than shipping nothing.
+
+**It is `UNPROVED` like the four before it.** Until it is run, a slot can still
+be taken twice.
 
 ---
 
@@ -120,7 +126,7 @@ quantity — tickets, appointments, stock.
 | 1 | **Layout model** — containers, stacking, reflow | every site on a phone; landing pages entirely | **large, and it is a rewrite** |
 | 2 | **Visitor accounts** — sign-in for the *built* site's users | community, shop, dashboard, anything with "my" | medium, needs a migration |
 | 3 | **A private server layer** — Edge Functions | email, payments, API keys, spam guards, AI | medium, unlocks 4–6 |
-| 4 | **Uniqueness / no double-booking** | booking, tickets, anything with limited stock | small, needs a migration |
+| — | ~~Uniqueness / no double-booking~~ | booking, tickets, limited stock | **written, migration 0008, unrun** |
 | 5 | **Email** — tell the owner, tell the visitor | contact form, booking, shop, community | small once 3 exists |
 | 6 | **Payments** | shop, subscriptions, the whole revenue idea | large, needs 2 and 3 |
 | 7 | **Roles and permissions** | dashboards, teams | medium, needs 2 |
@@ -139,14 +145,18 @@ claim about code held up by 1,480 checks and by nothing on the real domain. The
 most likely place for that to be wrong is not the logic — it is the editor:
 dragging, selecting, the panel, the slash menu.
 
-**Four migrations are `UNPROVED`.** 0004 (per-visitor rows), 0005 (delete a
-page), 0006 (two tabs overwriting each other) and 0007 (row limits) are written,
-documented and never run. Until they are:
+**Five migrations are `UNPROVED`.** 0004 (per-visitor rows), 0005 (delete a
+page), 0006 (two tabs overwriting each other), 0007 (row limits) and 0008
+(used-once columns) are written, documented and never run. Until they are:
 
 - a shop is blocked on more than payments
 - deleting a page explains itself instead of working
 - **two tabs still overwrite each other**
 - **a published form can still be filled by a script**
+- **a slot can still be booked twice**
+
+Five is too many to be a queue. It is the single largest gap between what this
+document claims and what a visitor would meet.
 
 **A published page still leaks its webhook URLs.** `get_page` returns the
 workflows whole, so anything a builder put in a `sendWebhook` step is readable by

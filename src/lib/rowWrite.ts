@@ -52,6 +52,25 @@ export function describeRowWriteError(error: unknown): RowWriteFailure {
       retryable: false,
     };
   }
+  /**
+   * A column marked "used once" already holds this value (migration 0008).
+   *
+   * The server names the column, and that name is the whole value of the
+   * message: "that is already taken" without saying WHAT leaves a visitor
+   * guessing which of five fields to change.
+   */
+  if (code === 'P0005' || lower.includes('is already taken')) {
+    const named = /that (.+?) is already taken/i.exec(message);
+    return {
+      message: named
+        ? `That ${named[1]} is already taken. Choose another one — nothing was saved.`
+        : 'That value is already taken. Choose another one — nothing was saved.',
+      // Retrying the same value fails the same way. Retrying a different one is
+      // a new submission, not a retry.
+      retryable: false,
+    };
+  }
+
   if (lower.includes('failed to fetch') || lower.includes('network')) {
     return {
       message: 'Could not reach the server, so this was not saved. Check the connection and try again.',

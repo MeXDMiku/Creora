@@ -200,7 +200,7 @@ export interface BlockProps {
   defaultValue?: any;
   trackedBlockId?: string;
   history?: number[];
-  columns?: { name: string; type: ColumnType }[];
+  columns?: { name: string; type: ColumnType; unique?: boolean }[];
   rows?: { id: string; [key: string]: any }[];
   outputMode?: string;
   targetPageId?: string;
@@ -276,7 +276,7 @@ export interface BlockRuntimeState {
   autoStart?: boolean;
   trackedBlockId?: string;
   history?: number[];
-  columns?: { name: string; type: ColumnType }[];
+  columns?: { name: string; type: ColumnType; unique?: boolean }[];
   rows?: { id: string; [key: string]: any }[];
   outputMode?: string;
   /** Which column sum / average / lowest / highest works on. */
