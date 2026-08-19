@@ -112,6 +112,44 @@ function group(title: string) {
   say(`\n${title}`);
 }
 
+/**
+ * Run something that might throw, and turn the throw into a VALUE.
+ *
+ * FOUND BY A NEGATIVE CONTROL LYING TO ME. `check()` takes an already-worked-out
+ * `actual`, so a check whose expression throws does not go red -- it kills the
+ * process before `check` is ever called. Every check after it never runs, and
+ * the tally line never prints.
+ *
+ * That is not a theoretical tidiness point. I broke the relation feature on
+ * purpose to see which check caught it, and what came back was a crash. A crash
+ * says "something moved". A FAIL says WHICH SENTENCE STOPPED BEING TRUE, and
+ * lets the other 1,700 checks answer too. Use this anywhere an expression is
+ * allowed to be wrong.
+ */
+function ran<T>(f: () => T): T | string {
+  try {
+    return f();
+  } catch (e: any) {
+    return `threw: ${e?.message ?? String(e)}`;
+  }
+}
+
+/**
+ * ...and if something throws anyway, the run still ends with a countable line.
+ *
+ * The other half of the same lesson. My control harness decided a run had
+ * finished by looking for `'passed,'` in the output -- which also matches the
+ * NAME of a check ("...once it has passed, which is what overdue means"). A
+ * crashed suite therefore read as "finished, 0 failed": a green that meant the
+ * opposite. The tally is the only line that should be able to say so, and now
+ * there is always exactly one, crash or no crash.
+ */
+let reachedTheEnd = false;
+process.on('exit', () => {
+  if (reachedTheEnd) return;
+  say(`\n${passed} passed, ${failed + 1} failed   <- SUITE STOPPED EARLY, the tally above is partial`);
+});
+
 // ---------------------------------------------------------------- rules
 group('rules, one at a time');
 
@@ -6864,5 +6902,253 @@ group('the server checks WHAT is written, not only who writes it');
   check('rather than printing the byte count at somebody', tooLong.message.includes('99999'), false);
 }
 
+
+group('a row can ask about another table, about itself');
+{
+  /**
+   * FOUND BY BUILDING A REAL SITE AND TRYING TO TRANSLATE IT.
+   * See docs/BUILT_ONE_TO_FIND_OUT.md.
+   *
+   * A pottery studio's booking site needed fifteen things. Three worked. NINE
+   * OF THE REMAINING TWELVE WERE THE SAME MISSING SENTENCE wearing different
+   * clothes: a formula could not refer to the row it was standing in when it
+   * asked about another table.
+   *
+   *     {{calc: Capacity - countOf("Bookings", '{{ClassId}} == ???') }}
+   *
+   * `{{ClassId}}` is the booking being tested, which is right. There was no way
+   * to say "…equals the id of the class I am rendering". The condition is a
+   * string and the row was outside it.
+   *
+   * The fix is one line: give the condition the CALLING scope underneath, with
+   * `{{...}}` slots still winning. No new syntax, no new block.
+   */
+  const CLASSES = {
+    rows: [
+      { id: 'c1', Title: 'Wheel throwing', InstructorId: 'i1', Capacity: 8, Price: 34 },
+      { id: 'c3', Title: 'Glazing', InstructorId: 'i2', Capacity: 6, Price: 40 },
+    ],
+    columns: ['Title', 'InstructorId', 'Capacity', 'Price'],
+  };
+  const INSTRUCTORS = {
+    rows: [{ id: 'i1', Name: 'Maya Okonkwo' }, { id: 'i2', Name: 'Tomas Reid' }],
+    columns: ['Name'],
+  };
+  const BOOKINGS = {
+    rows: [
+      { id: 'b1', ClassId: 'c1', Status: 'confirmed' },
+      { id: 'b2', ClassId: 'c1', Status: 'confirmed' },
+      { id: 'b3', ClassId: 'c3', Status: 'confirmed' },
+      { id: 'b4', ClassId: 'c3', Status: 'waitlist' },
+    ],
+    columns: ['ClassId', 'Status'],
+  };
+  const REVIEWS = {
+    rows: [
+      { id: 'v1', ClassId: 'c1', Rating: 5 },
+      { id: 'v2', ClassId: 'c1', Rating: 4 },
+      { id: 'v3', ClassId: 'c3', Rating: 5 },
+    ],
+    columns: ['ClassId', 'Rating'],
+  };
+  const tables = { Classes: CLASSES, Instructors: INSTRUCTORS, Bookings: BOOKINGS, Reviews: REVIEWS };
+
+  // What a repeater's row markup can see: the row's own columns, by bare name.
+  // Through ran(), so breaking the feature makes these go RED rather than
+  // taking the whole suite down with them -- see ran() at the top of the file.
+  const card = (row: any, f: string) => ran(() => evaluateExpression(f, { ...row, RowId: row.id }, tables));
+  const asks = (f: string, scope: Record<string, any>) => ran(() => evaluateExpression(f, scope, tables));
+  const c1 = CLASSES.rows[0];
+  const c3 = CLASSES.rows[1];
+
+  check('PLACES LEFT: capacity minus a count of rows in another table',
+    card(c1, `Capacity - countOf("Bookings", '{{ClassId}} == RowId and {{Status}} == "confirmed"')`), 6);
+  check('and the other card gets its own answer, not the first one’s',
+    card(c3, `Capacity - countOf("Bookings", '{{ClassId}} == RowId and {{Status}} == "confirmed"')`), 5);
+
+  check('WHO TEACHES IT: a lookup into another table, which is a relation',
+    card(c1, `joinOf("Instructors", "Name", '{{Row id}} == InstructorId')`), 'Maya Okonkwo');
+  check('and the second class has the other teacher',
+    card(c3, `joinOf("Instructors", "Name", '{{Row id}} == InstructorId')`), 'Tomas Reid');
+
+  check('AVERAGE RATING of the rows that point at this one',
+    card(c1, `avgOf("Reviews", "Rating", '{{ClassId}} == RowId')`), 4.5);
+  check('a class nobody reviewed averages nothing rather than erroring',
+    card({ id: 'c9', Capacity: 4 }, `avgOf("Reviews", "Rating", '{{ClassId}} == RowId')`), 0);
+
+  check('IS IT FULL: the whole sentence, as a card would ask it',
+    card(c3, `if(Capacity - countOf("Bookings", '{{ClassId}} == RowId and {{Status}} == "confirmed"') <= 0, "Full", "Book")`),
+    'Book');
+  check('and a truly full one says so',
+    card({ id: 'c3', Capacity: 1 }, `if(Capacity - countOf("Bookings", '{{ClassId}} == RowId and {{Status}} == "confirmed"') <= 0, "Full", "Book")`),
+    'Full');
+
+  check('HOW MANY ARE WAITING, which is a different condition on the same table',
+    card(c3, `countOf("Bookings", '{{ClassId}} == RowId and {{Status}} == "waitlist"')`), 1);
+
+  /**
+   * The dashboard's revenue: for every booking, the price of the class it
+   * points at. An aggregate across a relation, from the other side.
+   */
+  const booking = BOOKINGS.rows[0];
+  check('WHAT ONE BOOKING IS WORTH: the price of the row it points at',
+    asks(`sumOf("Classes", "Price", '{{Row id}} == ClassId')`, { ...booking, RowId: booking.id }),
+    34);
+
+  /**
+   * WHICH SCOPE A NAME MEANS -- and this is where I had written a check that
+   * could not fail.
+   *
+   * It said "the tested row WINS over the caller where both have the name" and
+   * it passed. It also passed when I inverted the precedence on purpose, which
+   * is the only reason I found out that the sentence describes a contest that
+   * never happens: a `{{Column}}` slot is rewritten to an invented name before
+   * anything is resolved, so the caller has nothing to shadow it WITH.
+   *
+   * The guarantee is therefore stronger than precedence and worth saying
+   * properly: a card can have its own `Status` and still ask a table about the
+   * table's `Status`, and neither one moves.
+   */
+  const bothHaveStatus = { Status: 'waitlist' };
+  check('A CALLER WITH THE SAME COLUMN NAME CANNOT CHANGE WHAT A SLOT MEANS',
+    asks(`countOf("Bookings", '{{Status}} == "confirmed"')`, bothHaveStatus), 3);
+  check('and the caller’s own value is still there for a bare name to reach',
+    asks(`if(Status == "waitlist", countOf("Bookings", '{{Status}} == "waitlist"'), -1)`, bothHaveStatus), 1);
+  check('so the two spellings in ONE condition mean two different rows',
+    asks(`countOf("Bookings", '{{Status}} == Status')`, { Status: 'waitlist' }), 1);
+
+  /**
+   * THE INVENTED NAME HAS TO BE ONE THE CONDITION IS NOT USING. It used to be
+   * a fixed `__w0`, so a caller value of that name was overwritten by the
+   * tested row and `{{Status}} == __w0` quietly became `Status == Status`:
+   * every row matched, and the answer was a number, which is the shape of
+   * wrongness this file exists to refuse.
+   */
+  check('AN INTERNAL NAME LEAKING INTO A CONDITION DOES NOT SILENTLY MATCH EVERYTHING',
+    asks(`countOf("Bookings", '{{Status}} == __w0')`, { __w0: 'waitlist' }), 1);
+  check('and it answers the same as the identical question spelled differently',
+    asks(`countOf("Bookings", '{{Status}} == Want')`, { Want: 'waitlist' }), 1);
+
+  check('and a bare name still reaches the caller when the tested row has no such column',
+    card(c1, `countOf("Bookings", '{{ClassId}} == RowId')`), 2);
+
+  /**
+   * Nothing that worked before stops working. A condition that mentions only
+   * the tested row is unchanged, and a name in neither scope still says so.
+   */
+  check('a condition using only the tested row is unaffected',
+    asks(`countOf("Bookings", '{{Status}} == "confirmed"')`, {}), 3);
+
+  /**
+   * THROUGH THE PATH A BUILDER ACTUALLY USES, which is where this nearly went
+   * wrong. Every check above builds the row's scope by hand and puts `RowId`
+   * in it. A real repeater builds that scope with `rowSlots`, which spelled the
+   * id `Row id` -- with a space, so it cannot be a bare name in an expression.
+   *
+   * The whole feature would have looked correct in the checks and said
+   * "Referenced block RowId does not exist" on a page. rowSlots now offers both
+   * spellings: `{{Row id}}` because it reads, `RowId` because it parses.
+   */
+  const realScope = rowSlots(c1 as any, 0);
+  check('THE ROW’S ID IS SPELLED BOTH WAYS, or a formula cannot name it',
+    [realScope['Row id'], realScope['RowId']], ['c1', 'c1']);
+  check('and the row number too', [realScope['Row number'], realScope['RowNumber']], [1, 1]);
+
+  check('PLACES LEFT, RENDERED THE WAY A CARD RENDERS IT',
+    fillSlots(
+      `<p>{{calc: Capacity - countOf("Bookings", '{{ClassId}} == RowId and {{Status}} == "confirmed"')}} left</p>`,
+      rowSlots(c1 as any, 0), [], { tables }),
+    '<p>6 left</p>');
+  check('WHO TEACHES IT, RENDERED THE SAME WAY',
+    fillSlots(
+      `<p>with {{calc: joinOf("Instructors", "Name", '{{Row id}} == InstructorId')}}</p>`,
+      rowSlots(c1 as any, 0), [], { tables }),
+    '<p>with Maya Okonkwo</p>');
+  check('and the second card gets its own teacher, not the first one’s',
+    fillSlots(
+      `<p>{{calc: joinOf("Instructors", "Name", '{{Row id}} == InstructorId')}}</p>`,
+      rowSlots(c3 as any, 1), [], { tables }),
+    '<p>Tomas Reid</p>');
+  check('a star rating, per card',
+    fillSlots(`<p>{{calc: avgOf("Reviews", "Rating", '{{ClassId}} == RowId')}}</p>`,
+      rowSlots(c1 as any, 0), [], { tables }),
+    '<p>4.5</p>');
+  /**
+   * AND THE NAMES INSIDE A CONDITION ARE FETCHED. A table function's condition
+   * is an expression wearing a string's clothes: `RowId` in it is a real
+   * reference, and to the parser it is three characters inside a literal.
+   *
+   * A repeater hides this -- its rows supply every column whether anybody asked
+   * or not -- so it works there and fails in a Custom HTML block, which fetches
+   * exactly what it is told to and nothing else.
+   */
+  check('a name used only inside a condition is still asked for',
+    findSlotsForCheck(`<p>{{calc: countOf("Bookings", '{{ClassId}} == RowId')}}</p>`), ['RowId']);
+  check('alongside the ones outside it',
+    findSlotsForCheck(`<p>{{calc: Capacity - countOf("Bookings", '{{ClassId}} == RowId')}}</p>`), ['Capacity', 'RowId']);
+  check('THE TABLE NAME IS NOT MISTAKEN FOR A BLOCK, since it is a name not an expression',
+    findSlotsForCheck(`<p>{{calc: countOf("Bookings")}}</p>`), []);
+  check('nor the column name',
+    findSlotsForCheck(`<p>{{calc: sumOf("Orders", "Total")}}</p>`), []);
+  check('and the slots inside the condition belong to the table, not to the caller',
+    findSlotsForCheck(`<p>{{calc: countOf("Bookings", '{{ClassId}} == "x"')}}</p>`), []);
+
+  check('and a name in neither scope is still an error a person can act on',
+    (() => { try { evaluateExpression(`countOf("Bookings", '{{ClassId}} == Nonsense')`, {}, tables); return null; } catch (e: any) { return String(e.message); } })()?.includes('Nonsense'),
+    true);
+}
+
+
+group('a slot can contain a slot');
+{
+  /**
+   * The scan used to be `/\{\{\s*([^}]+?)\s*\}\}/`, which stops at the FIRST
+   * `}}`. That was fine until a slot could contain another one -- and the very
+   * first thing a real card wants to write does:
+   *
+   *     {{calc: Capacity - countOf("Bookings", '{{ClassId}} == RowId')}}
+   *
+   * The old scan matched as far as `{{ClassId}}` and left the rest of the line
+   * on the page as text. The feature worked perfectly in a Formula block and
+   * was broken in the one place a card would use it.
+   *
+   * It was found by rendering it the way a repeater renders it. Every check
+   * written before that handed a scope straight to the engine, and all of them
+   * passed.
+   */
+  const vals = { A: 1, B: 2 };
+  check('an ordinary slot is unchanged', fillSlots('<p>{{A}}</p>', vals), '<p>1</p>');
+  check('two in a row are still two', fillSlots('<p>{{A}}{{B}}</p>', vals), '<p>12</p>');
+  check('with text between them', fillSlots('<p>{{A}} and {{B}}</p>', vals), '<p>1 and 2</p>');
+  check('A NESTED SLOT IS PART OF THE OUTER ONE, not the end of it',
+    findSlotsForCheck(`<p>{{calc: countOf("T", '{{X}} == A')}}</p>`), ['A']);
+  check('and the whole thing is replaced, leaving no tail behind',
+    fillSlots(`<p>[{{calc: 1 + 1}}]</p>`, {}), '<p>[2]</p>');
+
+  /**
+   * An unclosed `{{` is left exactly as typed. Somebody writing an example, or
+   * mid-edit, should see what they wrote rather than have the rest of their
+   * page swallowed.
+   */
+  check('AN UNFINISHED SLOT DOES NOT EAT THE REST OF THE PAGE',
+    fillSlots('<p>{{A}} then {{oops</p>', vals), '<p>1 then {{oops</p>');
+  check('nor does a lone opening brace pair', fillSlots('<p>{{</p>', vals), '<p>{{</p>');
+  check('a stray closing pair is ordinary text', fillSlots('<p>}} {{A}}</p>', vals), '<p>}} 1</p>');
+  check('and markup with no slots at all comes back whole',
+    fillSlots('<p>nothing here</p>', vals), '<p>nothing here</p>');
+  check('empty markup is not a crash', fillSlots('', vals), '');
+
+  /**
+   * What it cannot do, said plainly rather than discovered later: a `}}` inside
+   * a quoted string inside a slot closes the slot early, because the scan
+   * counts braces and does not read quotes. `'}}'` in a condition is not
+   * something anybody writes, and a scanner that understood quotes would have
+   * to understand escaping too.
+   */
+  check('a }} inside a quoted condition ends the slot early — a known limit',
+    fillSlots(`<p>{{calc: text("}}")}}</p>`, {}).includes('}}'), true);
+}
+
+reachedTheEnd = true;
 say(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

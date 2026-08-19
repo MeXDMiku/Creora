@@ -172,13 +172,83 @@ export function escapeHtmlText(value: any): string {
  * The name is what gets looked up, so everything that resolves values -- block
  * names, database columns -- keeps working without knowing filters exist.
  */
+/**
+ * Walk the {{ slots }} in some markup, counting braces rather than matching a
+ * regular expression.
+ *
+ * WHY THIS IS NOT A REGEX ANY MORE
+ * `/\{\{\s*([^}]+?)\s*\}\}/` stops at the FIRST `}}`, which was fine until a
+ * slot could contain another one:
+ *
+ *     {{calc: Capacity - countOf("Bookings", '{{ClassId}} == RowId')}}
+ *
+ * The old scan matched up to `{{ClassId}}` and left the rest of the line on the
+ * page as text. The feature worked perfectly in a Formula block and was broken
+ * in the one place a card would use it -- and it was only found by rendering it
+ * the way a repeater renders it, rather than by handing a scope to the engine
+ * in a check.
+ *
+ * An unclosed `{{` is left exactly as written. Somebody typing an example, or
+ * mid-edit, should see what they typed rather than have the rest of their page
+ * swallowed.
+ */
+export function eachSlot(
+  html: string,
+  replace: (raw: string, whole: string) => string,
+): string {
+  let out = '';
+  let i = 0;
+  while (i < html.length) {
+    const open = html.indexOf('{{', i);
+    if (open === -1) {
+      out += html.slice(i);
+      break;
+    }
+    out += html.slice(i, open);
+
+    let depth = 0;
+    let j = open;
+    let close = -1;
+    while (j < html.length - 1) {
+      if (html[j] === '{' && html[j + 1] === '{') {
+        depth++;
+        j += 2;
+        continue;
+      }
+      if (html[j] === '}' && html[j + 1] === '}') {
+        depth--;
+        if (depth === 0) {
+          close = j;
+          break;
+        }
+        j += 2;
+        continue;
+      }
+      j++;
+    }
+
+    if (close === -1) {
+      // Never closed. Leave it as the builder typed it.
+      out += html.slice(open);
+      break;
+    }
+
+    const whole = html.slice(open, close + 2);
+    out += replace(html.slice(open + 2, close).trim(), whole);
+    i = close + 2;
+  }
+  return out;
+}
+
 export function findSlots(html: string | undefined | null): string[] {
   if (!html) return [];
   const names = new Set<string>();
-  const re = /\{\{\s*([^}]+?)\s*\}\}/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(html)) !== null) {
-    const name = parseSlot(m[1]).name;
+  const raws: string[] = [];
+  // Brace-counted, so a calc containing its own {{...}} is one slot -- see
+  // eachSlot. The regex this replaced stopped at the first `}}`.
+  eachSlot(html, raw => { raws.push(raw); return ''; });
+  for (const raw of raws) {
+    const name = parseSlot(raw).name;
     if (!name) continue;
 
     /**
@@ -251,7 +321,7 @@ export function fillSlots(
   options: FilterOptions = {}
 ): string {
   const guarded = new Set(urlSlots || []);
-  return safeHtml.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_, raw) => {
+  return eachSlot(safeHtml, (raw) => {
     const { name: key, filters } = parseSlot(String(raw));
 
     /**

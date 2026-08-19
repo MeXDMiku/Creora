@@ -250,6 +250,27 @@ export function rowSlots(row: Row, index: number): Record<string, any> {
   }
   values['Row number'] = index + 1;
   values['Row id'] = row?.id ?? '';
+
+  /**
+   * THE SAME TWO VALUES, SPELLED SO A FORMULA CAN USE THEM.
+   *
+   * `{{Row id}}` reads well in markup and cannot be written in an expression --
+   * a bare identifier cannot contain a space. That did not matter until a
+   * condition could refer to the row it is standing in:
+   *
+   *     {{calc: Capacity - countOf("Bookings", '{{ClassId}} == RowId') }}
+   *
+   * Without these two aliases that line looks right, does nothing, and says
+   * "Referenced block RowId does not exist" -- which is the exact shape of
+   * shipping a capability nobody can reach. Found by checking the feature
+   * through the path a builder actually uses, rather than through a scope
+   * built by hand in a check.
+   *
+   * Both spellings stay: `{{Row id}}` in markup because it reads, `RowId` in a
+   * formula because it parses.
+   */
+  values['RowId'] = row?.id ?? '';
+  values['RowNumber'] = index + 1;
   return values;
 }
 

@@ -372,13 +372,62 @@ function rowsWhere(
   rows: Record<string, any>[],
   where: string | null,
   options?: EvaluateOptions,
+  outer?: Record<string, any>,
 ): Record<string, any>[] {
   if (!where || !where.trim()) return rows;
+  /**
+   * A `{{Column}}` slot is not looked up by name -- it is REWRITTEN to an
+   * invented name that holds the tested row's value. That is what keeps the
+   * two scopes apart: the caller cannot shadow a slot, because by the time
+   * anything is resolved the slot is not spelled the way the caller's names
+   * are spelled.
+   *
+   * The invented name has to be one the condition is not itself using, or the
+   * scopes collide the other way round. With a fixed `__w0`, this:
+   *
+   *     countOf("T", '{{Status}} == __w0')      // caller has __w0 = "confirmed"
+   *
+   * became `__w0 == __w0` and counted EVERY row -- a wrong number that looks
+   * like a number, which is the failure this file exists to refuse. So the
+   * prefix grows until the condition does not contain it. It is only ever the
+   * first branch in practice; the loop is there so the guarantee is a
+   * guarantee and not a bet on what people name things.
+   */
+  let prefix = '__w';
+  while (where.includes(prefix)) prefix = '_' + prefix;
   return rows.filter(row => {
-    const rowScope: Record<string, any> = {};
+    /**
+     * TWO SCOPES, AND WHICH ONE A NAME MEANS IS DECIDED BY HOW IT IS SPELLED.
+     *
+     * `{{Column}}` is the row being TESTED -- a booking, a review -- and that
+     * has always been true. A bare name falls through to whatever asked the
+     * question: the class card doing the asking, the page around it.
+     *
+     * WHY THIS IS THE WHOLE POINT
+     * Without the second scope, a condition can compare the tested row against
+     * a constant and nothing else. So "how many bookings does THIS class have"
+     * was not sayable -- the class was outside the string:
+     *
+     *     countOf("Bookings", '{{ClassId}} == ???')
+     *
+     * With it, `RowId` in that condition is the class card's own id, and the
+     * same sentence does lookups too:
+     *
+     *     joinOf("Instructors", "Name", '{{Row id}} == InstructorId')
+     *
+     * That is a relation between two tables, built entirely out of parts that
+     * already existed. Six separate things a real site needs turned out to be
+     * this one sentence -- see docs/BUILT_ONE_TO_FIND_OUT.md.
+     *
+     * THE TWO CANNOT COLLIDE, which is stronger than one winning. See the
+     * rewriting above: a slot never becomes a name the caller could also have
+     * used, so a card with its own `Status` column can still ask a table about
+     * ITS `Status` and get the right answer.
+     */
+    const rowScope: Record<string, any> = { ...(outer || {}) };
     let index = 0;
     const rewritten = where.replace(SLOT_IN_WHERE, (_all, rawName: string) => {
-      const key = `__w${index++}`;
+      const key = `${prefix}${index++}`;
       const name = String(rawName).trim();
       rowScope[key] = name === 'Row id' ? row?.id : row?.[name];
       return key;
@@ -450,6 +499,8 @@ function callTableFunction(
   walk: (node: any) => any,
   tables: TableScope | undefined,
   options?: EvaluateOptions,
+  /** What the formula asking this question can see. See rowsWhere. */
+  outer?: Record<string, any>,
 ): FormulaValue {
   // A literal string, taken as written. Anything else is worked out first, so
   // a formula can build a table name if it really wants to.
@@ -484,11 +535,11 @@ function callTableFunction(
 
   if (name === 'countOf') {
     if (args.length > 2) throw new Error('countOf takes a table and, if you want, a condition');
-    return rowsWhere(table.rows, asWhere(args[1]), options).length;
+    return rowsWhere(table.rows, asWhere(args[1]), options, outer).length;
   }
 
   const column = columnNamed(table, asName(args[1], 'a column name'));
-  const kept = rowsWhere(table.rows, asWhere(args[2]), options);
+  const kept = rowsWhere(table.rows, asWhere(args[2]), options, outer);
 
   switch (name) {
     case 'sumOf':
@@ -781,7 +832,7 @@ export function evaluateExpression(
          */
         const called = node.callee?.name;
         if (typeof called === 'string' && called in TABLE_FUNCTIONS) {
-          return callTableFunction(called, node.arguments || [], walk, tables, { now: clock() });
+          return callTableFunction(called, node.arguments || [], walk, tables, { now: clock() }, scope);
         }
         if (typeof called === 'string' && called in DATE_FUNCTIONS) {
           return DATE_FUNCTIONS[called](node.arguments.map(walk), clock());
@@ -878,11 +929,42 @@ export function identifiersIn(formula: string | undefined | null): string[] {
       case 'Identifier':
         add(node.name);
         return;
-      case 'CallExpression':
+      case 'CallExpression': {
         // The callee is the function's name, not a value. Only arguments hold
         // things to fetch.
         (node.arguments || []).forEach(walk);
+
+        /**
+         * A TABLE FUNCTION'S CONDITION IS AN EXPRESSION WEARING A STRING'S
+         * CLOTHES, and the names in it have to be fetched like any others.
+         *
+         *     countOf("Bookings", '{{ClassId}} == RowId')
+         *
+         * `RowId` is a real reference to the calling row, and to jsep it is
+         * three characters inside a literal. A repeater hides this -- its rows
+         * supply every column whether anybody asked or not -- so it works there
+         * and fails in a Custom HTML block, which fetches exactly what it is
+         * told to fetch and nothing else. Same shape as the bug where a calc
+         * slot asked for a block called "calc: Total * 2".
+         *
+         * Only the CONDITION argument is read this way. The table name and the
+         * column name are also strings and are emphatically not expressions --
+         * parsing "Orders" would report a block called Orders that nobody
+         * mentioned.
+         */
+        const fn = node.callee?.name;
+        if (typeof fn === 'string' && fn in TABLE_FUNCTIONS) {
+          const conditionAt = fn === 'countOf' ? 1 : 2;
+          const arg = (node.arguments || [])[conditionAt];
+          if (arg && arg.type === 'Literal' && typeof arg.value === 'string') {
+            // The {{...}} slots belong to the table being asked about, not to
+            // whoever is asking, so they are removed before the rest is read.
+            const bare = arg.value.replace(/\{\{[^}]*\}\}/g, ' 0 ');
+            for (const name of identifiersIn(bare)) add(name);
+          }
+        }
         return;
+      }
       case 'UnaryExpression':
         walk(node.argument);
         return;
