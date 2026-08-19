@@ -56,6 +56,9 @@ import { describeRowWriteError, withoutRow } from '../src/lib/rowWrite';
 import { chartBars, MIN_BAR_HEIGHT } from '../src/lib/chartBars';
 import { timerStep, timerResetValue } from '../src/lib/useTimer';
 import { duplicatedRuns, duplicatedLineCount } from './rendererDrift';
+import { BLOCK_DISPLAY_NAMES } from '../src/lib/blockRegistry';
+import { RULE_TYPES as AUDIT_RULES } from '../src/lib/validation';
+import { TABLE_FUNCTION_NAMES, DATE_FUNCTION_NAMES } from '../src/lib/formula';
 import { visibleRows, rowSlots, compareCells, slotNamesFor, rowMatchesSearch, MAX_RENDERED_ROWS, rowIndexesForStep, coerceForColumn, rowMatchesFormula, columnsUsedByFormula, calcExampleFor, calcExampleWithFilter, shareExampleFor, isoDate, isoToDateInput, dateInputToIso, displayCell, COLUMN_TYPE_LABELS, listRowLines, listIsEmpty } from '../src/lib/rows';
 import {
   parseSlot,
@@ -6082,6 +6085,71 @@ group('the editor and the published page are not drifting apart again');
     runs.some(r => r.starts.includes('baselineY') || r.starts.includes('maxVal')), false);
   check('nor the list’s rows', runs.some(r => r.starts.includes("key !== 'id'")), false);
   check('nor how a cell is displayed', runs.some(r => r.starts.includes('String(colVal)')), false);
+}
+
+
+group('this audit still describes the product');
+{
+  /**
+   * CAPABILITIES.md counts what exists. It was written on 13 Aug and by 19 Aug
+   * it named three things as missing that had all shipped -- page parameters,
+   * more input types, a date picker -- so for six days the project's own
+   * planning document pointed at work that was already done. Its opening
+   * paragraph warns about exactly that, which is the whole problem with a
+   * document that can only be checked by reading it.
+   *
+   * So the numbers are asserted here. Adding a block type or an action without
+   * updating the file turns this red, and updating the file is then a line in a
+   * diff rather than something somebody has to remember.
+   *
+   * ONLY THE COUNTS. Whether "a blog is possible now" is true is a judgement
+   * about a walk through a real site, and no check can hold that up -- Part 5 of
+   * the file says so in its own words.
+   */
+  const audit = readFileSync('docs/CAPABILITIES.md', 'utf8');
+  const claims = (label: string): number | null => {
+    const m = new RegExp(`\\*\\*([\\d,]+) ${label}`).exec(audit);
+    return m ? Number(m[1].replace(/,/g, '')) : null;
+  };
+
+  check('THE AUDIT COUNTS THE BLOCK TYPES THAT EXIST',
+    claims('block types'), Object.keys(BLOCK_DISPLAY_NAMES).length);
+  check('and the validation rules', claims('validation rules'), AUDIT_RULES.length);
+  check('and the formula functions',
+    claims('formula functions'),
+    FORMULA_FUNCTION_NAMES.length + TABLE_FUNCTION_NAMES.length + DATE_FUNCTION_NAMES.length);
+  check('and the column types', claims('column types'), Object.keys(COLUMN_TYPE_LABELS).length);
+  check('and the migrations',
+    claims('migrations'), readdirSync('supabase/migrations').filter(f => f.endsWith('.sql')).length);
+
+  // The workflow actions come from a type union, so they are read from source.
+  const creoraTypes = readFileSync('src/types/creora.ts', 'utf8');
+  const actionSlice = creoraTypes.slice(
+    creoraTypes.indexOf('  action:'),
+    creoraTypes.indexOf("| 'setEnabled';") + 20,
+  );
+  const actionCount = new Set(Array.from(actionSlice.matchAll(/'([a-zA-Z]+)'/g)).map(m => m[1])).size;
+  check('the action slice was actually found, or the count below proves nothing',
+    actionCount > 10, true);
+  check('and the audit counts the workflow actions', claims('workflow actions'), actionCount);
+
+  /**
+   * The checks figure too, because "held up by N checks and by nothing on the
+   * real domain" is the sentence that keeps this honest -- and a stale N is the
+   * first sign nobody re-ran it.
+   */
+  const claimedChecks = claims('runnable checks');
+  check('the audit knows roughly how many checks hold it up',
+    claimedChecks !== null && Math.abs(claimedChecks - passed) < 60, true);
+
+  /**
+   * And the three things the last audit got wrong by going stale. Naming them
+   * means the same rot is visible rather than merely absent.
+   */
+  check('it no longer calls page parameters missing',
+    /rank 1[\s\S]{0,200}[Pp]age parameters/.test(audit), false);
+  check('nor the input types', audit.includes('More input types'), false);
+  check('nor a date picker', /\| 10 \| \*\*Date and time picker/.test(audit), false);
 }
 
 say(`\n${passed} passed, ${failed} failed`);

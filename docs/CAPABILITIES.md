@@ -1,18 +1,20 @@
 # What a website needs, and what Creora has
 
-**Second audit. Written 13 Aug 2026, against the code as it stands.**
+**Third audit. Written 19 Aug 2026, against the code as it stands.**
 
-The first audit (11 Aug) is superseded. It listed images, validation,
-for-each-row, dates, search and per-visitor data as missing; six cycles later
-all six exist. An audit nobody re-runs is worse than none, because it keeps
-pointing at work that is already done.
+The second audit (13 Aug) is superseded. It named page parameters as the
+highest blast-radius item, more input types as rank 3, and a date picker as rank
+10. **All three exist now**, and the second audit kept pointing at them for six
+days — which is exactly what its own first paragraph warned about.
 
-Method, so this can be re-run rather than re-felt:
+So this time the counts are not typed by hand. They are asserted against the
+code by `npm run check`, in the group *"this audit still describes the
+product"*. If a block type or an action is added and this file is not updated,
+the checks go red. **An audit that can go stale silently will.**
 
-1. **Inventory taken from the code, not from memory** — block types from
-   `BLOCK_NODE_TYPES`, actions from the `WorkflowStep` union, operators from
-   `conditions.ts`, filters from `format.ts`, rules from `validation.ts`, RPCs
-   from the migrations.
+Method, unchanged and still worth following:
+
+1. **Inventory from the code, not from memory** — and now checked.
 2. **Walk real site types end to end** and mark where each one stops.
 3. **Order what is left by blast radius** — how many site types a missing piece
    unblocks — not by size or appeal.
@@ -23,76 +25,91 @@ Legend: `HAVE` · `PART` partly · `MISSING` · `UNPROVED` written but never run
 
 ## Part 1 — What exists today, counted
 
-**16 block types**
+**17 block types**
 Button · Number display · Toggle · Input · Text label · Formula · Timer ·
 History chart · Database · List · Shape · Live data · My design · Visitor ·
-**Image** · **For each row**
+Image · For each row · **Page value**
 
-**18 workflow actions**
+**20 workflow actions**
 increment · decrement · set · setText · toggle · reset · setVisible · setHidden ·
 addRow · updateRow · deleteRow · exportCsv · sendWebhook · validate · setLoading ·
-clearLoading · setDisabled · setEnabled
+clearLoading · setDisabled · setEnabled · **goToPage** · **openUrl**
 
-**14 condition operators**, each with its opposite, plus `isValid` / `isInvalid`
-which ask a field's own rules.
+**10 condition operators** in five opposed pairs, plus `isValid` / `isInvalid`
+which ask a field's own rules — and, since 16 Aug, **a condition may be a whole
+formula** instead, which is what made "only when quantity times price is over
+500" sayable at all.
 
-**13 validation rules** — required, email, number, whole number, url, phone,
+**17 validation rules** — required, email, number, whole number, url, phone,
 min/max length, min/max value, starts/ends with, your own regular expression,
-matches another field.
+matches another field, and **is a date / is after / is before** (either taking
+the word `today`).
 
 **15 display filters** — date, time, ago, plus, minus, money, number, round,
 percent, upper, lower, title, trim, truncate, default.
 
-**17 database functions**, all `SECURITY DEFINER`, with RLS on and no policies,
-so every read and write goes through one.
+**47 formula functions** — this is the newest and largest addition, and none of
+it existed on 13 Aug. The evaluator was `+ - * / %` over a `default: return 0`,
+so `if(...)` and `Price > 100` both silently answered **0**.
 
-**370 runnable checks.**
+- 30 general: `if` `and` `or` `not` `isBlank`, min/max/sum/avg/abs/floor/ceil/
+  round/pow/sqrt/clamp, len/upper/lower/trim/join/concat/contains/startsWith/
+  endsWith/replace/left/right, number/text
+- 6 over a whole table: `countOf` `sumOf` `avgOf` `minOf` `maxOf` `joinOf`,
+  each taking an optional row condition
+- 11 dates: `daysUntil` `daysSince` `daysBetween` `dateAdd` `isBefore` `isAfter`
+  `isSameDay` `year` `month` `day` `weekday`, plus `today` and `now` as words
 
-That is not a skeleton. It is roughly the capability surface of a small
-commercial builder — with one very large hole, which is Part 3.
+**4 column types** — text, number, boolean, **date**.
+
+**7 migrations**, all `SECURITY DEFINER` with RLS on and no policies, so every
+read and write goes through one function.
+
+**1,480 runnable checks**, each with a negative control.
 
 ---
 
 ## Part 2 — Ten real websites, re-walked
 
-Same ten as the first audit, so the two can be compared directly.
+Same ten as both previous audits, so all three can be compared.
 
-| # | site | verdict on 11 Aug | verdict today | what still stops it |
-| :--- | :--- | :--- | :--- | :--- |
-| 1 | **Waitlist / signup** | closest to possible | **possible now** | nothing — validation, submit, states all exist |
-| 2 | **Landing page** | blocked on images + layout | **blocked on layout only** | fixed x/y; does not reflow on a phone |
-| 3 | **Contact form** | blocked on email | **PART** | works, but the owner is not told. Webhook is the workaround, email is the answer |
-| 4 | **Portfolio / gallery** | blocked on images | **possible now** | grid layout in For-each-row is the gallery |
-| 5 | **Blog** | blocked on for-each-row + dates | **PART** | list works; **there is no detail page** — no way to open one row |
-| 6 | **Directory / listing** | blocked on for-each-row + search | **PART** | same one gap: no detail page |
-| 7 | **Booking** | blocked on dates + private state + server | **blocked** | no date picker, no conflict prevention |
-| 8 | **Shop** | blocked on private state + payments | **blocked on payments** | cart is now possible (unproved); money is not |
-| 9 | **Community** | blocked on end-user identity | **blocked** | no accounts for visitors |
-| 10 | **Internal dashboard** | blocked on identity + roles + filtering | **PART** | filtering exists; roles and login do not |
+| # | site | 11 Aug | 13 Aug | today | what still stops it |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| 1 | **Waitlist / signup** | closest | possible | **possible** | nothing |
+| 2 | **Landing page** | blocked | blocked on layout | **blocked on layout** | fixed x/y; no reflow on a phone |
+| 3 | **Contact form** | blocked on email | PART | **PART** | works, but the owner is not told. Webhook is the workaround; email is the answer |
+| 4 | **Portfolio / gallery** | blocked | possible | **possible** | — |
+| 5 | **Blog** | blocked | PART — no detail page | **possible** | page parameters shipped; a row can open a page |
+| 6 | **Directory / listing** | blocked | PART — no detail page | **possible** | same |
+| 7 | **Booking** | blocked | blocked | **PART** | date picker, date column and date maths all exist. **No conflict prevention** — nothing stops two people booking one slot |
+| 8 | **Shop** | blocked | blocked on payments | **blocked on payments** | cart is possible; money is not |
+| 9 | **Community** | blocked | blocked | **blocked** | no accounts for visitors |
+| 10 | **Internal dashboard** | blocked | PART | **PART** | numbers are strong now — several figures from one table, dates, totals. Roles and login still missing |
 
-**Four of ten moved. One gap appeared that the first audit did not see.**
+**Three of ten moved.** Two on page parameters, one on dates.
 
 ---
 
 ## Part 3 — The hole this audit found
 
-### There is no way to open one row.
+### Two people can book the same slot.
 
-A blog lists posts and cannot show a post. A directory lists businesses and
-cannot show a business. A shop lists products and cannot show a product.
+Booking moved from `blocked` to `PART` because dates arrived — a date column, a
+picker, `daysUntil`, "must be in the future". A visitor can now choose a slot
+and it is stored correctly.
 
-This is not a missing block — clicking a row already puts its value into the
-repeater, and buttons already navigate to another page. **What is missing is that
-a page cannot receive a value.** Every page is the same for everybody; there is
-no `/view/<page>?id=<row>`, and nothing on the destination page can ask "which
-row was I opened with".
+**Nothing stops the next visitor choosing the same one.** There is no uniqueness
+anywhere: not on a column, not in a condition, not in the database. A workflow
+can check "is this slot taken" only against the rows the browser happens to have
+loaded, which is the wrong question asked of the wrong copy — two people pressing
+Submit within the same second both see a free slot and both get it.
 
-It blocks **three** of the ten site types on its own, it is the smallest item in
-this document, and no previous plan contained it — because every plan so far was
-written by asking "what feature is missing" rather than by walking a site from
-the first click to the last.
+This is the same shape as the save race fixed in migration 0006, one layer up,
+and it is not a client-side problem: it can only be answered where the write
+happens.
 
-**It is the highest blast-radius item and it is roughly one cycle.**
+It blocks booking outright, and it quietly blocks anything with a limited
+quantity — tickets, appointments, stock.
 
 ---
 
@@ -100,46 +117,53 @@ the first click to the last.
 
 | rank | missing | unblocks | size |
 | :--- | :--- | :--- | :--- |
-| 1 | **Page parameters** — a page can be opened *with* a row | blog, directory, shop detail, any master/detail | small |
-| 2 | **Layout model** — containers, stacking, reflow | every site on a phone. Landing pages entirely | **large, and it is a rewrite** |
-| 3 | **More input types** — dropdown, checkbox, radio, number, long text, date | booking, shop, dashboard, most real forms | medium |
-| 4 | **Visitor accounts** — email sign-in for the *built* site's users | community, shop, dashboard, anything with "my" | medium, needs a migration |
-| 5 | **A private server layer** — Edge Functions | email, payments, API keys, spam guards, AI | medium, unlocks 6–8 |
-| 6 | **Email** — tell the owner, tell the visitor | contact form, booking, shop, community | small once 5 exists |
-| 7 | **Payments** | shop, subscriptions, the whole revenue idea | large, needs 4 and 5 |
-| 8 | **Roles and permissions** | dashboards, teams, the Discord-style layer | medium, needs 4 |
-| 9 | **Rich text per row** | blog, community | medium |
-| 10 | **Date and time picker** | booking | small, part of 3 |
+| 1 | **Layout model** — containers, stacking, reflow | every site on a phone; landing pages entirely | **large, and it is a rewrite** |
+| 2 | **Visitor accounts** — sign-in for the *built* site's users | community, shop, dashboard, anything with "my" | medium, needs a migration |
+| 3 | **A private server layer** — Edge Functions | email, payments, API keys, spam guards, AI | medium, unlocks 4–6 |
+| 4 | **Uniqueness / no double-booking** | booking, tickets, anything with limited stock | small, needs a migration |
+| 5 | **Email** — tell the owner, tell the visitor | contact form, booking, shop, community | small once 3 exists |
+| 6 | **Payments** | shop, subscriptions, the whole revenue idea | large, needs 2 and 3 |
+| 7 | **Roles and permissions** | dashboards, teams | medium, needs 2 |
+| 8 | **Rich text per row** | blog, community | medium |
 
-**Read rank 1–3 as the rest of Phase B.** Ranks 4–8 are a second wave that all
-depend on the same two foundations: visitor accounts and a private server.
+**Rank 1 is the one the builder has already chosen to do last**, deliberately:
+functions first, layout after. Ranks 2–3 are the two foundations everything
+below them waits on.
 
 ---
 
-## Part 5 — Two things this audit will not pretend
+## Part 5 — Three things this audit will not pretend
 
-**Six cycles of work have not been seen running.** Every "HAVE" above is a claim
-about code, held up by 370 checks and by nothing on the real domain. The most
-likely place for that to be wrong is not the logic — it is the editor: dragging,
-selecting, the panel, the slash menu. None of it has been touched by a human
-since 11 Aug.
+**None of this has been seen running since 16 Aug.** Every `HAVE` above is a
+claim about code held up by 1,480 checks and by nothing on the real domain. The
+most likely place for that to be wrong is not the logic — it is the editor:
+dragging, selecting, the panel, the slash menu.
 
-**Migration 0004 is `UNPROVED`.** Per-visitor rows are written and documented and
-have never been run. Until they are, "a shop is blocked only on payments" is a
-statement about a file, not about a database.
+**Four migrations are `UNPROVED`.** 0004 (per-visitor rows), 0005 (delete a
+page), 0006 (two tabs overwriting each other) and 0007 (row limits) are written,
+documented and never run. Until they are:
+
+- a shop is blocked on more than payments
+- deleting a page explains itself instead of working
+- **two tabs still overwrite each other**
+- **a published form can still be filled by a script**
+
+**A published page still leaks its webhook URLs.** `get_page` returns the
+workflows whole, so anything a builder put in a `sendWebhook` step is readable by
+any visitor. That is rank 3's job and it is the one thing here that is a security
+hole rather than a missing feature.
 
 ---
 
 ## How to re-run this
 
-When it feels stale, it is. The mechanical half is one command:
+The mechanical half is now `npm run check` — the group *"this audit still
+describes the product"* asserts every number in Part 1 against the code, so this
+file cannot drift quietly. `node --experimental-strip-types --import
+./scripts/register.mjs scripts/inventory-report.ts` prints the same figures with
+the names attached.
 
-    grep -o "'[a-zA-Z]*Block'," src/lib/blockRegistry.ts
-    sed -n "/  action:/,/;/p" src/types/creora.ts
-    grep -o "case '[a-zA-Z ]*':" src/lib/conditions.ts
-    grep -ho "function public\.[a-z_]*" supabase/migrations/*.sql
-
-The half that matters is the other one: **pick a real website, build it in your
-head from the first click to the last, and write down where you stop.** Every
-gap in Part 3 was found that way, and none of them were found by listing
+The half that matters is unchanged: **pick a real website, build it in your head
+from the first click to the last, and write down where you stop.** Every gap in
+Part 3 of all three audits was found that way. None of them were found by listing
 features.
