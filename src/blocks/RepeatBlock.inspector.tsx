@@ -327,6 +327,27 @@ export default function RepeatBlockInspector({ blockId, editor }: { blockId: str
           </label>
         )}
 
+        {/*
+          Sort by something worked out rather than something stored.
+          "Best rated first" is not a column -- it is an average of rows in
+          another table -- and no list of columns can ever contain it.
+        */}
+        <label style={{ display: 'block', marginBottom: '10px', fontSize: '12px', fontWeight: 600, color: '#334155' }}>
+          Order by a formula (optional)
+          <input
+            type="text"
+            value={runtimeState.sortFormula || ''}
+            onChange={(e) => set({ sortFormula: e.target.value })}
+            placeholder={'avgOf("Reviews", "Rating", \'{{ClassId}} == RowId\')'}
+            style={{ display: 'block', marginTop: '4px', width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #ccc', boxSizing: 'border-box', fontFamily: 'ui-monospace, monospace', fontSize: '12px' }}
+          />
+          <span style={{ display: 'block', marginTop: '4px', fontWeight: 400, fontSize: '11px', color: '#64748b', lineHeight: 1.4 }}>
+            Anything a formula can work out: <code>{'{{Price}} * {{Qty}}'}</code>,
+            or a question about another table where <code>RowId</code> means this
+            row. Used instead of the column below; the direction still applies.
+          </span>
+        </label>
+
         <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px' }}>
           Ordered by
           <div style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>

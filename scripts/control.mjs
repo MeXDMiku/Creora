@@ -23,6 +23,7 @@
  * tally at all is reported as its own outcome and never as a pass.
  */
 import { readFileSync, writeFileSync, openSync, fsyncSync, closeSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 
 const TALLY = /^(\d+) passed, (\d+) failed/m;
@@ -37,16 +38,61 @@ const CONTROLS = [
   {
     name: 'relation: the condition loses the calling scope',
     file: 'src/lib/formula.ts',
-    find: `    const rowScope: Record<string, any> = { ...(outer || {}) };`,
-    with: `    const rowScope: Record<string, any> = {};`,
+    find: `  const scope: Record<string, any> = { ...(outer || {}) };`,
+    with: `  const scope: Record<string, any> = {};`,
     expect: ['PLACES LEFT', 'WHO TEACHES IT', 'AVERAGE RATING'],
   },
   {
     name: 'relation: the invented name goes back to being a fixed one',
     file: 'src/lib/formula.ts',
-    find: `  while (where.includes(prefix)) prefix = '_' + prefix;`,
+    find: `  while (text.includes(prefix)) prefix = '_' + prefix;`,
     with: `  // control: no escalation`,
-    expect: ['AN INTERNAL NAME LEAKING INTO A CONDITION'],
+    expect: ['AN INTERNAL NAME LEAKING INTO A CONDITION', 'AN INTERNAL NAME IN A ROW FORMULA'],
+  },
+  {
+    name: 'list: a slot inside a quoted condition gets rewritten anyway',
+    file: 'src/lib/formula.ts',
+    find: `    if (ch === '"' || ch === "'") { quote = ch; out += ch; i++; continue; }`,
+    with: `    if (false) { out += ch; i++; continue; }`,
+    expect: ['HIDE FULL', 'a slot inside a condition is NOT'],
+  },
+  {
+    name: 'list: a formula stops being used instead of the sort column',
+    file: 'src/lib/rows.ts',
+    find: `  if (sortFormula) {`,
+    with: `  if (false) {`,
+    expect: ['BEST RATED FIRST', 'A FORMULA IS USED INSTEAD OF THE SORT COLUMN'],
+  },
+  {
+    name: 'list: the sort formula is worked out inside the comparator again',
+    file: 'src/lib/rows.ts',
+    find: `      const by = compareCells(a.key, b.key) * direction;`,
+    with: `      const by = compareCells(
+        rowFormulaValue(a.row, sortFormula, { tables: spec.tables, now: spec.now }).value,
+        rowFormulaValue(b.row, sortFormula, { tables: spec.tables, now: spec.now }).value,
+      ) * direction;`,
+    expect: ['once per row and not once per comparison'],
+  },
+  {
+    name: 'list: a filter that cannot be worked out goes quiet again',
+    file: 'src/lib/rows.ts',
+    find: `    if (answer.error && report) report(answer.error);`,
+    with: `    // control: the error is dropped`,
+    expect: ['AND SAYS SO'],
+  },
+  {
+    name: 'list: equal rows are free to shuffle',
+    file: 'src/lib/rows.ts',
+    find: `      return by !== 0 ? by : a.i - b.i;`,
+    with: `      return by !== 0 ? by : b.i - a.i;`,
+    expect: ['EQUAL ROWS DO NOT SHUFFLE'],
+  },
+  {
+    name: 'list: the Health panel stops reading the sort formula',
+    file: 'src/lib/diagnose.ts',
+    find: `        formula: String((state as any)?.sortFormula || '').trim(),`,
+    with: `        formula: '',`,
+    expect: ['THE HEALTH PANEL READS THE SORT FORMULA'],
   },
   {
     name: 'relation: a row stops offering its id under a name a formula can type',
@@ -78,8 +124,8 @@ const CONTROLS = [
     with: `  const card = (row: any, f: string) => evaluateExpression(f, { ...row, RowId: row.id }, tables) as any;\n  void 0;`,
     also: {
       file: 'src/lib/formula.ts',
-      find: `    const rowScope: Record<string, any> = { ...(outer || {}) };`,
-      with: `    const rowScope: Record<string, any> = {};`,
+      find: `  const scope: Record<string, any> = { ...(outer || {}) };`,
+      with: `  const scope: Record<string, any> = {};`,
     },
     // Nothing goes red by name -- the point is that the run still ENDS with a
     // countable tally instead of vanishing. See STOPPED EARLY below.
@@ -88,14 +134,42 @@ const CONTROLS = [
   },
 ];
 
+/**
+ * Write, then READ IT BACK until the change is actually there.
+ *
+ * This working copy is a network mount. A control that writes a file and
+ * immediately starts a subprocess has been observed running against the file as
+ * it was BEFORE the edit -- so the control reports green, and the green is
+ * about the mount rather than about the code. It happened again while this file
+ * was being written: one control in a batch of twelve came back wrong, and
+ * re-running that control alone was correct.
+ *
+ * fsync alone was not enough. Reading back is, because it is the same question
+ * the child is about to ask.
+ */
 const write = (path, text) => {
   writeFileSync(path, text);
-  // This working copy is a network mount. Without the flush, the child process
-  // below has been observed reading the file as it was BEFORE the edit, which
-  // reports a control as green for the one reason that is not about the code.
   const fd = openSync(path, 'r');
   fsyncSync(fd);
   closeSync(fd);
+  /**
+   * Checked from a CHILD process, not from this one. Re-reading it here was not
+   * enough and the flake survived: this process has already got the file in
+   * hand, so it can agree with itself while a freshly started node -- which is
+   * exactly what runs the checks -- still sees the old bytes.
+   */
+  const want = createHash('sha1').update(text).digest('hex');
+  const deadline = Date.now() + 5000;
+  for (;;) {
+    const seen = execFileSync('node', [
+      '-e',
+      'const{readFileSync}=require("fs");const{createHash}=require("crypto");' +
+      'process.stdout.write(createHash("sha1").update(readFileSync(process.argv[1])).digest("hex"))',
+      path,
+    ], { encoding: 'utf8' });
+    if (seen === want) return;
+    if (Date.now() > deadline) throw new Error(`${path} still reads as it did before the edit after 5s`);
+  }
 };
 
 const runChecks = () => {
@@ -107,6 +181,36 @@ const runChecks = () => {
   }
 };
 
+/**
+ * PUT EVERY FILE BACK, EVEN IF THIS IS KILLED.
+ *
+ * Written after doing exactly that: a run was cut short by a timeout part way
+ * through a control, and it left a deliberate lie in src/lib/formula.ts. The
+ * next `npm run check` said 3 failed and the obvious reading of that -- "the
+ * work I just did is broken" -- was wrong, which is the most expensive kind of
+ * wrong a test tool can be.
+ */
+const openEdits = new Map();
+const restoreAll = () => {
+  for (const [file, text] of openEdits) {
+    try { write(file, text); } catch { /* nothing better to do while dying */ }
+  }
+  openEdits.clear();
+};
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+  process.on(signal, () => { restoreAll(); process.exit(130); });
+}
+process.on('uncaughtException', err => { restoreAll(); throw err; });
+
+// A control's result only means something against a tree that was green to
+// start with. Otherwise every control "goes red" and none of them proved it.
+const before = runChecks().match(TALLY);
+if (!before || Number(before[2]) !== 0) {
+  console.log(`the tree is not green before we start (${before ? `${before[2]} failed` : 'no tally at all'}).`);
+  console.log('Fix that first -- a control cannot tell you anything from here.');
+  process.exit(1);
+}
+
 const only = process.argv[2];
 const chosen = only ? CONTROLS.filter(c => c.name.includes(only)) : CONTROLS;
 if (!chosen.length) {
@@ -114,55 +218,103 @@ if (!chosen.length) {
   process.exit(1);
 }
 
-let suspicious = 0;
-for (const control of chosen) {
+/**
+ * Run one control and say what happened, without deciding what it means.
+ */
+function attempt(control) {
   const edits = [control, ...(control.also ? [control.also] : [])];
   const originals = edits.map(e => [e.file, readFileSync(e.file, 'utf8')]);
-  let applied = true;
-  for (const e of edits) {
-    const before = readFileSync(e.file, 'utf8');
-    if (!before.includes(e.find)) {
-      console.log(`\n${control.name}\n  CANNOT APPLY — the line it breaks is not in ${e.file} any more.`);
-      applied = false;
-      break;
-    }
-    write(e.file, before.replace(e.find, e.with));
-  }
+  for (const [file, text] of originals) if (!openEdits.has(file)) openEdits.set(file, text);
 
-  if (applied) {
+  try {
+    for (const e of edits) {
+      const before = readFileSync(e.file, 'utf8');
+      if (!before.includes(e.find)) {
+        return { kind: 'cannot-apply', file: e.file, reds: [] };
+      }
+      write(e.file, before.replace(e.find, e.with));
+    }
+
     const out = runChecks();
     const tally = out.match(TALLY);
-    const stoppedEarly = out.includes('SUITE STOPPED EARLY');
     const reds = [...out.matchAll(FAIL_LINE)].map(m => m[1].trim());
+    if (!tally) return { kind: 'no-tally', out, reds };
 
-    console.log(`\n${control.name}`);
-    if (!tally) {
-      console.log('  NO TALLY AT ALL — the suite did not reach its own last line, and');
-      console.log('  nothing here can be read as a pass. First lines of what came back:');
-      console.log(out.split('\n').slice(0, 6).map(l => '    ' + l).join('\n'));
-      suspicious++;
-    } else {
-      const [, , failedCount] = tally;
-      console.log(`  ${failedCount} failed${stoppedEarly ? '  (SUITE STOPPED EARLY)' : ''}`);
-      for (const red of reds.slice(0, 8)) console.log(`    red: ${red}`);
-      if (reds.length > 8) console.log(`    …and ${reds.length - 8} more`);
-
-      if (control.wantStoppedEarly) {
-        if (!stoppedEarly) { console.log('  ✗ expected the run to be cut short and say so, and it did not.'); suspicious++; }
-      } else if (Number(failedCount) === 0) {
-        console.log('  ✗ NOTHING WENT RED. The checks do not cover this line — see the note at the top.');
-        suspicious++;
-      } else {
-        const missing = (control.expect || []).filter(want => !reds.some(r => r.includes(want)));
-        if (missing.length) {
-          console.log(`  ✗ went red, but not where it should: nothing matching ${missing.map(m => `"${m}"`).join(', ')}`);
-          suspicious++;
-        }
-      }
+    const failedCount = Number(tally[2]);
+    const stoppedEarly = out.includes('SUITE STOPPED EARLY');
+    if (control.wantStoppedEarly) {
+      return { kind: stoppedEarly ? 'ok' : 'not-stopped', failedCount, reds, stoppedEarly };
     }
+    if (failedCount === 0) return { kind: 'nothing-red', failedCount, reds, stoppedEarly };
+    const missing = (control.expect || []).filter(want => !reds.some(r => r.includes(want)));
+    if (missing.length) return { kind: 'wrong-reds', failedCount, reds, missing, stoppedEarly };
+    return { kind: 'ok', failedCount, reds, stoppedEarly };
+  } finally {
+    for (const [file, text] of originals) write(file, text);
+    openEdits.clear();
+  }
+}
+
+let suspicious = 0;
+for (const control of chosen) {
+  let result = attempt(control);
+  /**
+   * ONE AUTOMATIC RETRY, and only when the news is bad.
+   *
+   * This mount can hand a freshly started process the file as it was before the
+   * edit, however hard the write is flushed and read back -- it has been chased
+   * through fsync, a re-read here, and a re-read from a child, and it still
+   * turns up about once in a couple of dozen control runs. HOW_HOW_WE_WORK used
+   * to say "re-run a green control by hand before concluding anything", which
+   * is a correct instruction that somebody will skip at exactly the wrong
+   * moment. So the tool does it.
+   *
+   * Only bad results are retried, deliberately. Retrying a red one until it
+   * goes green is how a flake becomes a habit.
+   */
+  let retried = false;
+  if (result.kind !== 'ok') {
+    retried = true;
+    result = attempt(control);
   }
 
-  for (const [file, text] of originals) write(file, text);
+  console.log(`\n${control.name}`);
+  const note = retried ? '  (on the second try — the first disagreed)' : '';
+  switch (result.kind) {
+    case 'ok':
+      console.log(`  ${result.failedCount} failed${result.stoppedEarly ? '  (SUITE STOPPED EARLY)' : ''}${note}`);
+      break;
+    case 'cannot-apply':
+      // A control aimed at a line that no longer exists is not a control. This
+      // used to print and not count, which is how a control quietly stops
+      // testing anything while the summary still says all clear.
+      console.log(`  CANNOT APPLY — the line it breaks is not in ${result.file} any more, so this control is testing nothing.${note}`);
+      suspicious++;
+      break;
+    case 'no-tally':
+      console.log(`  NO TALLY AT ALL — the suite did not reach its own last line, and`);
+      console.log(`  nothing here can be read as a pass. First lines of what came back:${note}`);
+      console.log(result.out.split('\n').slice(0, 6).map(l => '    ' + l).join('\n'));
+      suspicious++;
+      break;
+    case 'nothing-red':
+      console.log(`  0 failed${note}`);
+      console.log('  ✗ NOTHING WENT RED. The checks do not cover this line — see the note at the top.');
+      suspicious++;
+      break;
+    case 'not-stopped':
+      console.log(`  ${result.failedCount} failed${note}`);
+      console.log('  ✗ expected the run to be cut short and say so, and it did not.');
+      suspicious++;
+      break;
+    case 'wrong-reds':
+      console.log(`  ${result.failedCount} failed${note}`);
+      console.log(`  ✗ went red, but not where it should: nothing matching ${result.missing.map(m => `"${m}"`).join(', ')}`);
+      suspicious++;
+      break;
+  }
+  for (const red of result.reds.slice(0, 8)) console.log(`    red: ${red}`);
+  if (result.reds.length > 8) console.log(`    …and ${result.reds.length - 8} more`);
 }
 
 const after = runChecks().match(TALLY);

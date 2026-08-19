@@ -259,9 +259,19 @@ the wrong line — but on this mount there is a fourth, and it is the boring one
 A batch is still worth running; it is only the green results in it that need
 repeating.
 
-`scripts/control.mjs` now flushes each write before starting the subprocess, so
-this particular explanation should be retired rather than lived with. Treat a
-green control as suspicious for the other three reasons.
+`scripts/control.mjs` chases this as far as it can be chased: it flushes each
+write, then re-reads the file **from a child process** — the same question the
+checks are about to ask — before starting anything. It still turns up about once
+in a couple of dozen runs, so the tool does the re-run itself: **any result that
+is not a clean catch is retried once**, and the report says when it was. Only
+bad results are retried, deliberately. Retrying a red one until it goes green is
+how a flake becomes a habit.
+
+It also **puts every file back when it is killed**, which was written after
+doing the opposite: a run was cut short by a timeout part way through a control
+and left a deliberate lie in `src/lib/formula.ts`. The next `npm run check` said
+3 failed, and the obvious reading of that — *the work I just did is broken* —
+was wrong. That is the most expensive kind of wrong a test tool can be.
 
 
 ## The instrument lied: `'passed,' in output`
@@ -317,3 +327,34 @@ controls and neither was caught by reading them:
   overwritten and `'{{Status}} == __w0'` quietly became `Status == Status` —
   every row matched, and the answer came back as a number. Found by asking
   *what would make this check fail?* rather than *does this check pass?*
+
+And then the same control caught the check going stale an hour later. The
+prefix was renamed `__w` → `__slot` during a tidy-up; the check still probed
+`__w0`, still passed, and was testing nothing. Nothing about the code was wrong.
+The check had simply stopped pointing at it, which is invisible from a green
+run and obvious from a control.
+
+**A check that hard-codes an internal detail has to be run against a control, or
+it is a comment.**
+
+
+## Sweep the sibling, then sweep it again
+
+The relation work rewrote `{{Column}}` slots into invented names. `rows.ts` did
+the identical rewrite for a repeater's filter — same regex, same bug, five
+hundred lines away. Both now call one `bindSlots`.
+
+That merge is what made the next bug findable. A row formula can contain a table
+function whose condition has slots of its own:
+
+```
+{{Capacity}} - countOf("Bookings", '{{ClassId}} == RowId') > 0
+```
+
+`{{Capacity}}` is this class; `{{ClassId}}` is a booking and belongs to a call
+that has not happened yet. A blind scan rewrote both, the condition compared
+nothing to something, and **every row was kept** — no error, list unchanged,
+filter apparently ignored. `bindSlots` now skips anything inside quotes.
+
+Both halves of that are the same lesson: the bug lived in the seam between two
+things that each looked right on their own.

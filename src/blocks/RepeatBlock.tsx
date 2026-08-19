@@ -107,7 +107,18 @@ export function RepeatView({
    */
   useEffect(() => {
     setPage(1);
-  }, [searchText, filterValue, sortColumn, sortDirection, state?.pageSize]);
+  }, [searchText, filterValue, sortColumn, state?.sortFormula, sortDirection, state?.pageSize]);
+
+  /**
+   * Tables, so a row can work out its share of the whole:
+   * `{{calc: Total / sumOf("Orders", "Total") * 100 | round: 1}}%`. Read through
+   * an atom rather than built here, so a row added to another block moves this
+   * total instead of leaving it as it stood when this last rendered.
+   *
+   * It is read HERE, above the view, because a filter and a sort can ask about
+   * another table too -- "hide the full ones" is a count of rows somewhere else.
+   */
+  const tables = useTableScope();
 
   const view = useMemo(
     () =>
@@ -120,7 +131,10 @@ export function RepeatView({
         filterOperator: state?.filterOperator,
         filterValue,
         sortColumn,
+        // Same rule as the filter: a formula says the more specific thing.
+        sortFormula: state?.sortFormula,
         sortDirection,
+        tables,
         page,
         pageSize: state?.pageSize,
         maxRows: state?.maxRows,
@@ -134,7 +148,9 @@ export function RepeatView({
       state?.filterOperator,
       filterValue,
       sortColumn,
+      state?.sortFormula,
       sortDirection,
+      tables,
       page,
       state?.pageSize,
       state?.maxRows,
@@ -148,14 +164,6 @@ export function RepeatView({
   // without that being a separate feature.
   const templateSlots = useMemo(() => findSlots(template.html), [template.html]);
   const pageValues = useSlotValues(templateSlots);
-  /**
-   * Tables, so a row can work out its share of the whole:
-   * `{{calc: Total / sumOf("Orders", "Total") * 100 | round: 1}}%`. Read through
-   * an atom rather than built here, so a row added to another block moves this
-   * total instead of leaving it as it stood when this last rendered.
-   */
-  const tables = useTableScope();
-
   const clickColumn = state?.clickColumn;
   const clickTargetPageId = state?.clickTargetPageId;
   // Clickable if it either records something or goes somewhere. Opening a
@@ -248,6 +256,16 @@ export function RepeatView({
       {view.truncatedNote && (
         <div style={{ marginTop: '8px', fontSize: '11px', color: '#64748b', fontFamily: 'sans-serif' }}>
           {view.truncatedNote}
+        </div>
+      )}
+      {/*
+        A filter or sort that could not be worked out keeps every row, so this
+        line is the ONLY evidence it failed. It used to be computed and thrown
+        away: the list quietly ignored the filter and nothing said why.
+      */}
+      {view.formulaError && (
+        <div style={{ marginTop: '8px', fontSize: '11px', color: '#b45309', fontFamily: 'sans-serif' }}>
+          {view.formulaError}
         </div>
       )}
 

@@ -256,8 +256,27 @@ export function diagnosePage(facts: PageFacts): Problem[] {
    */
   for (const blockId of facts.blockIds || []) {
     const state = facts.states[blockId];
-    const formula = String((state as any)?.filterFormula || '').trim();
-    if (!formula) continue;
+    /**
+     * The sort formula is read here too, and it was a deliberate second look
+     * rather than an afterthought: it is the same syntax over the same columns,
+     * so a typo in it goes wrong the same way -- silently, since a blank sort
+     * key just parks the row at the end and the list still looks fine.
+     */
+    const uses: Array<{ formula: string; verb: string; consequence: string }> = [
+      {
+        formula: String((state as any)?.filterFormula || '').trim(),
+        verb: 'filters on',
+        consequence:
+          'A column that is not there reads as blank, blank fails every comparison, and every row is hidden — so the list looks empty rather than wrong.',
+      },
+      {
+        formula: String((state as any)?.sortFormula || '').trim(),
+        verb: 'sorts by',
+        consequence:
+          'A column that is not there reads as blank, and blanks sort to the end — so the order looks arbitrary rather than broken.',
+      },
+    ].filter(u => u.formula);
+    if (!uses.length) continue;
 
     const trackedId = String((state as any)?.trackedBlockId || '');
     const tracked = trackedId ? facts.states[trackedId] : undefined;
@@ -268,15 +287,16 @@ export function diagnosePage(facts: PageFacts): Problem[] {
     const known = new Set<string>(
       ((tracked as any)?.columns || []).map((c: any) => String(c?.name)).concat(['Row id']),
     );
-    for (const used of columnsUsedByFormula(formula)) {
-      if (!known.has(used)) {
-        problems.push({
-          severity: 'broken',
-          title: `"${nameOf(facts, blockId)}" filters on a column called "${used}", which is not there`,
-          detail:
-            'A column that is not there reads as blank, blank fails every comparison, and every row is hidden — so the list looks empty rather than wrong.',
-          blockId,
-        });
+    for (const use of uses) {
+      for (const used of columnsUsedByFormula(use.formula)) {
+        if (!known.has(used)) {
+          problems.push({
+            severity: 'broken',
+            title: `"${nameOf(facts, blockId)}" ${use.verb} a column called "${used}", which is not there`,
+            detail: use.consequence,
+            blockId,
+          });
+        }
       }
     }
   }

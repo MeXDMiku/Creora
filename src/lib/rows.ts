@@ -1,7 +1,8 @@
 import { toDate, formatDate } from './format';
 import type { BlockRuntimeState, ColumnType } from '../types/creora';
 import { evaluateCondition } from './conditions';
-import { evaluateExpression, truthy, explainUnreadableFormula } from './formula';
+import { evaluateExpression, truthy, explainUnreadableFormula, bindSlots, slotNamesIn } from './formula';
+import type { TableScope } from './formula';
 
 /**
  * Which rows a repeater shows, and in what order.
@@ -55,7 +56,24 @@ export interface ViewSpec {
    */
   filterFormula?: string;
   sortColumn?: string;
+  /**
+   * Sort by a worked-out value rather than a stored one: `{{Price}} * {{Qty}}`,
+   * or -- now that a condition can see the row it is standing in --
+   * `avgOf("Reviews", "Rating", '{{ClassId}} == RowId')` for "best rated first".
+   *
+   * Wins over `sortColumn` when both are set, for the same reason
+   * `filterFormula` wins: the builder wrote the more specific thing.
+   */
+  sortFormula?: string;
   sortDirection?: 'asc' | 'desc';
+  /**
+   * The other tables on the page, so a filter or sort formula can ask about
+   * them. Without this, "hide the full classes" cannot be said: fullness is a
+   * count of rows in a DIFFERENT table.
+   */
+  tables?: TableScope;
+  /** Passed through so `{{Due}} > today` means today and not the epoch. */
+  now?: Date;
   /** 1-based. Out of range is clamped, never empty. */
   page?: number;
   pageSize?: number;
@@ -112,10 +130,19 @@ function cellFor(row: Row, column: string): any {
   return column === 'Row id' ? row?.id : row?.[column];
 }
 
-function passesFilter(row: Row, spec: ViewSpec): boolean {
+function passesFilter(row: Row, spec: ViewSpec, index: number, report?: (e: string) => void): boolean {
   // A formula says the more specific thing, so it wins when both are set.
   if (isFormulaFilter(spec.filterFormula)) {
-    return rowMatchesFormula(row, spec.filterFormula).pass;
+    const answer = rowMatchesFormula(row, spec.filterFormula, {
+      rowNumber: index + 1,
+      tables: spec.tables,
+      now: spec.now,
+    });
+    // The error used to be worked out here and DROPPED. A filter nobody can
+    // read kept every row and said nothing, so the builder saw a list that
+    // ignored their filter with no hint that it had failed to run.
+    if (answer.error && report) report(answer.error);
+    return answer.pass;
   }
   const col = spec.filterColumn;
   if (!col) return true;
@@ -166,6 +193,12 @@ export interface VisibleRowsResult {
   pageCount: number;
   /** Set when rows were dropped without being asked for, so the page can admit it. */
   truncatedNote: string | null;
+  /**
+   * Set when a filter or sort formula could not be worked out. The rows are
+   * still all there -- see rowMatchesFormula for why refusing to hide is the
+   * safe direction -- so this is the only evidence that anything went wrong.
+   */
+  formulaError: string | null;
 }
 
 /**
@@ -181,12 +214,45 @@ export function visibleRows(rows: Row[] | undefined | null, spec: ViewSpec = {})
     ? all.filter((r) => rowMatchesSearch(r, spec.search as string, spec.searchColumns))
     : all;
 
-  const filtered = searched.filter((r) => passesFilter(r, spec));
+  // First one only. Every row fails a broken formula the same way, and 200
+  // copies of one sentence is not 200 pieces of information.
+  let formulaError: string | null = null;
+  const report = (e: string) => { if (!formulaError) formulaError = e; };
+
+  const filtered = searched.filter((r, i) => passesFilter(r, spec, i, report));
 
   const sortColumn = spec.sortColumn;
+  const sortFormula = String(spec.sortFormula ?? '').trim();
+  const direction = spec.sortDirection === 'desc' ? -1 : 1;
   let ordered = filtered;
-  if (sortColumn) {
-    const direction = spec.sortDirection === 'desc' ? -1 : 1;
+  if (sortFormula) {
+    /**
+     * WORKED OUT ONCE PER ROW, NOT ONCE PER COMPARISON.
+     *
+     * A sort does O(n log n) comparisons, and a sort formula is now allowed to
+     * ask other tables -- `avgOf("Reviews", "Rating", '{{ClassId}} == RowId')`
+     * walks a whole table every time it is called. Evaluating inside the
+     * comparator would turn 200 rows into thousands of table walks for one
+     * render, on a page a visitor is waiting for. Decorate, sort, undecorate.
+     */
+    const keyed = filtered.map((row, i) => {
+      const answer = rowFormulaValue(row, sortFormula, {
+        rowNumber: i + 1,
+        tables: spec.tables,
+        now: spec.now,
+      });
+      if (answer.error) report(answer.error);
+      return { row, key: answer.value, i };
+    });
+    keyed.sort((a, b) => {
+      const by = compareCells(a.key, b.key) * direction;
+      // Ties keep the order they arrived in. Without this the browser's sort
+      // is free to shuffle equal rows between renders, and a list that
+      // reorders itself while you read it looks broken.
+      return by !== 0 ? by : a.i - b.i;
+    });
+    ordered = keyed.map(k => k.row);
+  } else if (sortColumn) {
     // Copied before sorting: sort() mutates, and this array belongs to the
     // Database block's runtime state, which is shared with the table itself.
     ordered = [...filtered].sort((a, b) => compareCells(cellFor(a, sortColumn), cellFor(b, sortColumn)) * direction);
@@ -216,6 +282,7 @@ export function visibleRows(rows: Row[] | undefined | null, spec: ViewSpec = {})
       page,
       pageCount,
       truncatedNote: null,
+      formulaError,
     };
   }
 
@@ -232,7 +299,7 @@ export function visibleRows(rows: Row[] | undefined | null, spec: ViewSpec = {})
         : 'Showing ' + shown.length + ' of ' + matched + ' (' + hidden + ' not shown)';
   }
 
-  return { rows: shown, matched, page: 1, pageCount: 1, truncatedNote };
+  return { rows: shown, matched, page: 1, pageCount: 1, truncatedNote, formulaError };
 }
 
 /**
@@ -425,24 +492,37 @@ export function rowIndexesForStep(
  * parsed, so the formula language itself needs to know nothing about columns.
  */
 
-const SLOT = /\{\{\s*([^}|]+?)\s*\}\}/g;
-
 /** Was this filter written as a formula at all? */
 export function isFormulaFilter(filter: string | undefined | null): boolean {
   return String(filter ?? '').trim() !== '';
 }
 
-/** The column names a row formula mentions, in the order they appear. */
+/**
+ * The column names a row formula mentions, in the order they appear.
+ *
+ * The scan itself lives in formula.ts, because the row filter and a table
+ * function's condition were reading the same syntax with two copies of the same
+ * regex -- the shape of nine bugs in this project so far.
+ */
 export function columnsUsedByFormula(formula: string | undefined | null): string[] {
-  const text = String(formula ?? '');
-  const found: string[] = [];
-  let match: RegExpExecArray | null;
-  const re = new RegExp(SLOT.source, 'g');
-  while ((match = re.exec(text)) !== null) {
-    const name = match[1].trim();
-    if (name && !found.includes(name)) found.push(name);
-  }
-  return found;
+  return slotNamesIn(formula);
+}
+
+export interface RowFormulaOptions {
+  /** How to find a row's id, for `{{Row id}}` and the bare `RowId`. */
+  rowIdOf?: (row: Record<string, any>) => any;
+  /** 1-based position, for the bare `RowNumber`. */
+  rowNumber?: number;
+  /** The other tables, so a row formula can ask about them. */
+  tables?: TableScope;
+  now?: Date;
+}
+
+export interface RowFormulaValue {
+  /** What the formula worked out to. `null` when it could not be worked out. */
+  value: any;
+  /** Set when the formula could not be worked out at all. */
+  error: string | null;
 }
 
 export interface RowFormulaResult {
@@ -453,7 +533,87 @@ export interface RowFormulaResult {
 }
 
 /**
- * Answer a row formula against one row.
+ * Work out a formula against one row and hand back the VALUE.
+ *
+ * Filtering and sorting are the same sentence read two ways -- "is this row
+ * worth showing" is `truthy()` of "what is this row worth" -- so there is one
+ * implementation and rowMatchesFormula is a wrapper over it. Two would drift,
+ * and then a filter and a sort written identically would disagree.
+ */
+export function rowFormulaValue(
+  row: Record<string, any>,
+  formula: string | undefined | null,
+  options: RowFormulaOptions = {},
+): RowFormulaValue {
+  const text = String(formula ?? '').trim();
+  if (!text) return { value: null, error: null };
+
+  const rowIdOf = options.rowIdOf ?? ((r: Record<string, any>) => r?.id);
+  /**
+   * WHAT A BARE NAME CAN REACH, and why it is only these two.
+   *
+   * The columns are deliberately NOT here. A bare `Price` still fails with
+   * "use {{Price}}", which is the sentence that teaches the syntax -- putting
+   * the columns in scope would make the wrong spelling silently work and the
+   * two spellings mean subtly different things.
+   *
+   * `RowId` and `RowNumber` are here because a relation needs them and neither
+   * is a column name:
+   *
+   *     avgOf("Reviews", "Rating", '{{ClassId}} == RowId')
+   *
+   * They are spelled the same as the repeater's own slots offer them, so there
+   * is one spelling to learn rather than one per place.
+   */
+  const outer: Record<string, any> = { RowId: rowIdOf(row) ?? '' };
+  if (typeof options.rowNumber === 'number') outer.RowNumber = options.rowNumber;
+
+  const bound = bindSlots(
+    text,
+    name => (name === 'Row id' ? rowIdOf(row) : row?.[name]),
+    outer,
+  );
+
+  try {
+    /**
+     * The tables are passed through now. They used to be withheld on the
+     * grounds that a repeater filtering itself by a total of itself is a loop
+     * nobody asked for -- but it is not a loop: an aggregate reads the STORED
+     * rows, not the filtered output, so it terminates. And withholding them
+     * made "hide the full classes" unsayable, because fullness is a count of
+     * rows in another table. Cost is handled where it belongs, by working the
+     * formula out once per row rather than once per comparison.
+     */
+    return {
+      value: evaluateExpression(bound.expression, bound.scope, options.tables, { now: options.now }),
+      error: null,
+    };
+  } catch (err: any) {
+    const message = String(err?.message || 'that formula could not be worked out');
+    /**
+     * A spelling mix-up first, because it is the likeliest cause and the
+     * generic message points at the wrong thing. `{{Price | money: $}}` is
+     * copied out of the row markup on the same panel, where it is correct.
+     */
+    const spelling = explainUnreadableFormula(text, 'slots');
+    if (spelling) return { value: null, error: spelling };
+    /**
+     * A bare name in a row formula is almost always somebody writing `Price`
+     * where they meant `{{Price}}`, and "Referenced block Price does not exist"
+     * sends them looking for a block. Say the thing they can act on.
+     */
+    const friendly = /Referenced block "(.+?)" does not exist/.exec(message);
+    return {
+      value: null,
+      error: friendly
+        ? `Use {{${friendly[1]}}} to mean a column. A plain name refers to a block, and there is no block called "${friendly[1]}".`
+        : message,
+    };
+  }
+}
+
+/**
+ * Answer a row formula against one row: does this row stay?
  *
  * A formula that cannot be worked out KEEPS the row rather than dropping it.
  * That is the deliberate direction: a broken filter that hides everything looks
@@ -465,49 +625,11 @@ export interface RowFormulaResult {
 export function rowMatchesFormula(
   row: Record<string, any>,
   formula: string | undefined | null,
-  rowIdOf: (row: Record<string, any>) => any = r => r?.id,
-  now?: Date,
+  options: RowFormulaOptions = {},
 ): RowFormulaResult {
-  const text = String(formula ?? '').trim();
-  if (!text) return { pass: true, error: null };
-
-  const scope: Record<string, any> = {};
-  let index = 0;
-  const rewritten = text.replace(SLOT, (_all, rawName: string) => {
-    const name = String(rawName).trim();
-    const key = `__col${index++}`;
-    // "Row id" is addressable the same way the repeater's own slots address it.
-    scope[key] = name === 'Row id' ? rowIdOf(row) : row?.[name];
-    return key;
-  });
-
-  try {
-    // No tables in a row filter -- a repeater filtering itself by a total of
-    // itself is a loop nobody asked for -- but the clock is here, so
-    // `{{Due}} > today` works where a builder most expects it to.
-    return { pass: truthy(evaluateExpression(rewritten, scope, undefined, { now })), error: null };
-  } catch (err: any) {
-    const message = String(err?.message || 'that formula could not be worked out');
-    /**
-     * A spelling mix-up first, because it is the likeliest cause and the
-     * generic message points at the wrong thing. `{{Price | money: $}}` is
-     * copied out of the row markup on the same panel, where it is correct.
-     */
-    const spelling = explainUnreadableFormula(text, 'slots');
-    if (spelling) return { pass: true, error: spelling };
-    /**
-     * A bare name in a row formula is almost always somebody writing `Price`
-     * where they meant `{{Price}}`, and "Referenced block Price does not exist"
-     * sends them looking for a block. Say the thing they can act on.
-     */
-    const friendly = /Referenced block "(.+?)" does not exist/.exec(message);
-    return {
-      pass: true,
-      error: friendly
-        ? `Use {{${friendly[1]}}} to mean a column. A plain name refers to a block, and there is no block called "${friendly[1]}".`
-        : message,
-    };
-  }
+  if (!String(formula ?? '').trim()) return { pass: true, error: null };
+  const answer = rowFormulaValue(row, formula, options);
+  return { pass: answer.error ? true : truthy(answer.value), error: answer.error };
 }
 
 /**

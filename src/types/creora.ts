@@ -387,6 +387,13 @@ export interface BlockRuntimeState {
    * more specific thing, and silently ANDing them would be a rule nobody wrote.
    */
   filterFormula?: string;
+  /**
+   * Sort by a worked-out value: `{{Price}} * {{Qty}}`, or
+   * `avgOf("Reviews", "Rating", '{{ClassId}} == RowId')` for "best rated
+   * first". Wins over the sort column when set, for the same reason
+   * filterFormula wins over the filter row.
+   */
+  sortFormula?: string;
   /** A block whose value names the column to sort by. */
   sortColumnBlockId?: string;
   /** A block -- usually a Toggle -- where true means last-to-first. */

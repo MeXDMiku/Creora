@@ -272,8 +272,6 @@ export interface TableData {
 
 export type TableScope = Record<string, TableData>;
 
-const SLOT_IN_WHERE = /\{\{\s*([^}|]+?)\s*\}\}/g;
-
 /**
  * The functions that read a whole table.
  *
@@ -361,6 +359,112 @@ function columnNamed(table: TableData, column: string): string {
 }
 
 /**
+ * The `{{Column}}` names a piece of text mentions, in the order they appear.
+ *
+ * One definition, because it had two: this file's and the row filter's in
+ * rows.ts, identical and free to drift apart. Nine bugs in this project have
+ * been one decision living in two places.
+ */
+export function slotNamesIn(text: string | undefined | null): string[] {
+  const found: string[] = [];
+  overSlots(String(text ?? ''), name => {
+    if (name && !found.includes(name)) found.push(name);
+    return null;
+  });
+  return found;
+}
+
+/**
+ * Turn `{{Column}}` slots into names the expression engine can resolve, and
+ * hand back the scope holding their values.
+ *
+ * WHY SLOTS ARE REWRITTEN RATHER THAN LOOKED UP
+ * It is what keeps two scopes apart. `{{Status}}` is the row being TESTED and a
+ * bare `Status` is whatever asked the question, and if the slot were simply
+ * another name in the same bag, one would shadow the other and a card could
+ * never ask a table about a column both of them have.
+ *
+ * WHY THE INVENTED NAME IS NOT A CONSTANT
+ * Because then the scopes collide the other way round. It used to be `__w0`:
+ *
+ *     countOf("T", '{{Status}} == __w0')      // and the caller has an __w0
+ *
+ * The slot's value overwrote the caller's, the condition became
+ * `Status == Status`, every row matched, and the answer came back as a NUMBER
+ * -- a wrong answer wearing the clothes of a right one, which is the failure
+ * this project keeps finding. So the prefix grows until the text is not using
+ * it. In practice that is the first branch every time; the loop is there so it
+ * is a guarantee rather than a bet on what people name things.
+ */
+export function bindSlots(
+  text: string,
+  valueOf: (name: string) => any,
+  outer?: Record<string, any>,
+): { expression: string; scope: Record<string, any> } {
+  const scope: Record<string, any> = { ...(outer || {}) };
+  let prefix = '__slot';
+  while (text.includes(prefix)) prefix = '_' + prefix;
+  let index = 0;
+  const expression = overSlots(text, name => {
+    const key = `${prefix}${index++}`;
+    scope[key] = valueOf(name);
+    return key;
+  });
+  return { expression, scope };
+}
+
+/**
+ * Walk the `{{Column}}` slots in an expression, SKIPPING ANYTHING IN QUOTES.
+ *
+ * WHY THE QUOTES MATTER, AND WHAT BROKE WITHOUT THEM
+ * A table function's condition is a string, and it has slots of its own that
+ * mean a row in the OTHER table:
+ *
+ *     {{Capacity}} - countOf("Bookings", '{{ClassId}} == RowId') > 0
+ *
+ * `{{Capacity}}` is this class. `{{ClassId}}` is a booking, and belongs to the
+ * countOf that has not been called yet. A blind scan rewrote both, so the
+ * condition arrived as `__slot1 == RowId` holding a class's non-existent
+ * ClassId -- the filter compared nothing to something and quietly kept every
+ * row. The whole of "hide the full ones" failed that way, with no error.
+ *
+ * A slot inside quotes is therefore left exactly as written, for the inner call
+ * to deal with when its turn comes. Backslash escapes are honoured, so a
+ * condition containing an apostrophe does not swallow the rest of the line.
+ *
+ * `replace` returns the text to substitute, or null to leave the slot alone --
+ * which is how the same walk serves both "rename these" and "list these".
+ */
+function overSlots(text: string, replace: (name: string) => string | null): string {
+  let out = '';
+  let i = 0;
+  let quote: string | null = null;
+  while (i < text.length) {
+    const ch = text[i];
+    if (quote) {
+      if (ch === '\\' && i + 1 < text.length) { out += ch + text[i + 1]; i += 2; continue; }
+      if (ch === quote) quote = null;
+      out += ch;
+      i++;
+      continue;
+    }
+    if (ch === '"' || ch === "'") { quote = ch; out += ch; i++; continue; }
+    if (ch === '{' && text[i + 1] === '{') {
+      const match = /^\{\{\s*([^}|]+?)\s*\}\}/.exec(text.slice(i));
+      if (match) {
+        const replaced = replace(match[1].trim());
+        out += replaced === null ? match[0] : replaced;
+        i += match[0].length;
+        continue;
+      }
+    }
+    out += ch;
+    i++;
+  }
+  return out;
+}
+
+/**
  * Keep the rows a filter says to keep.
  *
  * A filter that cannot be worked out THROWS here, unlike the repeater's, and
@@ -375,26 +479,6 @@ function rowsWhere(
   outer?: Record<string, any>,
 ): Record<string, any>[] {
   if (!where || !where.trim()) return rows;
-  /**
-   * A `{{Column}}` slot is not looked up by name -- it is REWRITTEN to an
-   * invented name that holds the tested row's value. That is what keeps the
-   * two scopes apart: the caller cannot shadow a slot, because by the time
-   * anything is resolved the slot is not spelled the way the caller's names
-   * are spelled.
-   *
-   * The invented name has to be one the condition is not itself using, or the
-   * scopes collide the other way round. With a fixed `__w0`, this:
-   *
-   *     countOf("T", '{{Status}} == __w0')      // caller has __w0 = "confirmed"
-   *
-   * became `__w0 == __w0` and counted EVERY row -- a wrong number that looks
-   * like a number, which is the failure this file exists to refuse. So the
-   * prefix grows until the condition does not contain it. It is only ever the
-   * first branch in practice; the loop is there so the guarantee is a
-   * guarantee and not a bet on what people name things.
-   */
-  let prefix = '__w';
-  while (where.includes(prefix)) prefix = '_' + prefix;
   return rows.filter(row => {
     /**
      * TWO SCOPES, AND WHICH ONE A NAME MEANS IS DECIDED BY HOW IT IS SPELLED.
@@ -419,22 +503,15 @@ function rowsWhere(
      * already existed. Six separate things a real site needs turned out to be
      * this one sentence -- see docs/BUILT_ONE_TO_FIND_OUT.md.
      *
-     * THE TWO CANNOT COLLIDE, which is stronger than one winning. See the
-     * rewriting above: a slot never becomes a name the caller could also have
-     * used, so a card with its own `Status` column can still ask a table about
-     * ITS `Status` and get the right answer.
+     * THE TWO CANNOT COLLIDE, which is stronger than one winning. See
+     * bindSlots: a slot never becomes a name the caller could also have used,
+     * so a card with its own `Status` column can still ask a table about ITS
+     * `Status` and get the right answer.
      */
-    const rowScope: Record<string, any> = { ...(outer || {}) };
-    let index = 0;
-    const rewritten = where.replace(SLOT_IN_WHERE, (_all, rawName: string) => {
-      const key = `${prefix}${index++}`;
-      const name = String(rawName).trim();
-      rowScope[key] = name === 'Row id' ? row?.id : row?.[name];
-      return key;
-    });
+    const bound = bindSlots(where, name => (name === 'Row id' ? row?.id : row?.[name]), outer);
     // The clock reaches a table's filter too, so
     // countOf("Bookings", '{{Due}} > today') means what it reads as.
-    return truthy(evaluateExpression(rewritten, rowScope, undefined, options));
+    return truthy(evaluateExpression(bound.expression, bound.scope, undefined, options));
   });
 }
 

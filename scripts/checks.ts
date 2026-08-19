@@ -63,7 +63,7 @@ import { startingPace, nextPace, rowsFingerprint, POLL_FAST_MS, POLL_SLOW_MS, PO
 import { BLOCK_DISPLAY_NAMES } from '../src/lib/blockRegistry';
 import { RULE_TYPES as AUDIT_RULES } from '../src/lib/validation';
 import { TABLE_FUNCTION_NAMES, DATE_FUNCTION_NAMES } from '../src/lib/formula';
-import { visibleRows, rowSlots, compareCells, slotNamesFor, rowMatchesSearch, MAX_RENDERED_ROWS, rowIndexesForStep, coerceForColumn, rowMatchesFormula, columnsUsedByFormula, calcExampleFor, calcExampleWithFilter, shareExampleFor, isoDate, isoToDateInput, dateInputToIso, displayCell, COLUMN_TYPE_LABELS, listRowLines, listIsEmpty } from '../src/lib/rows';
+import { visibleRows, rowFormulaValue, rowSlots, compareCells, slotNamesFor, rowMatchesSearch, MAX_RENDERED_ROWS, rowIndexesForStep, coerceForColumn, rowMatchesFormula, columnsUsedByFormula, calcExampleFor, calcExampleWithFilter, shareExampleFor, isoDate, isoToDateInput, dateInputToIso, displayCell, COLUMN_TYPE_LABELS, listRowLines, listIsEmpty } from '../src/lib/rows';
 import {
   parseSlot,
   applyFilters,
@@ -7019,13 +7019,19 @@ group('a row can ask about another table, about itself');
 
   /**
    * THE INVENTED NAME HAS TO BE ONE THE CONDITION IS NOT USING. It used to be
-   * a fixed `__w0`, so a caller value of that name was overwritten by the
-   * tested row and `{{Status}} == __w0` quietly became `Status == Status`:
-   * every row matched, and the answer was a number, which is the shape of
-   * wrongness this file exists to refuse.
+   * a fixed one, so a caller value of that name was overwritten by the tested
+   * row and `{{Status}} == __slot0` quietly became `Status == Status`: every
+   * row matched, and the answer was a number, which is the shape of wrongness
+   * this file exists to refuse.
+   *
+   * THE NAME BELOW IS DELIBERATELY THE REAL ONE, copied from bindSlots. That
+   * makes this check go stale the moment the prefix is renamed -- and it did,
+   * once, within the hour: the prefix moved and this quietly stopped probing
+   * anything while still passing. `npm run control` caught it. If you rename
+   * the prefix, rename it here too, and run the controls to prove you did.
    */
   check('AN INTERNAL NAME LEAKING INTO A CONDITION DOES NOT SILENTLY MATCH EVERYTHING',
-    asks(`countOf("Bookings", '{{Status}} == __w0')`, { __w0: 'waitlist' }), 1);
+    asks(`countOf("Bookings", '{{Status}} == __slot0')`, { __slot0: 'waitlist' }), 1);
   check('and it answers the same as the identical question spelled differently',
     asks(`countOf("Bookings", '{{Status}} == Want')`, { Want: 'waitlist' }), 1);
 
@@ -7095,6 +7101,214 @@ group('a row can ask about another table, about itself');
 
   check('and a name in neither scope is still an error a person can act on',
     (() => { try { evaluateExpression(`countOf("Bookings", '{{ClassId}} == Nonsense')`, {}, tables); return null; } catch (e: any) { return String(e.message); } })()?.includes('Nonsense'),
+    true);
+}
+
+
+group('a list can be filtered and ordered by something worked out');
+{
+  /**
+   * RANK 2 FROM docs/BUILT_ONE_TO_FIND_OUT.md. The pottery site wanted two
+   * controls above its list of classes -- "hide full" and "best rated first" --
+   * and neither is a column. Fullness is a COUNT of rows in another table;
+   * rating is an AVERAGE of rows in another table. No list of columns can ever
+   * contain them, so no amount of dropdown could have said it.
+   *
+   * Both are now one formula each, using the relation from the group above.
+   */
+  const CLASSES = [
+    { id: 'c1', Title: 'Wheel throwing', Capacity: 8, Price: 34 },
+    { id: 'c2', Title: 'Hand-building', Capacity: 2, Price: 28 },
+    { id: 'c3', Title: 'Glazing', Capacity: 6, Price: 40 },
+  ];
+  const tables = {
+    Bookings: {
+      rows: [
+        { id: 'b1', ClassId: 'c2', Status: 'confirmed' },
+        { id: 'b2', ClassId: 'c2', Status: 'confirmed' },
+        { id: 'b3', ClassId: 'c3', Status: 'confirmed' },
+      ],
+      columns: ['ClassId', 'Status'],
+    },
+    Reviews: {
+      rows: [
+        { id: 'v1', ClassId: 'c1', Rating: 3 },
+        { id: 'v2', ClassId: 'c2', Rating: 5 },
+        { id: 'v3', ClassId: 'c3', Rating: 4 },
+        { id: 'v4', ClassId: 'c3', Rating: 4 },
+      ],
+      columns: ['ClassId', 'Rating'],
+    },
+  };
+  const titles = (r: any) => r.rows.map((x: any) => x.Title);
+
+  const hideFull = visibleRows(CLASSES, {
+    filterFormula: `{{Capacity}} - countOf("Bookings", '{{ClassId}} == RowId') > 0`,
+    tables,
+  });
+  check('HIDE FULL: a filter that counts rows in another table',
+    titles(hideFull), ['Wheel throwing', 'Glazing']);
+  check('and it is the full one that went, not an arbitrary one',
+    hideFull.matched, 2);
+  check('nothing is reported as wrong, because nothing was', hideFull.formulaError, null);
+
+  const bestRated = visibleRows(CLASSES, {
+    sortFormula: `avgOf("Reviews", "Rating", '{{ClassId}} == RowId')`,
+    sortDirection: 'desc',
+    tables,
+  });
+  check('BEST RATED FIRST: an order that averages rows in another table',
+    titles(bestRated), ['Hand-building', 'Glazing', 'Wheel throwing']);
+  check('and the other direction is the other way round',
+    titles(visibleRows(CLASSES, {
+      sortFormula: `avgOf("Reviews", "Rating", '{{ClassId}} == RowId')`,
+      sortDirection: 'asc',
+      tables,
+    })),
+    ['Wheel throwing', 'Glazing', 'Hand-building']);
+
+  check('an ordinary arithmetic order needs no tables at all',
+    titles(visibleRows(CLASSES, { sortFormula: '{{Capacity}} * {{Price}}', sortDirection: 'desc' })),
+    ['Wheel throwing', 'Glazing', 'Hand-building']);
+
+  /**
+   * The rule about which wins, said the same way as the filter's: a formula is
+   * the more specific thing, so it is used INSTEAD OF the column rather than
+   * as well as it. Silently ANDing them would be a rule nobody wrote.
+   */
+  check('A FORMULA IS USED INSTEAD OF THE SORT COLUMN, not alongside it',
+    titles(visibleRows(CLASSES, { sortColumn: 'Title', sortFormula: '{{Price}}', sortDirection: 'desc' })),
+    ['Glazing', 'Wheel throwing', 'Hand-building']);
+  check('and with no formula the column is still what orders it',
+    titles(visibleRows(CLASSES, { sortColumn: 'Title' })),
+    ['Glazing', 'Hand-building', 'Wheel throwing']);
+  check('an empty formula is not a formula', 
+    titles(visibleRows(CLASSES, { sortColumn: 'Title', sortFormula: '   ' })),
+    ['Glazing', 'Hand-building', 'Wheel throwing']);
+
+  /**
+   * TIES KEEP THE ORDER THEY ARRIVED IN. Array.prototype.sort is required to be
+   * stable now, but the comparator is not: `compareCells` answers 0 for a tie
+   * and the decorate step reorders nothing, so without the index tiebreak the
+   * stability would depend on an implementation detail two layers down. A list
+   * that reshuffles equal rows between renders looks broken to the person
+   * reading it, and there is no way to tell them it is not.
+   */
+  check('EQUAL ROWS DO NOT SHUFFLE',
+    titles(visibleRows(
+      [{ id: 'a', Title: 'A', N: 1 }, { id: 'b', Title: 'B', N: 1 }, { id: 'c', Title: 'C', N: 1 }],
+      { sortFormula: '{{N}}' })),
+    ['A', 'B', 'C']);
+
+  /**
+   * WORKED OUT ONCE PER ROW, NOT ONCE PER COMPARISON.
+   *
+   * This is the check that stops a correct feature being unusable. A sort does
+   * O(n log n) comparisons and a sort formula may walk a whole table, so
+   * evaluating inside the comparator turns one render into thousands of table
+   * walks while a visitor waits. The count is the only way to tell from the
+   * outside -- both spellings answer identically.
+   */
+  let reads = 0;
+  const counted = {
+    get Reviews() { reads++; return tables.Reviews; },
+  } as any;
+  const many = Array.from({ length: 8 }, (_, i) => ({ id: 'c' + i, Title: 'T' + i, N: 8 - i }));
+  visibleRows(many, { sortFormula: `countOf("Reviews", '{{ClassId}} == RowId')`, tables: counted });
+  check('the table is read once per row and not once per comparison',
+    reads <= many.length, true);
+  check('and it really was read, so the count means something', reads, 8);
+
+  /**
+   * WHEN THE FORMULA CANNOT BE WORKED OUT. Rows are kept -- see rows.ts for why
+   * hiding is the dangerous direction -- and the error is now REPORTED. It used
+   * to be worked out and dropped on the floor: the list quietly ignored the
+   * filter and there was nothing on the page to say so.
+   */
+  const brokenFilter = visibleRows(CLASSES, { filterFormula: '{{Capacity}} >' });
+  check('A BROKEN FILTER KEEPS EVERY ROW', brokenFilter.rows.length, 3);
+  check('AND SAYS SO, which it did not before', !!brokenFilter.formulaError, true);
+  const brokenSort = visibleRows(CLASSES, { sortFormula: 'Capacity > 1' });
+  check('a broken sort leaves the order alone', titles(brokenSort), ['Wheel throwing', 'Hand-building', 'Glazing']);
+  check('and explains the spelling, since that is the likely cause',
+    String(brokenSort.formulaError).includes('{{Capacity}}'), true);
+  check('only the first complaint, not one per row',
+    (brokenFilter.formulaError || '').split('\n').length, 1);
+
+  /**
+   * A row formula rewrites `{{Column}}` to an invented name, exactly as a
+   * table condition does -- and it had the same collision bug, which is what a
+   * sibling sweep is for. It was `__col0`, in scope, so `{{Price}} > __col0`
+   * quietly became `Price > Price` and answered false. It now refuses.
+   */
+  const leaked = visibleRows(CLASSES, { filterFormula: '{{Price}} > __slot0' });
+  check('AN INTERNAL NAME IN A ROW FORMULA IS AN ERROR, not a quiet false',
+    !!leaked.formulaError, true);
+  check('and it keeps the rows rather than emptying the list', leaked.rows.length, 3);
+
+  /**
+   * A SLOT INSIDE QUOTES BELONGS TO THE INNER CALL, and this is the line the
+   * whole feature turned on.
+   *
+   *     {{Capacity}} - countOf("Bookings", '{{ClassId}} == RowId') > 0
+   *
+   * `{{Capacity}}` is this class. `{{ClassId}}` is a booking, and countOf has
+   * not been called yet. A blind scan rewrote both, so the condition arrived
+   * holding a class's non-existent ClassId, compared nothing to something, and
+   * KEPT EVERY ROW -- no error, list unchanged, filter apparently ignored.
+   *
+   * Every check above passed while that was broken, because they were written
+   * afterwards. These are the ones that say why it works.
+   */
+  check('a slot in the outer formula is the row being filtered',
+    rowFormulaValue({ id: 'c2', Capacity: 2 }, `{{Capacity}}`, {}).value, 2);
+  check('and a slot inside a condition is NOT, it is the other table’s row',
+    rowFormulaValue({ id: 'c2', Capacity: 2 }, `countOf("Bookings", '{{ClassId}} == RowId')`, { tables }).value, 2);
+  check('both spellings in one formula, which is the sentence that matters',
+    rowFormulaValue({ id: 'c2', Capacity: 2 },
+      `{{Capacity}} - countOf("Bookings", '{{ClassId}} == RowId')`, { tables }).value, 0);
+  check('a double-quoted condition is left alone too',
+    rowFormulaValue({ id: 'c2' }, `countOf("Bookings", "{{ClassId}} == RowId")`, { tables }).value, 2);
+  check('AND THE COLUMNS A FORMULA USES DO NOT INCLUDE THE OTHER TABLE’S',
+    columnsUsedByFormula(`{{Capacity}} - countOf("Bookings", '{{ClassId}} == RowId')`), ['Capacity']);
+  check('so the Health panel does not accuse a correct formula',
+    diagnosePage({
+      blockIds: ['repeatBlock__r1'],
+      states: {
+        repeatBlock__r1: {
+          trackedBlockId: 'databaseBlock__d1',
+          filterFormula: `{{Capacity}} - countOf("Bookings", '{{ClassId}} == RowId') > 0`,
+        } as any,
+        databaseBlock__d1: { columns: [{ name: 'Capacity' }] } as any,
+      },
+      workflows: [],
+    } as any).some(p => p.title.includes('ClassId')),
+    false);
+
+  /**
+   * The Health panel reads the sort formula too. Same syntax, same columns, and
+   * a typo goes wrong more quietly here than in a filter: a blank sort key just
+   * parks the row at the end and the list still looks plausible.
+   */
+  const diagnosed = diagnosePage({
+    blockIds: ['repeatBlock__r1'],
+    states: {
+      repeatBlock__r1: { trackedBlockId: 'databaseBlock__d1', sortFormula: '{{Prcie}}' } as any,
+      databaseBlock__d1: { columns: [{ name: 'Price' }] } as any,
+    },
+    workflows: [],
+  } as any);
+  check('THE HEALTH PANEL READS THE SORT FORMULA, not only the filter',
+    diagnosed.some(p => p.title.includes('sorts by a column called "Prcie"')), true);
+  check('and still reads the filter', 
+    diagnosePage({
+      blockIds: ['repeatBlock__r1'],
+      states: {
+        repeatBlock__r1: { trackedBlockId: 'databaseBlock__d1', filterFormula: '{{Prcie}} > 1' } as any,
+        databaseBlock__d1: { columns: [{ name: 'Price' }] } as any,
+      },
+      workflows: [],
+    } as any).some(p => p.title.includes('filters on a column called "Prcie"')),
     true);
 }
 
