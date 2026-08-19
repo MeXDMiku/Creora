@@ -38,16 +38,21 @@ const DatabaseBlockComponent = (props: NodeViewProps) => {
   const outputMode = runtimeState?.outputMode || 'row_count';
 
   // Load rows from Supabase
-  const loadRowsRef = useRef<() => void>(() => {});
+  // Returns whether the answer differed, so the poll can slow down when
+  // nothing is happening -- see hooks/usePollWhileVisible.
+  const loadRowsRef = useRef<() => boolean | Promise<boolean>>(() => false);
   useEffect(() => {
-    async function loadRows() {
+    async function loadRows(): Promise<boolean> {
       try {
         const { data, error } = await supabase
           .rpc('list_database_rows', { p_block_id: blockId });
 
         if (error) {
           console.warn('[Supabase load info]: Table public.database_rows not initialized or missing, using local state.', error.message);
-          return;
+          // Not "nothing changed" -- nothing was learned. Slowing down because
+          // the server is unreachable would be backing off from the one thing
+          // that needs retrying.
+          return true;
         }
 
         if (data) {
@@ -87,10 +92,13 @@ const DatabaseBlockComponent = (props: NodeViewProps) => {
               executeWorkflow(blockId, 'onChange', store);
               recalculateAllFormulas(store);
             }
+            return changed;
           }
         }
+        return false;
       } catch (err) {
         console.error('Error fetching database rows from Supabase:', err);
+        return true;
       }
     }
     loadRowsRef.current = loadRows;

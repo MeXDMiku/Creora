@@ -58,6 +58,7 @@ import { timerStep, timerResetValue } from '../src/lib/useTimer';
 import { duplicatedRuns, duplicatedLineCount } from './rendererDrift';
 import { measurePage, verdictForPage, byteLength, describeBytes } from '../src/lib/pageSize';
 import { costLines, inlinedImages } from '../src/lib/pageCost';
+import { startingPace, nextPace, rowsFingerprint, POLL_FAST_MS, POLL_SLOW_MS, POLL_PATIENCE } from '../src/lib/pollPace';
 import { BLOCK_DISPLAY_NAMES } from '../src/lib/blockRegistry';
 import { RULE_TYPES as AUDIT_RULES } from '../src/lib/validation';
 import { TABLE_FUNCTION_NAMES, DATE_FUNCTION_NAMES } from '../src/lib/formula';
@@ -6383,6 +6384,93 @@ group('a builder can see what their page costs');
   check('the panel actually shows the lines', panelSrc.includes('cost.map'), true);
   check('and it measures the same shape the save writes, without the rows',
     /delete copy\.rows/.test(panelSrc), true);
+}
+
+
+group('a page left open does not spend the month');
+{
+  /**
+   * THE BIGGEST REMAINING EGRESS LEAK. A Database block re-reads ALL its rows
+   * every four seconds while the tab is visible -- `list_database_rows` has no
+   * "only what changed", it returns everything. A table with a thousand rows is
+   * about half a megabyte per poll, so a visitor sitting on the page for five
+   * minutes costs roughly 37 MB against a free plan that includes 5 GB a month.
+   * A hundred and thirty page-sits, from one block, with nobody doing anything
+   * wrong.
+   *
+   * Most of those polls change nothing: a page open on a desk all afternoon
+   * asks nine hundred times and gets the same answer nine hundred times.
+   */
+  let pace = startingPace();
+  check('it starts fast, because something might be happening', pace.intervalMs, POLL_FAST_MS);
+
+  /**
+   * A few unchanged answers are tolerated before slowing -- a form being filled
+   * in has gaps in it, and backing off on the first quiet second would make the
+   * common case feel broken.
+   *
+   * COUNTED IN LITERALS, not in POLL_PATIENCE. The first version looped
+   * `POLL_PATIENCE - 1` times, so lowering the constant to 1 changed the check
+   * along with the code and it stayed green -- a check written in terms of the
+   * thing it is checking cannot fail. A control found that; reading it would
+   * not have.
+   */
+  pace = nextPace(pace, false);
+  check('one quiet answer does not slow it down', pace.intervalMs, POLL_FAST_MS);
+  pace = nextPace(pace, false);
+  check('nor two, because a form being filled in has gaps in it',
+    pace.intervalMs, POLL_FAST_MS);
+
+  pace = nextPace(pace, false);
+  check('AND THEN IT SLOWS, on the third', pace.intervalMs, POLL_FAST_MS * 2);
+  pace = nextPace(pace, false);
+  check('and keeps slowing, because ten seconds still and ten minutes still are not the same',
+    pace.intervalMs, POLL_FAST_MS * 4);
+
+  for (let i = 0; i < 20; i++) pace = nextPace(pace, false);
+  check('IT NEVER STOPS, only slows — a table that gave up is worse than a slow one',
+    pace.intervalMs, POLL_SLOW_MS);
+  check('and the ceiling is still fast enough to catch up', POLL_SLOW_MS <= 60000, true);
+
+  check('A CHANGE PUTS IT STRAIGHT BACK TO FAST', nextPace(pace, true).intervalMs, POLL_FAST_MS);
+  check('and forgets how quiet it had been', nextPace(pace, true).quietRounds, 0);
+
+  /**
+   * The saving, stated plainly: an idle page goes from 900 requests an hour to
+   * about 60.
+   */
+  const perHourFast = 3600000 / POLL_FAST_MS;
+  const perHourSlow = 3600000 / POLL_SLOW_MS;
+  check('an idle page asks far less often than it used to', perHourFast / perHourSlow >= 10, true);
+
+  check('ids and count catch an arrival',
+    rowsFingerprint([{ id: 'a' }]) !== rowsFingerprint([{ id: 'a' }, { id: 'b' }]), true);
+  check('and a removal',
+    rowsFingerprint([{ id: 'a' }, { id: 'b' }]) !== rowsFingerprint([{ id: 'a' }]), true);
+  check('the same rows read the same', rowsFingerprint([{ id: 'a' }]), rowsFingerprint([{ id: 'a' }]));
+  check('and nothing at all is not a crash', rowsFingerprint(undefined), '0:');
+
+  /**
+   * Both readers report whether the answer differed, and both treat a FAILURE
+   * as "something changed" -- backing off from an unreachable server is backing
+   * off from the one thing that needs retrying.
+   */
+  const dbSrc = readFileSync('src/blocks/DatabaseBlock.tsx', 'utf8');
+  const pubSrc = readFileSync('src/components/PublishedRenderer.tsx', 'utf8');
+  check('the editor’s table says whether anything changed', /return changed;/.test(dbSrc), true);
+  check('AND SO DOES THE PUBLISHED ONE', /return changed;/.test(pubSrc), true);
+  check('a failure does not slow the poll down in either',
+    (dbSrc.match(/return true;/g) || []).length >= 2 && (pubSrc.match(/return true;/g) || []).length >= 2, true);
+
+  const hookSrc = readFileSync('src/hooks/usePollWhileVisible.ts', 'utf8');
+  check('the hook follows the pace rather than a fixed interval',
+    hookSrc.includes('pace.current.intervalMs'), true);
+  check('and still pauses when the tab is hidden',
+    hookSrc.includes("document.visibilityState !== 'visible'"), true);
+  check('COMING BACK TO THE TAB STARTS FAST AGAIN, since somebody just chose to look',
+    /pace\.current = startingPace\(\);\s*\n\s*if \(timer\) clearTimeout\(timer\);/.test(hookSrc), true);
+  check('a caller that reports nothing keeps the fast pace rather than going quiet behind its back',
+    hookSrc.includes('changed !== false'), true);
 }
 
 say(`\n${passed} passed, ${failed} failed`);

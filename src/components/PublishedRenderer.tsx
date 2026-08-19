@@ -323,14 +323,16 @@ function PublishedDatabaseBlock({ block }: { block: ExtractedBlock }) {
   const rows = runtimeState?.rows || [];
   const outputMode = runtimeState?.outputMode || 'row_count';
 
-  const loadRowsRef = useRef<() => void>(() => {});
+  // Returns whether the answer differed, so the poll can slow when nothing is
+  // happening -- see hooks/usePollWhileVisible.
+  const loadRowsRef = useRef<() => boolean | Promise<boolean>>(() => false);
   useEffect(() => {
-    async function loadRows() {
+    async function loadRows(): Promise<boolean> {
       try {
         const { data, error } = await supabase
           .rpc('list_database_rows', { p_block_id: block.id });
 
-        if (error) return;
+        if (error) return true;
 
         if (data) {
           const parsedRows = data.map((item: any) => ({
@@ -361,9 +363,15 @@ function PublishedDatabaseBlock({ block }: { block: ExtractedBlock }) {
               executeWorkflow(block.id, 'onChange', store);
               recalculateAllFormulas(store);
             }
+            return changed;
           }
         }
-      } catch (err) {}
+        return false;
+      } catch (err) {
+        // Not "nothing changed" -- nothing was learned, and backing off from an
+        // unreachable server is backing off from the thing that needs retrying.
+        return true;
+      }
     }
     loadRowsRef.current = loadRows;
     loadRows();

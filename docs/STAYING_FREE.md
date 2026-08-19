@@ -57,7 +57,33 @@ pricing tier. The owner is exempt.
 
 Without it, one script pointed at a live page fills the 500 MB.
 
-### 3. Images
+### 3. Polling, on a page left open
+
+A Database block re-reads **all** of its rows every four seconds while the tab is
+visible. `list_database_rows` has no "only what changed" — it returns everything
+— so a table with a thousand rows is about half a megabyte per poll. A visitor
+sitting on that page for five minutes cost roughly **37 MB**. That is a hundred
+and thirty page-sits out of the monthly 5 GB, from one block, with nobody doing
+anything wrong.
+
+Most of those polls change nothing: a page open on a desk all afternoon asks nine
+hundred times and gets the same answer nine hundred times.
+
+**It now slows down when nothing is happening** — four seconds, doubling up to
+sixty once three answers in a row come back the same, and straight back to four
+the moment anything changes or you return to the tab. An idle page went from
+about 900 requests an hour to 60.
+
+**It never stops.** "Nothing changed for an hour" is not evidence that nothing
+will, and a table that has quietly given up is worse than a slow one: somebody
+submits on their phone and the owner's screen never catches up, which is the
+whole feature.
+
+The real fix is a server that can answer "nothing since X", which needs a
+migration and a way to notice deletions. This is the client-side half, and it is
+most of the money.
+
+### 4. Images
 
 They belong in Storage (1 GB), not in the database. `SETUP_STORAGE.md` has the
 bucket. The Image block stores a URL; anything else is the failure above.
