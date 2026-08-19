@@ -56,6 +56,7 @@ import { describeRowWriteError, withoutRow } from '../src/lib/rowWrite';
 import { chartBars, MIN_BAR_HEIGHT } from '../src/lib/chartBars';
 import { timerStep, timerResetValue } from '../src/lib/useTimer';
 import { duplicatedRuns, duplicatedLineCount } from './rendererDrift';
+import { buildBundle, migrationFiles } from './bundleMigrations';
 import { measurePage, verdictForPage, byteLength, describeBytes } from '../src/lib/pageSize';
 import { costLines, inlinedImages } from '../src/lib/pageCost';
 import { startingPace, nextPace, rowsFingerprint, POLL_FAST_MS, POLL_SLOW_MS, POLL_PATIENCE } from '../src/lib/pollPace';
@@ -6471,6 +6472,88 @@ group('a page left open does not spend the month');
     /pace\.current = startingPace\(\);\s*\n\s*if \(timer\) clearTimeout\(timer\);/.test(hookSrc), true);
   check('a caller that reports nothing keeps the fast pace rather than going quiet behind its back',
     hookSrc.includes('changed !== false'), true);
+}
+
+
+group('every migration in one paste, and that paste stays true');
+{
+  /**
+   * FIVE MIGRATIONS SAT UNRUN FOR DAYS -- the row-ownership one since 13
+   * August. Each fixes something silently broken until it is applied: two tabs
+   * overwriting each other, a form anyone can fill, a slot bookable twice.
+   *
+   * The work was done and the friction was the whole obstacle. Five pastes is
+   * not five times the effort of one, it is five times the chance of stopping
+   * after the first. So there is one file.
+   */
+  const bundlePath = 'supabase/RUN_ALL_MIGRATIONS.sql';
+  check('the bundle exists at all', existsSync(bundlePath), true);
+
+  /**
+   * A BUNDLE THAT HAS DRIFTED IS WORSE THAN NO BUNDLE: somebody pastes it and
+   * believes they are up to date. Rebuilt in memory and compared, so an edited
+   * migration with a stale bundle turns this red.
+   */
+  check('THE BUNDLE STILL MATCHES THE MIGRATIONS IT WAS BUILT FROM',
+    readFileSync(bundlePath, 'utf8') === buildBundle(), true);
+  check('and it contains every one of them',
+    migrationFiles().every(f => readFileSync(bundlePath, 'utf8').includes(f)), true);
+  check('in order, so 0004 cannot land after 0008',
+    migrationFiles(), [...migrationFiles()].sort());
+
+  /**
+   * THE HEADER PROMISES IT IS SAFE TO RUN WHOLE, EVERY TIME. That promise is
+   * only true while every migration is idempotent, and the next one somebody
+   * writes is the one that breaks it -- silently, because the failure is a
+   * duplicate-object error halfway through a paste that has already applied
+   * half of itself.
+   *
+   * So the shape is checked rather than trusted.
+   */
+  for (const file of migrationFiles()) {
+    const sql = readFileSync(`supabase/migrations/${file}`, 'utf8');
+    const lines = sql.split('\n');
+
+    const bareTable = lines.some(l => /^\s*create table\s/i.test(l) && !/if not exists/i.test(l));
+    check(`${file}: no table is created without "if not exists"`, bareTable, false);
+
+    const bareIndex = lines.some(l => /^\s*create index\s/i.test(l) && !/if not exists/i.test(l));
+    check(`${file}: nor an index`, bareIndex, false);
+
+    // A trigger cannot say "if not exists", so each has to be dropped first.
+    const triggers = lines.filter(l => /^\s*create trigger\s/i.test(l)).length;
+    const drops = lines.filter(l => /^\s*drop trigger if exists\s/i.test(l)).length;
+    check(`${file}: every trigger is dropped before it is created`, drops >= triggers, true);
+
+    // Functions must be replaceable, or a second run collides.
+    const bareFunction = lines.some(l => /^\s*create function\s/i.test(l));
+    check(`${file}: functions are created "or replace"`, bareFunction, false);
+
+    /**
+     * A top-level INSERT would write a row every time the bundle is pasted.
+     * Inserts inside a function body are the function's own work and are fine,
+     * so this counts brace depth rather than matching the word.
+     */
+    let depth = 0;
+    let topLevelInsert = false;
+    for (const line of lines) {
+      const low = line.trim().toLowerCase();
+      if (low.includes('as $function$')) depth++;
+      else if (low.startsWith('$function$')) depth--;
+      else if (low.startsWith('insert into') && depth === 0) topLevelInsert = true;
+    }
+    check(`${file}: nothing is inserted at the top level`, topLevelInsert, false);
+  }
+
+  /**
+   * And the promise is written down where somebody pasting it will read it.
+   */
+  const bundle = readFileSync(bundlePath, 'utf8');
+  check('the bundle says it is generated, so nobody edits it by hand',
+    bundle.includes('GENERATED FILE'), true);
+  check('and says why running it twice is fine',
+    bundle.includes('SAFE TO RUN WHOLE'), true);
+  check('and where to paste it', bundle.includes('SQL Editor'), true);
 }
 
 say(`\n${passed} passed, ${failed} failed`);

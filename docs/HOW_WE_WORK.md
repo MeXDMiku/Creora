@@ -238,3 +238,23 @@ Committing works; pushing is the user's, on Windows.
 `git` in that working copy also cannot remove its own lock files
 (`Operation not permitted` on unlink). Move `.git/index.lock` and
 `.git/HEAD.lock` aside before each git command or the next one fails.
+
+
+## A negative control that comes back green, on this mount
+
+The working copy is a network mount. A control that edits a file and
+immediately runs the checks in a subprocess can start reading **before the write
+has landed** — the check then runs against the unmodified file and passes, and
+the control looks like it found a decorative check when it found nothing at all.
+
+It has happened once, in a batch of five: the fifth control reported zero
+failures, and re-running that single control on its own turned two checks red
+correctly.
+
+**So a green control is a question, not an answer.** Re-run it alone before
+concluding anything. The three real explanations are still worth working
+through — the check is hollow, the check is overclaiming, or the control broke
+the wrong line — but on this mount there is a fourth, and it is the boring one.
+
+A batch is still worth running; it is only the green results in it that need
+repeating.
