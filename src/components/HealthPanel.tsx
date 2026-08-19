@@ -10,8 +10,11 @@ import {
   currentPageIsPublishedAtom,
   pagesListAtom,
   currentPageIdAtom,
+  slotNameOf,
 } from '../state/atoms'
 import { diagnosePage, sortProblems, type Problem } from '../lib/diagnose'
+import { costLines, inlinedImages } from '../lib/pageCost'
+import { measurePage } from '../lib/pageSize'
 
 /**
  * The Operations layer: what this page is, and what is wrong with it.
@@ -55,6 +58,37 @@ export function HealthPanel({ onClose }: { onClose: () => void }) {
     return total
   }, [blockIds, store])
 
+  /**
+   * What this page costs to keep online.
+   *
+   * Creora runs on free infrastructure and a builder had no way at all to see
+   * how close they were. The failure is not a bill -- it is a project that
+   * pauses, or a page that stops loading, weeks after the decision that caused
+   * it, with nothing connecting the two.
+   */
+  const cost = useMemo(() => {
+    const states: Record<string, any> = {}
+    for (const id of blockIds) states[id] = store.get(blockRuntimeAtom(id))
+    // The same shape the save writes, so the number matches what travels --
+    // rows excluded, because they are not written into the page.
+    const payload = {
+      runtimeStates: Object.fromEntries(
+        Object.entries(states).map(([id, st]) => {
+          const copy: any = { ...(st || {}) }
+          delete copy.rows
+          return [id, copy]
+        })
+      ),
+    }
+    return costLines({
+      pageBytes: measurePage(payload).bytes,
+      rowsOnThisPage: rowCount,
+      pageCount: (pagesList || []).length,
+      inlined: inlinedImages(blockIds, id => states[id]),
+      nameOf: id => states[id]?.blockName || slotNameOf(id, states[id]),
+    })
+  }, [blockIds, store, rowCount, pagesList])
+
   const pageName = pagesList.find(p => p.id === currentPageId)?.name || 'Untitled'
   const broken = problems.filter(p => p.severity === 'broken').length
 
@@ -91,6 +125,43 @@ export function HealthPanel({ onClose }: { onClose: () => void }) {
             <div style={{ fontSize: '13px', fontWeight: 600, marginTop: '2px', wordBreak: 'break-word' }}>{value}</div>
           </div>
         ))}
+      </div>
+
+      {/*
+        The limits are deliberately NOT printed here. They belong to somebody
+        else and they change, and a number typed into a product goes stale
+        silently and then lies with confidence -- which is what this project's
+        own capability audit did for six days. Measured figures, and a pointer
+        to the dashboard that knows the real ones.
+      */}
+      <div style={{ marginBottom: '16px' }}>
+        <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em', color: '#64748b', marginBottom: '6px' }}>
+          What this costs to keep online
+        </div>
+        {cost.map(line => (
+          <div
+            key={line.label}
+            style={{
+              background: line.heavy ? '#422006' : '#1e293b',
+              border: line.heavy ? '1px solid #854d0e' : '1px solid transparent',
+              borderRadius: '6px', padding: '8px', marginBottom: '6px',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+              <span style={{ fontSize: '12px', color: '#94a3b8' }}>{line.label}</span>
+              <span style={{ fontSize: '13px', fontWeight: 600 }}>{line.value}</span>
+            </div>
+            {line.advice && (
+              <div style={{ fontSize: '11px', color: line.heavy ? '#fcd34d' : '#94a3b8', marginTop: '4px', lineHeight: 1.4 }}>
+                {line.advice}
+              </div>
+            )}
+          </div>
+        ))}
+        <div style={{ fontSize: '10px', color: '#64748b', lineHeight: 1.5 }}>
+          These are measured here, for this page. Your Supabase dashboard has the
+          project totals and the current limits — those belong to them and they change.
+        </div>
       </div>
 
       <div style={{ fontSize: '12px', color: broken ? '#fca5a5' : '#86efac', marginBottom: '10px', fontWeight: 600 }}>

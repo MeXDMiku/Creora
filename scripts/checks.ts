@@ -57,6 +57,7 @@ import { chartBars, MIN_BAR_HEIGHT } from '../src/lib/chartBars';
 import { timerStep, timerResetValue } from '../src/lib/useTimer';
 import { duplicatedRuns, duplicatedLineCount } from './rendererDrift';
 import { measurePage, verdictForPage, byteLength, describeBytes } from '../src/lib/pageSize';
+import { costLines, inlinedImages } from '../src/lib/pageCost';
 import { BLOCK_DISPLAY_NAMES } from '../src/lib/blockRegistry';
 import { RULE_TYPES as AUDIT_RULES } from '../src/lib/validation';
 import { TABLE_FUNCTION_NAMES, DATE_FUNCTION_NAMES } from '../src/lib/formula';
@@ -6292,6 +6293,76 @@ group('a page that would cost money says so');
   check('and stops when the verdict says stop', /if \(!verdict\.save\)/.test(appSrc), true);
   check('and a heavy-but-saving page is shown, not just logged',
     appSrc.includes('{pageWeight}'), true);
+}
+
+
+group('a builder can see what their page costs');
+{
+  /**
+   * Creora runs on free infrastructure and a builder had NO WAY AT ALL to see
+   * how close they were. The failure is not a bill -- it is a project that
+   * pauses, or a page that stops loading, weeks after the decision that caused
+   * it, with nothing connecting the two.
+   */
+  const photo = 'data:image/png;base64,' + 'A'.repeat(400 * 1024);
+  const states: Record<string, any> = {
+    imageBlock__hero: { blockName: 'Hero photo', value: photo },
+    imageBlock__linked: { blockName: 'Logo', value: 'https://example.com/logo.png' },
+    buttonBlock__go: { blockName: 'Submit', value: false },
+  };
+  const found = inlinedImages(Object.keys(states), id => states[id]);
+
+  check('A PASTED PICTURE IS FOUND', found.map(f => f.blockId), ['imageBlock__hero']);
+  check('and a linked one is not, which is the whole distinction',
+    found.some(f => f.blockId === 'imageBlock__linked'), false);
+  check('its size is measured, not guessed', found[0].bytes > 400 * 1024, true);
+  check('nothing pasted, nothing reported', inlinedImages(['buttonBlock__go'], id => states[id]), []);
+  check('and a missing block is not a crash', inlinedImages(['nope'], () => undefined), []);
+
+  const lines = costLines({
+    pageBytes: 900 * 1024,
+    rowsOnThisPage: 42,
+    pageCount: 3,
+    inlined: found,
+    nameOf: id => states[id]?.blockName || id,
+  });
+  const by = (label: string) => lines.find(l => l.label.startsWith(label));
+
+  check('the page weight is shown as a size', by('This page weighs')?.value, '900 KB');
+  check('AND WHAT MAKES IT EXPENSIVE, which is the part nobody would guess',
+    by('This page weighs')?.advice?.includes('every time you pause typing'), true);
+  check('and that visitors pay for it too', by('This page weighs')?.advice?.includes('every visitor'), true);
+  check('a heavy page is marked as heavy', by('This page weighs')?.heavy, true);
+
+  check('rows are counted', by('Rows on this page')?.value, '42');
+  check('and pages', by('Pages in this project')?.value, '3');
+  check('neither is treated as alarming on its own',
+    [by('Rows on this page')?.heavy, by('Pages in this project')?.heavy], [false, false]);
+
+  check('THE PASTED PICTURE NAMES ITS BLOCK, or somebody opens every block to find it',
+    by('Picture pasted in')?.advice?.includes('"Hero photo"'), true);
+  check('and says what to do instead', by('Picture pasted in')?.advice?.includes('Upload it instead'), true);
+
+  const light = costLines({ pageBytes: 20 * 1024, rowsOnThisPage: 0, pageCount: 1, inlined: [], nameOf: id => id });
+  check('a small page is not nagged about', light.find(l => l.label.startsWith('This page'))?.advice, null);
+  check('and nothing is marked heavy', light.some(l => l.heavy), false);
+  check('with no picture line at all', light.some(l => l.label.includes('Picture')), false);
+
+  /**
+   * THE LIMITS ARE DELIBERATELY NOT IN THE PRODUCT. They belong to somebody
+   * else and they change -- and a number typed into a product goes stale
+   * silently and then lies with confidence, which is exactly what this
+   * project's own capability audit did for six days.
+   */
+  const costSrc = readFileSync('src/lib/pageCost.ts', 'utf8');
+  const panelSrc = readFileSync('src/components/HealthPanel.tsx', 'utf8');
+  check('NO FREE-TIER FIGURE IS HARD-CODED, because it would go stale and lie',
+    /500\s*MB|5\s*GB|50,?000 monthly/i.test(costSrc + panelSrc), false);
+  check('and the panel points at the dashboard that knows them',
+    panelSrc.includes('Supabase dashboard'), true);
+  check('the panel actually shows the lines', panelSrc.includes('cost.map'), true);
+  check('and it measures the same shape the save writes, without the rows',
+    /delete copy\.rows/.test(panelSrc), true);
 }
 
 say(`\n${passed} passed, ${failed} failed`);
