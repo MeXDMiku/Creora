@@ -10,7 +10,7 @@
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { createStore } from 'jotai';
-import { validateValue, isValidPattern } from '../src/lib/validation';
+import { validateValue, isValidPattern, RULE_TYPES } from '../src/lib/validation';
 import type { ValidationRule } from '../src/lib/validation';
 import { blockRuntimeAtom, workflowsAtom, allBlockIdsAtom, workflowRunsAtom, formulasAtom, switchPageFnAtom } from '../src/state/atoms';
 import { executeWorkflow, validationErrorFor, markValidated } from '../src/lib/bindingEngine';
@@ -5394,6 +5394,83 @@ group('a column can hold a date');
     pubSrc.includes('displayCell(cellVal, col.type)'), true);
   check('and does not still carry the old branch beside it',
     /col\.type === 'boolean'\s*\)?\s*display/.test(pubSrc), false);
+}
+
+
+group('a form can insist on a real date');
+{
+  /**
+   * THE HOLE THE DATE COLUMN OPENED. A column stores what it can read and
+   * blanks anything else, so a visitor typing "tomorrow" into a booking form
+   * had their answer silently dropped: the row saved, the field was empty, and
+   * nobody was told. Adding the column without adding this is what created
+   * that, so the two belong together.
+   */
+  const NOW_V = new Date(2026, 7, 17, 12, 0);
+  const say = (value: any, rules: any[]) =>
+    validateValue(value, rules, { fieldName: 'Booking date', now: NOW_V });
+
+  check('a real date passes', say('2026-08-20', [{ type: 'date' }]), null);
+  check('and one typed the way people type dates', say('20 Aug 2026', [{ type: 'date' }]), null);
+  check('SOMETHING THAT IS NOT A DATE IS CAUGHT INSTEAD OF SILENTLY DROPPED',
+    say('tomorrow', [{ type: 'date' }]), 'Booking date must be a date');
+  check('a blank is left to the required rule, as every other rule does',
+    say('', [{ type: 'date' }]), null);
+  check('and required still catches it when it should',
+    say('', [{ type: 'required' }, { type: 'date' }]), 'Booking date is required');
+
+  /**
+   * `today` as the limit, because "must be in the future" is what a booking
+   * form is actually for -- and writing it as a date would mean the builder
+   * editing the form every morning.
+   */
+  const future = [{ type: 'dateAfter', value: 'today' }];
+  check('a date in the future passes', say('2026-08-20', future), null);
+  check('one in the past does not', say('2026-08-10', future), 'Booking date must be in the future');
+  check('THE MESSAGE SAYS WHAT A PERSON WOULD SAY, not "after today"',
+    say('2026-08-10', future), 'Booking date must be in the future');
+  check('today itself is not in the future, which is the answer somebody wants for a booking',
+    say('2026-08-17', future) !== null, true);
+
+  const past = [{ type: 'dateBefore', value: 'today' }];
+  check('and the other way round', say('2026-08-10', past), null);
+  check('with its own wording', say('2026-08-20', past), 'Booking date must be in the past');
+
+  const window_ = [{ type: 'dateAfter', value: '2026-09-01' }, { type: 'dateBefore', value: '2026-09-30' }];
+  check('two rules make a window', say('2026-09-15', window_), null);
+  check('and the near edge is named', say('2026-08-20', window_), 'Booking date must be after 2026-09-01');
+  check('as is the far one', say('2026-10-05', window_), 'Booking date must be before 2026-09-30');
+
+  /**
+   * A rule whose OWN value cannot be read PASSES, the same direction `pattern`
+   * already goes: refusing every visitor because the builder typed "nextt week"
+   * is a far worse bug than accepting a date that is slightly too early.
+   */
+  check('A BUILDER TYPO IN THE RULE DOES NOT LOCK EVERYBODY OUT',
+    say('2026-08-20', [{ type: 'dateAfter', value: 'nextt week' }]), null);
+  check('nor an empty limit', say('2026-08-20', [{ type: 'dateAfter', value: '' }]), null);
+  // But a visitor's unreadable answer against a good rule is still refused.
+  check('while a visitor answer that is not a date still fails the comparison',
+    say('whenever', [{ type: 'dateAfter', value: 'today' }]) !== null, true);
+
+  check('the builder’s own wording still wins',
+    say('2026-08-10', [{ type: 'dateAfter', value: 'today', message: 'Pick a day from tomorrow onwards' }]),
+    'Pick a day from tomorrow onwards');
+
+  /**
+   * The rule list is what the inspector draws from, so a rule missing there is
+   * a rule nobody can add -- shipped and unreachable.
+   */
+  const listed = RULE_TYPES.map((r: any) => r.type);
+  check('ALL THREE CAN ACTUALLY BE PICKED IN THE INSPECTOR',
+    ['date', 'dateAfter', 'dateBefore'].every(t => listed.includes(t)), true);
+  check('and the two that need a limit say so',
+    RULE_TYPES.filter((r: any) => r.type === 'dateAfter' || r.type === 'dateBefore')
+      .every((r: any) => r.needsValue), true);
+  check('while the plain one does not ask for a value',
+    RULE_TYPES.find((r: any) => r.type === 'date')?.needsValue, false);
+  check('and the hint tells a builder that today is allowed there',
+    (RULE_TYPES.find((r: any) => r.type === 'dateAfter')?.hint || '').includes('today'), true);
 }
 
 say(`\n${passed} passed, ${failed} failed`);

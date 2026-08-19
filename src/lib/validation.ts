@@ -1,3 +1,4 @@
+import { toDate } from './format';
 /**
  * Validation rules, and the one function that decides whether a value passes.
  *
@@ -35,7 +36,24 @@ export type ValidationRuleType =
   | 'startsWith'
   | 'endsWith'
   | 'pattern'
-  | 'matchesBlock';
+  | 'matchesBlock'
+  /**
+   * Dates.
+   *
+   * WHY THESE ARRIVED LATE, AND WHY THEY HAD TO
+   * A date column was added, and a column stores what it can read -- anything
+   * else becomes blank. So a visitor typing "tomorrow" into a booking form had
+   * their answer SILENTLY DROPPED: the row saved, the field was empty, and
+   * nobody was told. Adding the column without adding this created that; they
+   * belong together.
+   *
+   * `dateAfter` and `dateBefore` take a date OR the word `today`, so "must be
+   * in the future" is one rule rather than a special case -- and `today` is
+   * what a booking form actually needs.
+   */
+  | 'date'
+  | 'dateAfter'
+  | 'dateBefore';
 
 export interface ValidationRule {
   type: ValidationRuleType;
@@ -69,6 +87,23 @@ export const RULE_TYPES: {
   { type: 'maxLength', label: 'At most this many characters', needsValue: true, valueKind: 'number', placeholder: '280' },
   { type: 'min', label: 'Number is at least', needsValue: true, valueKind: 'number', placeholder: '1' },
   { type: 'max', label: 'Number is at most', needsValue: true, valueKind: 'number', placeholder: '100' },
+  { type: 'date', label: 'Must be a date', needsValue: false },
+  {
+    type: 'dateAfter',
+    label: 'Date is after',
+    needsValue: true,
+    valueKind: 'text',
+    placeholder: 'today',
+    hint: 'A date, or the word today. Use this for "must be in the future".',
+  },
+  {
+    type: 'dateBefore',
+    label: 'Date is before',
+    needsValue: true,
+    valueKind: 'text',
+    placeholder: '2027-01-01',
+    hint: 'A date, or the word today.',
+  },
   { type: 'startsWith', label: 'Starts with', needsValue: true, valueKind: 'text', placeholder: '+44' },
   { type: 'endsWith', label: 'Ends with', needsValue: true, valueKind: 'text', placeholder: '.com' },
   {
@@ -148,13 +183,47 @@ function defaultMessage(rule: ValidationRule, fieldName: string): string {
       return `${field} is not in the right format`;
     case 'matchesBlock':
       return `${field} does not match`;
+    case 'date':
+      return `${field} must be a date`;
+    case 'dateAfter':
+      // "after today" reads as jargon on a form. Say what a person would say.
+      return String(rule.value ?? '').trim().toLowerCase() === 'today'
+        ? `${field} must be in the future`
+        : `${field} must be after ${rule.value}`;
+    case 'dateBefore':
+      return String(rule.value ?? '').trim().toLowerCase() === 'today'
+        ? `${field} must be in the past`
+        : `${field} must be before ${rule.value}`;
     default:
       return `${field} is not valid`;
   }
 }
 
 /** True when the value satisfies the rule. Blank passes everything but `required`. */
-function passes(value: any, rule: ValidationRule, resolve?: (blockId: string) => any): boolean {
+/**
+ * What a date rule is measured against: a date, or the word `today`.
+ *
+ * `today` rather than only a fixed date, because "must be in the future" is
+ * what a booking form is actually for, and expressing it as a date would mean
+ * the builder editing the form every morning.
+ */
+function ruleDate(value: any, now: Date): Date | null {
+  const text = String(value ?? '').trim();
+  if (text.toLowerCase() === 'today') {
+    const midnight = new Date(now.getTime());
+    midnight.setHours(0, 0, 0, 0);
+    return midnight;
+  }
+  if (text.toLowerCase() === 'now') return now;
+  return toDate(text);
+}
+
+function passes(
+  value: any,
+  rule: ValidationRule,
+  resolve?: (blockId: string) => any,
+  now: Date = new Date(),
+): boolean {
   const blank = isBlank(value);
 
   if (rule.type === 'required') return !blank;
@@ -210,6 +279,28 @@ function passes(value: any, rule: ValidationRule, resolve?: (blockId: string) =>
       const other = resolve(String(rule.value));
       return asText(other).trim() === text;
     }
+    case 'date':
+      return toDate(text) !== null;
+    /**
+     * A rule whose OWN value cannot be read passes.
+     *
+     * That is the same direction as `pattern` above and for the same reason: a
+     * builder's typo in the rule must not become a field nobody can submit.
+     * Refusing every visitor because the builder wrote "nextt week" would be a
+     * far worse bug than accepting a date that is slightly too early.
+     */
+    case 'dateAfter': {
+      const limit = ruleDate(rule.value, now);
+      const given = toDate(text);
+      if (!limit) return true;
+      return given !== null && given.getTime() > limit.getTime();
+    }
+    case 'dateBefore': {
+      const limit = ruleDate(rule.value, now);
+      const given = toDate(text);
+      if (!limit) return true;
+      return given !== null && given.getTime() < limit.getTime();
+    }
     default:
       return true;
   }
@@ -234,11 +325,11 @@ export function isValidPattern(pattern: string): boolean {
 export function validateValue(
   value: any,
   rules: ValidationRule[] | undefined,
-  opts?: { fieldName?: string; resolve?: (blockId: string) => any }
+  opts?: { fieldName?: string; resolve?: (blockId: string) => any; now?: Date }
 ): string | null {
   if (!rules || rules.length === 0) return null;
   for (const rule of rules) {
-    if (!passes(value, rule, opts?.resolve)) {
+    if (!passes(value, rule, opts?.resolve, opts?.now)) {
       const own = rule.message && rule.message.trim() !== '' ? rule.message.trim() : null;
       return own ?? defaultMessage(rule, opts?.fieldName ?? '');
     }
