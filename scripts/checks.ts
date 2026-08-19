@@ -54,6 +54,7 @@ import { slotNameOf, slotNameForNodeType } from '../src/state/atoms';
 import { interpretSave, shouldKeepAutosaving, PageStamps } from '../src/lib/savePage';
 import { describeRowWriteError, withoutRow } from '../src/lib/rowWrite';
 import { chartBars, MIN_BAR_HEIGHT } from '../src/lib/chartBars';
+import { timerStep, timerResetValue } from '../src/lib/useTimer';
 import { visibleRows, rowSlots, compareCells, slotNamesFor, rowMatchesSearch, MAX_RENDERED_ROWS, rowIndexesForStep, coerceForColumn, rowMatchesFormula, columnsUsedByFormula, calcExampleFor, calcExampleWithFilter, shareExampleFor, isoDate, isoToDateInput, dateInputToIso, displayCell, COLUMN_TYPE_LABELS, listRowLines, listIsEmpty } from '../src/lib/rows';
 import {
   parseSlot,
@@ -5927,6 +5928,85 @@ group('the history chart is measured once, and measured honestly');
   check('NEITHER STILL WORKS IT OUT ITSELF',
     /const baselineY = /.test(chartSrc + pubChartSrc), false);
   check('nor keeps half of it', /const barPadding = /.test(chartSrc + pubChartSrc), false);
+}
+
+
+group('a timer behaves the same while building and once published');
+{
+  /**
+   * NINTH DRIFT, and the one that mattered most. A Timer's whole behaviour --
+   * auto-start, ticking, countdown versus interval, when onTick and onComplete
+   * fire, when it stops itself -- was written out twice.
+   *
+   * It is the only block that acts ON ITS OWN, so a divergence here is not
+   * cosmetic: it means a workflow that fires on a published page and not while
+   * building it, or the other way round, with nothing on screen to say so. The
+   * builder tests it, it works, and it does something else for a visitor.
+   */
+  const countdown = (from: number) => timerStep(from, 'countdown');
+
+  check('a countdown counts down', countdown(10).next, 9);
+  check('and ticks on the way', countdown(10).tick, true);
+  check('without finishing early', [countdown(10).complete, countdown(10).stop], [false, false]);
+
+  const last = countdown(1);
+  check('THE LAST SECOND FIRES BOTH onTick AND onComplete',
+    [last.tick, last.complete], [true, true]);
+  check('and stops the timer itself', last.stop, true);
+  /**
+   * `countdown(1)` proves nothing about the floor: 1 - 1 is 0 whether or not
+   * anything clamps it. A control found that -- it broke the clamp and this
+   * check stayed green while the one below went red. The discriminating case is
+   * a timer that is somehow already at or below zero, which is what a paused
+   * and re-run countdown can be.
+   */
+  check('the last second lands on zero', last.next, 0);
+  check('AND SO DOES ONE ALREADY AT ZERO, which is the case that needs the clamp',
+    [countdown(0).next, countdown(0).stop], [0, true]);
+  check('and one somehow below it', countdown(-3).next, 0);
+
+  const interval = timerStep(7, 'interval');
+  check('an interval counts up', interval.next, 8);
+  check('and ticks', interval.tick, true);
+  check('AND NEVER COMPLETES, because it is not counting towards anything',
+    [interval.complete, interval.stop], [false, false]);
+
+  check('a stopped countdown shows its full duration', timerResetValue('countdown', 30), 30);
+  check('and a stopped interval shows nothing yet', timerResetValue('interval', 30), 0);
+
+  /**
+   * Both renderers ask for the behaviour rather than having their own.
+   */
+  const timerSrc = readFileSync('src/blocks/TimerBlock.tsx', 'utf8');
+  /**
+   * Only the timer's own component, not the whole file. The first version of
+   * this scanned all of PublishedRenderer and went red on the DATA SOURCE
+   * block's refresh interval -- a setInterval that is entirely correct and has
+   * nothing to do with timers. A check that reads too widely reports a fault
+   * that is not there, which costs the same trust as missing one that is.
+   */
+  const wholePub = readFileSync('src/components/PublishedRenderer.tsx', 'utf8');
+  const timerStart = wholePub.indexOf('function PublishedTimerBlock');
+  const pubTimerSrc = wholePub.slice(timerStart, wholePub.indexOf('\nfunction ', timerStart + 10));
+  check('the timer component was actually found, or the rest of this proves nothing',
+    timerStart > 0 && pubTimerSrc.length > 200, true);
+  check('the editor uses the shared timer', timerSrc.includes('useTimer({'), true);
+  check('AND SO DOES THE PUBLISHED PAGE', pubTimerSrc.includes('useTimer({'), true);
+  check('NEITHER STILL RUNS ITS OWN CLOCK',
+    /setInterval\(/.test(timerSrc + pubTimerSrc), false);
+  check('nor fires its own events',
+    (timerSrc + pubTimerSrc).includes("executeWorkflow(block.id, 'onTick'"), false);
+
+  /**
+   * The one difference that is meant to be there: the editor asks for a save
+   * when the running state changes, and the published page does not, because a
+   * visitor pressing play must not write to somebody else's page.
+   */
+  check('THE EDITOR SAVES WHEN THE TIMER CHANGES', timerSrc.includes('onStateChanged'), true);
+  check('AND THE PUBLISHED PAGE DELIBERATELY DOES NOT',
+    /useTimer\(\{ blockId: block\.id, store \}\)/.test(pubTimerSrc), true);
+  check('and the data source block keeps its own refresh, which is not a timer',
+    /setInterval\(run, secs \* 1000\)/.test(wholePub), true);
 }
 
 say(`\n${passed} passed, ${failed} failed`);

@@ -1,10 +1,10 @@
 import { Node } from '@tiptap/core';
+import { useTimer } from '../lib/useTimer';
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
 import type { NodeViewProps } from '@tiptap/react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
-import { executeWorkflow } from '../lib/bindingEngine';
 import { blockRuntimeAtom, activeWireAtom, snapTargetAtom, triggerSaveAtom, contextMenuAtom, getPortBadge, getBlockTypeDisplayName } from '../state/atoms';
-import { useMemo, useRef, useState, useEffect, useCallback } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useBlockDrag } from '../hooks/useBlockDrag';
 
 const TimerBlockComponent = (props: NodeViewProps) => {
@@ -28,75 +28,22 @@ const TimerBlockComponent = (props: NodeViewProps) => {
 
   const { position, handlePointerDown, handlePointerMove, handlePointerUp } = useBlockDrag(blockId, containerRef as React.RefObject<HTMLElement>);
 
-  // Timer configuration values
-  const isRunning = !!runtimeState?.value;
-  const mode = runtimeState?.mode ?? 'countdown';
-  const duration = runtimeState?.duration ?? 10;
-  const autoStart = runtimeState?.autoStart ?? false;
-
-  // Track the actual seconds ticked
-  const [seconds, setSeconds] = useState(mode === 'interval' ? 0 : duration);
-
-  // Keep countdown/interval seconds in sync when the timer is stopped
-  useEffect(() => {
-    if (!isRunning) {
-      setSeconds(mode === 'interval' ? 0 : duration);
-    }
-  }, [duration, mode, isRunning]);
-
-  // Handle autoStart on mount
-  useEffect(() => {
-    if (autoStart && !isRunning) {
-      store.set(atomInstance, (curr) => ({ ...curr, value: true }));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoStart, atomInstance, store]);
-
-  // Handle ticking interval with strict useEffect cleanup to prevent orphaned intervals
-  useEffect(() => {
-    if (!isRunning) return;
-
-    console.log(`[TimerBlock:${blockId}] Ticker interval started. Mode: ${mode}, Start Seconds: ${seconds}`);
-
-    const intervalId = setInterval(() => {
-      setSeconds((prev) => {
-        if (mode === 'countdown') {
-          const next = prev - 1;
-          if (next <= 0) {
-            console.log(`[TimerBlock:${blockId}] Countdown finished. Triggering onTick and onComplete.`);
-            executeWorkflow(blockId, 'onTick', store);
-            executeWorkflow(blockId, 'onComplete', store);
-            
-            // Automatically stop the timer
-            store.set(atomInstance, (curr) => ({ ...curr, value: false }));
-            triggerSave((s) => s + 1);
-            return 0;
-          }
-          console.log(`[TimerBlock:${blockId}] Tick. Seconds remaining: ${next}`);
-          executeWorkflow(blockId, 'onTick', store);
-          return next;
-        } else {
-          // Interval mode: count up
-          const next = prev + 1;
-          console.log(`[TimerBlock:${blockId}] Tick. Seconds elapsed: ${next}`);
-          executeWorkflow(blockId, 'onTick', store);
-          return next;
-        }
-      });
-    }, 1000);
-
-    return () => {
-      console.log(`[TimerBlock:${blockId}] Ticker interval cleared.`);
-      clearInterval(intervalId);
-    };
-  }, [isRunning, mode, duration, blockId, store, atomInstance, triggerSave]);
-
-  // Handle play/pause toggles
-  const toggleTimer = useCallback(() => {
-    const nextRunning = !isRunning;
-    store.set(atomInstance, (curr) => ({ ...curr, value: nextRunning }));
-    triggerSave((s) => s + 1);
-  }, [isRunning, store, atomInstance, triggerSave]);
+  /**
+   * The whole of a Timer's behaviour lives in lib/useTimer.ts, shared with the
+   * published renderer. It was written out twice, and the Timer is the only
+   * block that acts on its own -- a divergence here means a workflow that fires
+   * on a published page and not while building it, with nothing on screen to
+   * say so.
+   *
+   * The editor asks for a save when the running state changes; the published
+   * page does not, because a visitor pressing play must not write to somebody
+   * else's page. That difference is passed in rather than decided in there.
+   */
+  const { seconds, isRunning, toggle: toggleTimer } = useTimer({
+    blockId,
+    store,
+    onStateChanged: () => triggerSave((s) => s + 1),
+  });
 
   const onPointerUp = (e: React.PointerEvent) => {
     handlePointerUp(e);

@@ -15,6 +15,7 @@ import { CustomHtmlView } from '../blocks/CustomHtmlBlock';
 import { RepeatView } from '../blocks/RepeatBlock';
 import { ListRowsView } from '../blocks/ListBlock';
 import { chartBars } from '../lib/chartBars';
+import { useTimer } from '../lib/useTimer';
 import { FieldView, FieldError } from '../blocks/FieldView';
 import { refreshPageValue, buildParamsFromTemplate } from '../lib/pageValue';
 import { parseParams } from '../lib/pageParams';
@@ -189,56 +190,15 @@ function PublishedTimerBlock({ block }: { block: ExtractedBlock }) {
 
   const { outer: outerStyle, inner: innerStyle } = blockToCSS(block.type, position, runtimeState);
 
-  const isRunning = !!runtimeState?.value;
-  const mode = runtimeState?.mode ?? 'countdown';
-  const duration = runtimeState?.duration ?? 10;
-  const autoStart = runtimeState?.autoStart ?? false;
-
-  const [seconds, setSeconds] = useState(mode === 'interval' ? 0 : duration);
-
-  useEffect(() => {
-    if (!isRunning) {
-      setSeconds(mode === 'interval' ? 0 : duration);
-    }
-  }, [duration, mode, isRunning]);
-
-  useEffect(() => {
-    if (autoStart && !isRunning) {
-      store.set(blockRuntimeAtom(block.id), (curr) => ({ ...curr, value: true }));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoStart, block.id, store]);
-
-  useEffect(() => {
-    if (!isRunning) return;
-
-    const intervalId = setInterval(() => {
-      setSeconds((prev) => {
-        if (mode === 'countdown') {
-          const next = prev - 1;
-          if (next <= 0) {
-            executeWorkflow(block.id, 'onTick', store);
-            executeWorkflow(block.id, 'onComplete', store);
-            store.set(blockRuntimeAtom(block.id), (curr) => ({ ...curr, value: false }));
-            return 0;
-          }
-          executeWorkflow(block.id, 'onTick', store);
-          return next;
-        } else {
-          const next = prev + 1;
-          executeWorkflow(block.id, 'onTick', store);
-          return next;
-        }
-      });
-    }, 1000);
-
-    return () => clearInterval(intervalId);
-  }, [isRunning, mode, duration, block.id, store]);
-
-  const toggleTimer = () => {
-    const nextRunning = !isRunning;
-    store.set(blockRuntimeAtom(block.id), (curr) => ({ ...curr, value: nextRunning }));
-  };
+  /**
+   * The editor's own timer behaviour -- see lib/useTimer.ts. This was a second
+   * copy of all of it, and the Timer is the only block that acts on its own,
+   * so a divergence meant a workflow firing here and not there.
+   *
+   * No onStateChanged: a visitor pressing play must not write to somebody
+   * else's page.
+   */
+  const { seconds, isRunning, toggle: toggleTimer } = useTimer({ blockId: block.id, store });
 
   return (
     <div style={outerStyle}>
