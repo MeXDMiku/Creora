@@ -1,7 +1,7 @@
 # Where Creora stands — 19 August 2026
 
 **1,792 checks passing, `tsc` clean, working tree clean, 20 negative controls
-all behaving. Six commits, unpushed.**
+all behaving. Seven commits, unpushed.**
 
 ```
 npm run check      1,792 assertions, the real modules, no mocks
@@ -14,7 +14,7 @@ npm run control    break the code on purpose, watch the right check go red
 
 ### 1. `git push`
 
-Six commits are sitting here. Pushing from my side dies with
+Seven commits are sitting here. Pushing from my side dies with
 `HTTP 403 from proxy after CONNECT`, every time.
 
 ### 2. Run the migrations — Supabase → SQL Editor → paste → Run
