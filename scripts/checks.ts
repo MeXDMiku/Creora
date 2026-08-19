@@ -5118,6 +5118,35 @@ group('a number column with something that is not a number in it');
   // A runaway cell cannot fill the panel.
   const long = found(mk([{ id: 'a', Total: 1 }, { id: 'b', Total: 'q'.repeat(200) }]));
   check('a very long value is trimmed', long[0]?.title.length < 120, true);
+
+  /**
+   * A DATE column is checked more strictly, and can afford to be: the builder
+   * has already said what the column is, so one unreadable value is enough.
+   * No "a mixed column is a text column" escape applies.
+   */
+  const dated = (rows: any[]) => ({
+    blockIds: [DB],
+    states: { [DB]: { ...base, blockName: 'Bookings', rows, columns: [{ name: 'Due', type: 'date' }] } },
+    workflows: [], formulas: [], connections: [], pages: [{ id: 'page-1' }],
+  } as any);
+  const dateFound = (rows: any[]) =>
+    diagnosePage(dated(rows)).filter((p: any) => p.title.includes('which is not a date'));
+
+  check('A DATE COLUMN HOLDING SOMETHING ELSE IS REPORTED',
+    dateFound([{ id: 'a', Due: '2026-08-17T00:00:00.000Z' }, { id: 'b', Due: 'next tuesday' }]).length, 1);
+  check('and the value is quoted so it can be found',
+    dateFound([{ id: 'a', Due: 'next tuesday' }])[0]?.title.includes('"next tuesday"'), true);
+  check('the message says both ways it goes wrong',
+    dateFound([{ id: 'a', Due: 'soon' }])[0]?.detail.includes('sorts in the wrong place'), true);
+  check('a clean date column is not accused',
+    dateFound([{ id: 'a', Due: '2026-08-17T00:00:00.000Z' }, { id: 'b', Due: '2026-09-01T00:00:00.000Z' }]).length, 0);
+  check('a blank is a row nobody filled in',
+    dateFound([{ id: 'a', Due: '' }, { id: 'b', Due: null }]).length, 0);
+  check('ONE FINDING PER COLUMN here too', 
+    dateFound([{ id: 'a', Due: 'x' }, { id: 'b', Due: 'y' }, { id: 'c', Due: 'z' }]).length, 1);
+  check('and a text column full of the same words is never touched',
+    diagnosePage(mk([{ id: 'a', Total: 'next tuesday' }, { id: 'b', Total: 'soon' }]))
+      .filter((p: any) => p.title.includes('not a date')).length, 0);
 }
 
 

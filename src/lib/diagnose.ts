@@ -383,6 +383,58 @@ export function diagnosePage(facts: PageFacts): Problem[] {
     }
   }
 
+  /**
+   * A DATE column holding something that is not a date.
+   *
+   * Stricter than the number check above, and it can afford to be: a column
+   * DECLARED as a date should hold a readable date or nothing at all, so one
+   * bad value is enough to report. There is no "mixed column is a text column"
+   * escape here, because the builder has already said what this column is.
+   *
+   * Where it comes from is worth knowing: a column switched to Date converts
+   * what it already holds, and anything unreadable becomes blank — but a value
+   * written by a workflow goes through coerceForColumn, which also blanks it.
+   * So the loud case is data that predates the type being set. The quiet case
+   * — a visitor typing "tomorrow" into a form and having it silently dropped —
+   * is a validation problem and is recorded in the backlog rather than guessed
+   * at here.
+   */
+  for (const blockId of facts.blockIds || []) {
+    const state = facts.states[blockId] as any;
+    const rows = state?.rows;
+    if (!Array.isArray(rows) || !rows.length) continue;
+
+    for (const column of (state?.columns || []) as { name?: string; type?: string }[]) {
+      if (column?.type !== 'date') continue;
+      const name = String(column?.name ?? '');
+      if (!name) continue;
+
+      let firstBad: string | null = null;
+      for (const row of rows) {
+        const value = row?.[name];
+        if (value === null || value === undefined || value === '') continue;
+        if (isNaN(new Date(value).getTime())) {
+          firstBad = String(value);
+          // Stopping here is only an early exit. What keeps this to ONE finding
+          // per column is that the push is outside the loop -- a control that
+          // removed this `break` changed nothing, which is worth knowing before
+          // anybody trusts it to be doing that job.
+          break;
+        }
+      }
+      if (firstBad === null) continue;
+
+      const shown = firstBad.length > 30 ? firstBad.slice(0, 30) + '…' : firstBad;
+      problems.push({
+        severity: 'warning',
+        title: `"${nameOf(facts, blockId)}" has "${shown}" in its ${name} column, which is not a date`,
+        detail:
+          'That row sorts in the wrong place, and anything asking how many days away it is will refuse to run.',
+        blockId,
+      });
+    }
+  }
+
   // --- formulas referring to nothing ---
   for (const binding of facts.formulas || []) {
     if (!exists(facts, binding.targetBlockId)) {
