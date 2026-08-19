@@ -192,6 +192,65 @@ a different process with a different clock is evidence.
 were the control aimed at the wrong line, or the check overclaiming. Both are
 worth finding, and neither shows up by reading.
 
+### Rows that were never saved, and the message nobody could see
+
+1,395 checks, from 1,316. Migration **0007** written (unrun): a published form
+could be filled by a script until the Supabase project stopped working, and the
+bill would land on somebody who did nothing but publish a contact form.
+
+**But the app had to stop lying first.** `addRow` put the row on the page and
+fired the insert into the background, logging a warning if it failed. A visitor
+pressed Submit, watched their row appear, and nothing had been stored.
+
+**Counting instead of naming found six of these, not one:**
+
+| where | what was silent |
+| :--- | :--- |
+| engine `addRow` | row stayed on the page, unsaved |
+| engine `deleteRow` | row stayed *gone*, still in the database, back on next reload |
+| engine `updateRow` | its read failing meant the update **never reached the server at all** |
+| editor cell edit | typed value not stored |
+| editor add row | same as the engine's |
+| editor delete row | same as the engine's |
+
+A `console.warn` is not telling somebody. It is telling nobody.
+
+### And then: the message nothing displayed
+
+Every one of those branches set `error` on the block, **and no renderer read
+it.** The shipped-and-unreachable failure this file checks for everywhere else,
+committed by the same hand that was checking for it, in the same hour.
+
+It was not found by re-reading the diff. It was found by asking *does anything
+read this field?* — a different question from *is this code correct?*, and the
+only one that would have caught it.
+
+Both renderers show it now, because on a published page the **visitor** is the
+one whose submission was refused and the only one who can try again.
+
+### A fourth copy of the column coercion
+
+Three copies of number/boolean/else-string in the engine, none of which learned
+about `date` when the shared function did — so a workflow writing a date stored
+loose text while a table cell stored ISO. Same column, two shapes, sorting and
+`daysUntil` both wrong on half the rows. All three call `coerceForColumn` now,
+and the check **counts** them.
+
+### The hollow check, three times
+
+`includes(...)` against source is green whenever *any* occurrence survives. Each
+of these paths has two failure branches — the rejected call and the thrown one —
+and removing one left the other matching. Three separate checks were written
+this way before the pattern was named.
+
+**Counted, not matched.** And where a source check is all that is possible — the
+engine imports `supabase` directly, so there is no seam to hand it a failing
+client — the check says so in its own name.
+
+**Running total: fifteen green controls.** About half were real gaps; the rest
+were the control aimed at the wrong line, the check overclaiming, or the check
+being hollow. None of the three shows up by reading.
+
 ### Notes worth keeping
 
 - **An example printed in the UI is a promise.** The repeater panel prints a

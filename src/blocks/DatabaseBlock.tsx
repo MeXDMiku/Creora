@@ -136,6 +136,10 @@ const DatabaseBlockComponent = (props: NodeViewProps) => {
          * on screen while the message says it did not save.
          */
         if (error) reportWriteFailure(error);
+        else {
+          const ok = store.get(atomInstance);
+          if (ok?.error) store.set(atomInstance, { ...ok, error: null });
+        }
       } catch (err) {
         reportWriteFailure(err);
       }
@@ -208,6 +212,13 @@ const DatabaseBlockComponent = (props: NodeViewProps) => {
           p_block_id: blockId,
           p_row_data: defaultData
         });
+      // A stale message is its own kind of lie: the write that failed has
+      // been followed by one that worked, and the red line would still be
+      // there saying otherwise.
+      if (!error) {
+        const ok = store.get(atomInstance);
+        if (ok?.error) store.set(atomInstance, { ...ok, error: null });
+      }
       // The row comes back off the table if it was not stored, so the count
       // and the table agree with the database rather than with the click.
       if (error) {
@@ -535,6 +546,46 @@ const DatabaseBlockComponent = (props: NodeViewProps) => {
             </table>
           )}
         </div>
+
+        {/*
+          WHAT DID NOT SAVE, SAID ON THE BLOCK.
+          Without this line every "report the failure" branch in this file sets
+          a field nothing renders -- which is the shipped-and-unreachable
+          failure this project keeps catching elsewhere, committed here by the
+          same hand that was checking for it. The table showing a row and the
+          database not holding it is exactly what this exists to stop being
+          silent, so the message has to be somewhere a builder looks: on the
+          block, not in a console.
+        */}
+        {runtimeState?.error && (
+          <div
+            onPointerDown={(e) => e.stopPropagation()}
+            style={{
+              fontSize: '11px',
+              color: '#b91c1c',
+              background: '#fef2f2',
+              border: '1px solid #fecaca',
+              borderRadius: '6px',
+              padding: '6px 8px',
+              lineHeight: 1.4,
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '6px',
+            }}
+          >
+            <span style={{ flex: 1 }}>{runtimeState.error}</span>
+            <button
+              onClick={() => store.set(atomInstance, { ...store.get(atomInstance), error: null })}
+              style={{
+                border: 'none', background: 'transparent', color: '#b91c1c',
+                cursor: 'pointer', fontSize: '12px', lineHeight: 1, padding: 0,
+              }}
+              title="Dismiss"
+            >
+              &#10005;
+            </button>
+          </div>
+        )}
 
         {/* Add Row Button */}
         {columns.length > 0 && (

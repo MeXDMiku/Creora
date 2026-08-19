@@ -439,6 +439,29 @@ function PublishedDatabaseBlock({ block }: { block: ExtractedBlock }) {
           fontSize: customFontSize,
         }}
       >
+        {/*
+          The same message a builder sees in the editor, shown to a VISITOR --
+          because on a published page they are the one whose submission was
+          refused, and they are the only one who can try again. A row limit
+          reached in silence looks exactly like a form that worked.
+        */}
+        {runtimeState?.error && (
+          <div
+            style={{
+              fontSize: '11px',
+              color: '#b91c1c',
+              background: '#fef2f2',
+              border: '1px solid #fecaca',
+              borderRadius: '6px',
+              padding: '6px 8px',
+              lineHeight: 1.4,
+              marginBottom: '8px',
+            }}
+          >
+            {runtimeState.error}
+          </div>
+        )}
+
         <div style={{ overflowX: 'auto', maxHeight: '160px', overflowY: 'auto', marginBottom: '8px' }}>
           {columns.length === 0 ? (
             <div style={{ padding: '16px', textAlign: 'center', color: '#94a3b8', fontStyle: 'italic', fontSize: '12px' }}>

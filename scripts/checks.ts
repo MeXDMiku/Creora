@@ -5721,6 +5721,23 @@ group('a row that was not saved does not stay on the page');
   // nothing is being misreported.
   check('reading rows may still fall back quietly, since nothing was written',
     blockSrc.includes('[Supabase load info]'), true);
+
+  /**
+   * AND SOMETHING HAS TO RENDER IT.
+   *
+   * Every branch above sets `error` on the block — and nothing displayed it.
+   * That is the shipped-and-unreachable failure this file checks for
+   * everywhere else, committed by the same hand that was checking for it, and
+   * it took asking "does anything read this?" rather than reading the diff.
+   *
+   * Both renderers, because the visitor is the one whose submission was
+   * refused and the only one who can try again.
+   */
+  check('THE EDITOR SHOWS WHAT DID NOT SAVE', /runtimeState\?\.error && \(/.test(blockSrc), true);
+  check('AND SO DOES THE PUBLISHED PAGE',
+    /runtimeState\?\.error && \(/.test(readFileSync('src/components/PublishedRenderer.tsx', 'utf8')), true);
+  check('and a write that works clears a stale message',
+    (blockSrc.match(/if \(ok\?\.error\) store\.set\(atomInstance, \{ \.\.\.ok, error: null \}\)/g) || []).length, 2);
   check('so a workflow writing a date stores what a table cell would',
     coerceForColumn('2026-08-20', { name: 'Due', type: 'date' }),
     dateInputToIso('2026-08-20'));
