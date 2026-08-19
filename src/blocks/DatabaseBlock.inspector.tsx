@@ -2,6 +2,8 @@ import { useAtom, useSetAtom, useStore } from 'jotai';
 import { useEffect, useState } from 'react';
 import { getCollectionPrivate, setCollectionPrivate } from '../lib/collections';
 import { computeDatabaseOutput } from '../lib/databaseOutput';
+import { isoDate, COLUMN_TYPE_LABELS } from '../lib/rows';
+import type { ColumnType } from '../types/creora';
 import { blockRuntimeAtom, triggerSaveAtom, getBlockTypeDisplayName } from '../state/atoms';
 import { recalculateAllFormulas } from '../lib/bindingEngine';
 
@@ -107,7 +109,7 @@ export default function DatabaseBlockInspector({ blockId }: { blockId: string; e
       colName = `Column ${colIndex}`;
     }
 
-    const newCols = [...columns, { name: colName, type: 'text' as const }];
+    const newCols = [...columns, { name: colName, type: 'text' as ColumnType }];
     handleUpdateColumns(newCols);
   };
 
@@ -149,7 +151,7 @@ export default function DatabaseBlockInspector({ blockId }: { blockId: string; e
     recalculateAllFormulas(store);
   };
 
-  const handleChangeColumnType = (index: number, newType: 'text' | 'number' | 'boolean') => {
+  const handleChangeColumnType = (index: number, newType: ColumnType) => {
     const colName = columns[index].name;
     const newCols = columns.map((c, i) => {
       if (i === index) {
@@ -166,6 +168,11 @@ export default function DatabaseBlockInspector({ blockId }: { blockId: string; e
         val = isNaN(parsed) ? 0 : parsed;
       } else if (newType === 'boolean') {
         val = !!val;
+      } else if (newType === 'date') {
+        // Whatever was typed, read once and stored as ISO. Anything unreadable
+        // becomes blank rather than today -- see isoDate; a booking silently
+        // dated now is worse than one left empty.
+        val = isoDate(val);
       } else {
         val = String(val === undefined || val === null ? '' : val);
       }
@@ -315,9 +322,13 @@ export default function DatabaseBlockInspector({ blockId }: { blockId: string; e
                 onChange={(e) => handleChangeColumnType(idx, e.target.value as any)}
                 style={{ flex: 1.5, padding: '4px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none' }}
               >
-                <option value="text">Text</option>
-                <option value="number">Number</option>
-                <option value="boolean">Boolean</option>
+                {/*
+                  From the shared record, so adding a column type cannot leave
+                  the dropdown behind -- which would ship a type nobody can pick.
+                */}
+                {Object.entries(COLUMN_TYPE_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
               </select>
               <button
                 onClick={() => handleDeleteColumn(idx)}
@@ -379,7 +390,7 @@ export default function DatabaseBlockInspector({ blockId }: { blockId: string; e
             <option value="highest">Highest in a column</option>
             {columns.map(col => (
               <option key={col.name} value={col.name}>
-                {col.name} ({col.type === 'number' ? '#' : col.type === 'boolean' ? '?' : 'T'}) (last row)
+                {col.name} ({col.type === 'number' ? '#' : col.type === 'boolean' ? '?' : col.type === 'date' ? '\u1F4C5'.slice(0,0) + 'D' : 'T'}) (last row)
               </option>
             ))}
           </select>

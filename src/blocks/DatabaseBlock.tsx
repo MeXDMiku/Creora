@@ -1,4 +1,5 @@
 import { usePollWhileVisible } from '../hooks/usePollWhileVisible';
+import { isoToDateInput, dateInputToIso } from '../lib/rows';
 import { Node } from '@tiptap/core';
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
 import type { NodeViewProps } from '@tiptap/react';
@@ -399,6 +400,31 @@ const DatabaseBlockComponent = (props: NodeViewProps) => {
                                 const v = e.target.value === '' ? 0 : Number(e.target.value);
                                 handleCellEdit(row.id, col.name, v);
                               }}
+                              style={{
+                                width: '100%',
+                                border: 'none',
+                                background: 'transparent',
+                                padding: '2px 4px',
+                                outline: 'none',
+                                fontSize: customFontSize,
+                                color: customTextColor,
+                                boxSizing: 'border-box'
+                              }}
+                            />
+                          ) : col.type === 'date' ? (
+                            /*
+                              A real date picker rather than a text box. The
+                              input speaks only YYYY-MM-DD and shows an empty
+                              box for anything else -- silently -- so the stored
+                              ISO has to be translated both ways. Both halves
+                              live in rows.ts together, because written apart
+                              they disagreed about the timezone and a date typed
+                              near midnight came back a day earlier.
+                            */
+                            <input
+                              type="date"
+                              value={isoToDateInput(cellVal)}
+                              onChange={(e) => handleCellEdit(row.id, col.name, dateInputToIso(e.target.value))}
                               style={{
                                 width: '100%',
                                 border: 'none',

@@ -1,4 +1,5 @@
-import type { BlockRuntimeState } from '../types/creora';
+import { toDate, formatDate } from './format';
+import type { BlockRuntimeState, ColumnType } from '../types/creora';
 import { evaluateCondition } from './conditions';
 import { evaluateExpression, truthy, explainUnreadableFormula } from './formula';
 
@@ -286,7 +287,28 @@ export function coerceForColumn(value: any, column: ColumnDef | undefined): any 
   if (!column) return value;
   if (column.type === 'number') return Number(value);
   if (column.type === 'boolean') return value === 'true' || value === true;
+  if (column.type === 'date') return isoDate(value);
   return String(value === undefined || value === null ? '' : value);
+}
+
+/**
+ * A date column's stored shape: ISO text, or empty.
+ *
+ * WHY ISO AND NOT A DATE OBJECT
+ * Rows are JSON in a jsonb column and go through a save, a load, a CSV export
+ * and an import. A Date survives none of those. ISO survives all of them, sorts
+ * correctly as plain TEXT -- which is what makes a date column sort right for
+ * free, with no special case anywhere in the sorting -- and is what every date
+ * function in the formula language already reads.
+ *
+ * SOMETHING UNREADABLE BECOMES EMPTY, NOT TODAY. A date nobody can read is a
+ * field that was not filled in; quietly substituting the current date would
+ * write a booking for now, which is worse than a blank in every direction.
+ */
+export function isoDate(value: any): string {
+  if (value === null || value === undefined || String(value).trim() === '') return '';
+  const d = toDate(value);
+  return d ? d.toISOString() : '';
 }
 
 /**
@@ -494,3 +516,78 @@ export function shareExampleFor(
   const col = numeric[0];
   return `{{calc: ${col} / sumOf("${table}", "${col}") * 100 | round: 1}}%`;
 }
+
+/**
+ * A date column, both ways round, for a `<input type="date">`.
+ *
+ * The input speaks exactly one dialect -- YYYY-MM-DD, LOCAL, no time -- and
+ * refuses to display anything else, silently and with no error. Stored dates
+ * are ISO with a time and a zone on them, so handing one straight to the input
+ * shows an empty box over a row that plainly has a date in it.
+ *
+ * The two halves are here together on purpose. They were written apart the
+ * first time and disagreed about the timezone: reading used UTC and writing
+ * used local, so a date typed near midnight came back a day earlier, and only
+ * for people west of Greenwich.
+ */
+export function isoToDateInput(value: any): string {
+  const d = toDate(value);
+  if (!d) return '';
+  // Local parts, not toISOString(): a booking on the 17th typed in Delhi is on
+  // the 17th, and UTC would show it as the 16th for half the day.
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+export function dateInputToIso(value: string): string {
+  const text = String(value ?? '').trim();
+  if (!text) return '';
+  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (!parts) return isoDate(text);
+  // Built local, to match the reader above. new Date("2026-08-17") would be
+  // parsed as UTC midnight and land on the 16th in half the world.
+  const d = new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]));
+  return isNaN(d.getTime()) ? '' : d.toISOString();
+}
+
+/**
+ * A cell as a VISITOR should read it.
+ *
+ * WHY THIS IS A SHARED FUNCTION AND NOT AN `if` IN A RENDERER
+ * It was an `if` in a renderer, and that renderer is the published one -- the
+ * half of this codebase that has drifted from the editor five times. A date
+ * column arrived and the published table showed
+ * `2026-08-17T00:00:00.000Z` to a visitor, because the only branch it knew
+ * about was boolean. Sixth time.
+ *
+ * The switch is exhaustive over ColumnType on purpose: `Record<ColumnType, ...>`
+ * elsewhere makes an omission a compile error, and here the `satisfies` on the
+ * table below does the same job -- adding a seventh column type will not
+ * compile until this function has an opinion about it.
+ */
+export function displayCell(value: any, type: string | undefined): string {
+  if (type === 'boolean') return value ? 'Yes' : 'No';
+  if (value === undefined || value === null || value === '') return '';
+  if (type === 'date') {
+    const d = toDate(value);
+    // An unreadable date is shown as it was stored rather than as nothing: a
+    // visitor seeing the raw text can at least report what is on the page.
+    return d ? formatDate(d, 'D MMM YYYY') : String(value);
+  }
+  return String(value);
+}
+
+/**
+ * Every column type, and what it is called in a dropdown.
+ *
+ * Written as a full Record so that adding a type is a compile error everywhere
+ * that has to have an opinion about it, rather than a silent fall-through to
+ * "treat it as text" -- which is exactly how a date column ended up rendering
+ * as an ISO timestamp on a published page.
+ */
+export const COLUMN_TYPE_LABELS: Record<ColumnType, string> = {
+  text: 'Text',
+  number: 'Number',
+  boolean: 'Boolean',
+  date: 'Date',
+};

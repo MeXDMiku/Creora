@@ -51,7 +51,7 @@ import { fillSlots, leadingSlotName, findSlots as findSlotsForCheck } from '../s
 import { slotValuesFrom } from '../src/lib/useSlotValues';
 import { slotNameOf, slotNameForNodeType } from '../src/state/atoms';
 import { interpretSave, shouldKeepAutosaving, PageStamps } from '../src/lib/savePage';
-import { visibleRows, rowSlots, compareCells, slotNamesFor, rowMatchesSearch, MAX_RENDERED_ROWS, rowIndexesForStep, coerceForColumn, rowMatchesFormula, columnsUsedByFormula, calcExampleFor, calcExampleWithFilter, shareExampleFor } from '../src/lib/rows';
+import { visibleRows, rowSlots, compareCells, slotNamesFor, rowMatchesSearch, MAX_RENDERED_ROWS, rowIndexesForStep, coerceForColumn, rowMatchesFormula, columnsUsedByFormula, calcExampleFor, calcExampleWithFilter, shareExampleFor, isoDate, isoToDateInput, dateInputToIso, displayCell, COLUMN_TYPE_LABELS } from '../src/lib/rows';
 import {
   parseSlot,
   applyFilters,
@@ -5234,6 +5234,137 @@ group('a formula can ask a question about a date');
     helpSrc.includes('DATE_FUNCTION_NAMES'), true);
   check('and shows the one sentence anybody actually wants',
     helpSrc.includes('daysUntil(Due)'), true);
+}
+
+
+// ------------------------------------------------------ a date column
+group('a column can hold a date');
+{
+  /**
+   * The sweep after date arithmetic, and the finding it produced: the functions
+   * were shipped against data the product could not store. A booking's date was
+   * a TEXT column, so it sorted alphabetically -- "17 Aug" before "2 Sep" --
+   * and every formula reading it depended on whoever typed it happening to
+   * choose a shape the parser understood.
+   */
+  check('a date is stored as ISO, whatever was typed',
+    isoDate('17 Aug 2026').startsWith('2026-08-1'), true);
+  check('and an ISO string survives the trip unchanged in meaning',
+    isoDate('2026-08-17T00:00:00.000Z'), '2026-08-17T00:00:00.000Z');
+  check('a blank stays blank', isoDate(''), '');
+  check('and so does nothing at all', [isoDate(null), isoDate(undefined)], ['', '']);
+  check('SOMETHING UNREADABLE BECOMES EMPTY, NOT TODAY',
+    isoDate('sometime next week'), '');
+
+  check('coerceForColumn routes a date column through it',
+    coerceForColumn('17 Aug 2026', { name: 'Due', type: 'date' }).startsWith('2026-08-1'), true);
+  check('and leaves the other types alone',
+    [coerceForColumn('5', { name: 'n', type: 'number' }),
+     coerceForColumn('true', { name: 'b', type: 'boolean' }),
+     coerceForColumn(5, { name: 't', type: 'text' })],
+    [5, true, '5']);
+
+  /**
+   * ISO SORTS CORRECTLY AS PLAIN TEXT, which is the whole reason for choosing
+   * it: a date column sorts right with no special case anywhere in the sorting.
+   */
+  const dates = ['2026-09-02T00:00:00.000Z', '2026-08-17T00:00:00.000Z', '2026-08-09T00:00:00.000Z'];
+  check('A DATE COLUMN SORTS CHRONOLOGICALLY WITH NO SPECIAL CASE',
+    [...dates].sort(compareCells),
+    ['2026-08-09T00:00:00.000Z', '2026-08-17T00:00:00.000Z', '2026-09-02T00:00:00.000Z']);
+  /**
+   * And the same dates as TEXT, which is what a booking date was until now.
+   * The sort is numeric-aware, so it reads the leading number and puts 2 Sep
+   * before 17 Aug -- September before August. The guess when writing this check
+   * was that it would sort "17" first alphabetically; it does something else
+   * wrong. Either way it is not chronological, and pinning the ACTUAL wrong
+   * order is the point: it is what a builder saw.
+   */
+  check('WHICH IS WHAT A TEXT COLUMN GOT WRONG: September sorted before August',
+    ['2 Sep 2026', '17 Aug 2026'].sort(compareCells), ['2 Sep 2026', '17 Aug 2026']);
+
+  /**
+   * The date input speaks one dialect -- YYYY-MM-DD, LOCAL, no time -- and
+   * shows an empty box for anything else, silently. Both halves of the
+   * translation are checked together because written apart they disagreed
+   * about the timezone, and a date typed near midnight came back a day early.
+   */
+  const iso = dateInputToIso('2026-08-17');
+  check('what the picker gives is stored as ISO', iso.length > 0, true);
+  check('and comes back as the same day', isoToDateInput(iso), '2026-08-17');
+
+  /**
+   * THE TIMEZONE HALF CANNOT BE CHECKED BY BEHAVIOUR HERE, and pretending
+   * otherwise would be worse than saying so.
+   *
+   * This runner's clock is UTC, so local time and UTC are the same number and
+   * a wrong implementation gives identical answers. A control proved it:
+   * swapping the reader to `toISOString().slice(0, 10)` -- which loses a day
+   * for everyone east of Greenwich, including this project's own author --
+   * broke nothing at all.
+   *
+   * So the DECISION is checked instead of the behaviour, at the source, and
+   * this comment is the honest label on it. A behavioural check would need the
+   * suite re-run under a forced TZ, which is worth doing the day anything else
+   * needs it too.
+   */
+  const rowsSrc = readFileSync('src/lib/rows.ts', 'utf8');
+  check('THE DATE INPUT IS READ IN LOCAL PARTS, NOT UTC (source check — see comment)',
+    /getFullYear\(\)[\s\S]{0,120}getMonth\(\)[\s\S]{0,60}getDate\(\)/.test(rowsSrc), true);
+  check('and written back from local parts too, which is the half that has to match',
+    /new Date\(Number\(parts\[1\]\), Number\(parts\[2\]\) - 1, Number\(parts\[3\]\)\)/.test(rowsSrc), true);
+  check('neither half reaches for toISOString to build the picker value',
+    /isoToDateInput[\s\S]{0,400}toISOString\(\)\.slice/.test(rowsSrc), false);
+  check('a stored date with a time on it still fills the picker',
+    isoToDateInput('2026-08-17T23:30:00'), '2026-08-17');
+  check('an empty picker stores nothing', dateInputToIso(''), '');
+  check('and an empty store shows an empty picker', isoToDateInput(''), '');
+  check('a round trip is stable, however many times it goes round',
+    isoToDateInput(dateInputToIso(isoToDateInput(dateInputToIso('2026-01-01')))), '2026-01-01');
+  check('the last day of a year does not roll over', isoToDateInput(dateInputToIso('2026-12-31')), '2026-12-31');
+  check('nor the first', isoToDateInput(dateInputToIso('2026-01-01')), '2026-01-01');
+
+  /**
+   * And the point of the whole exercise: the date functions read a stored date
+   * without anybody having to think about its shape.
+   */
+  const stored = dateInputToIso('2026-08-20');
+  check('THE FORMULA LANGUAGE READS A STORED DATE DIRECTLY',
+    evaluateExpression('daysUntil(Due)', { Due: stored }, undefined, { now: new Date(2026, 7, 17, 14, 0) }),
+    3);
+  check('and a repeater can filter on one',
+    rowMatchesFormula({ Due: stored }, '{{Due}} != ""').pass, true);
+
+  const dbSrc = readFileSync('src/blocks/DatabaseBlock.tsx', 'utf8');
+  check('the table gives a real date picker, not a text box',
+    dbSrc.includes('type="date"'), true);
+  const inspSrc = readFileSync('src/blocks/DatabaseBlock.inspector.tsx', 'utf8');
+  check('and the column type can actually be chosen',
+    inspSrc.includes('COLUMN_TYPE_LABELS'), true);
+  check('every type has a name a person can read',
+    Object.keys(COLUMN_TYPE_LABELS).sort(), ['boolean', 'date', 'number', 'text']);
+
+  /**
+   * SIXTH DRIFT. The published table decided for itself how to show a cell, and
+   * the only branch it knew about was boolean -- so a date column showed a
+   * visitor "2026-08-17T00:00:00.000Z". Both renderers now ask the same
+   * function.
+   */
+  check('A DATE IS READABLE TO A VISITOR, NOT AN ISO TIMESTAMP',
+    displayCell('2026-08-17T00:00:00.000Z', 'date'), '17 Aug 2026');
+  check('a boolean still reads as a word', [displayCell(true, 'boolean'), displayCell(false, 'boolean')], ['Yes', 'No']);
+  check('an empty cell is empty, not "No"', displayCell('', 'text'), '');
+  check('and an empty date column is empty too', displayCell('', 'date'), '');
+  check('a number is itself', displayCell(42, 'number'), '42');
+  check('AN UNREADABLE DATE IS SHOWN AS STORED, so a visitor can report what they see',
+    displayCell('not a date', 'date'), 'not a date');
+  check('a column with no declared type is text', displayCell('hello', undefined), 'hello');
+
+  const pubSrc = readFileSync('src/components/PublishedRenderer.tsx', 'utf8');
+  check('THE PUBLISHED TABLE NO LONGER HAS ITS OWN OPINION',
+    pubSrc.includes('displayCell(cellVal, col.type)'), true);
+  check('and does not still carry the old branch beside it',
+    /col\.type === 'boolean'\s*\)?\s*display/.test(pubSrc), false);
 }
 
 say(`\n${passed} passed, ${failed} failed`);

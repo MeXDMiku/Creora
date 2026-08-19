@@ -1,4 +1,5 @@
 import { withoutVisitorState, isBlockNodeType } from '../lib/blockRegistry';
+import { displayCell } from '../lib/rows';
 import { usePollWhileVisible } from '../hooks/usePollWhileVisible';
 import { useValueChangeAnimation } from '../hooks/useValueChangeAnimation';
 import { useEffect, useState, useRef, useMemo } from 'react';
@@ -459,10 +460,15 @@ function PublishedDatabaseBlock({ block }: { block: ExtractedBlock }) {
                   <tr key={row.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
                     {columns.map((col: any) => {
                       const cellVal = row[col.name];
-                      let display: string;
-                      if (col.type === 'boolean') display = cellVal ? 'Yes' : 'No';
-                      else if (cellVal === undefined || cellVal === null) display = '';
-                      else display = String(cellVal);
+                      /*
+                        Shared with the editor rather than decided here. This
+                        branch knew only about booleans, so when a date column
+                        arrived a visitor was shown
+                        "2026-08-17T00:00:00.000Z" -- the sixth time this
+                        renderer has drifted from the editor by having its own
+                        opinion about something.
+                      */
+                      const display = displayCell(cellVal, col.type);
                       return (
                         <td
                           key={col.name}

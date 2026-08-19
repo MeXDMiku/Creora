@@ -200,7 +200,7 @@ export interface BlockProps {
   defaultValue?: any;
   trackedBlockId?: string;
   history?: number[];
-  columns?: { name: string; type: 'text' | 'number' | 'boolean' }[];
+  columns?: { name: string; type: ColumnType }[];
   rows?: { id: string; [key: string]: any }[];
   outputMode?: string;
   targetPageId?: string;
@@ -276,7 +276,7 @@ export interface BlockRuntimeState {
   autoStart?: boolean;
   trackedBlockId?: string;
   history?: number[];
-  columns?: { name: string; type: 'text' | 'number' | 'boolean' }[];
+  columns?: { name: string; type: ColumnType }[];
   rows?: { id: string; [key: string]: any }[];
   outputMode?: string;
   /** Which column sum / average / lowest / highest works on. */
@@ -413,10 +413,27 @@ export interface BlockRuntimeState {
   targetParams?: string;
 }
 
+/**
+ * What a column holds.
+ *
+ * `date` arrived last, after the formula language learned to ask questions
+ * about dates -- daysUntil, isBefore, "three days left". Those functions were
+ * shipped against data the product could not store: a booking's date was a TEXT
+ * column, so it sorted alphabetically ("17 Aug" before "2 Sep") and every
+ * formula reading it depended on whoever typed it choosing a shape the parser
+ * happened to understand.
+ *
+ * A date column stores ISO text. Not a Date object -- rows are JSON in a jsonb
+ * column and go through a save, a load, a CSV export and an import, and a Date
+ * survives none of those. ISO survives all of them, sorts correctly as plain
+ * text, and is what every date function here already reads.
+ */
+export type ColumnType = 'text' | 'number' | 'boolean' | 'date';
+
 export interface DatabaseField {
   id: string;
   name: string;
-  type: 'text' | 'number' | 'boolean';
+  type: ColumnType;
 }
 
 export interface DatabaseRow {
