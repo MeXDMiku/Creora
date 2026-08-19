@@ -1,4 +1,5 @@
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
+import { chartBars } from '../lib/chartBars';
 import type { NodeViewProps } from '@tiptap/react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { blockRuntimeAtom, contextMenuAtom, getBlockTypeDisplayName } from '../state/atoms';
@@ -101,54 +102,31 @@ const HistoryChartBlockComponent = (props: NodeViewProps) => {
       );
     }
 
-    const maxVal = Math.max(...history, 1);
-    const minVal = Math.min(...history, 0);
-    const range = maxVal - minVal === 0 ? 1 : maxVal - minVal;
-
-    const barPadding = 2;
-    const numBars = history.length;
-    const barWidth = (svgWidth - (numBars - 1) * barPadding) / numBars;
-
-    // Baseline calculation: where 0 is located inside the graph height
-    // If minVal < 0, baseline sits in the middle. If minVal >= 0, baseline sits at the bottom.
-    const baselineY = svgHeight - ((0 - minVal) / range) * svgHeight;
-
-    return history.map((val, idx) => {
-      let barHeight = (Math.abs(val) / range) * (svgHeight - 2 * padding);
-      // Give a tiny 2px height so 0 values are visible as a line
-      if (barHeight < 2) {
-        barHeight = 2;
-      }
-
-      let yPos = baselineY - barHeight;
-      if (val < 0) {
-        yPos = baselineY;
-      }
-
-      const xPos = idx * (barWidth + barPadding);
-
-      return (
-        <rect
-          key={idx}
-          x={xPos}
-          y={yPos}
-          width={barWidth}
-          height={barHeight}
-          rx={1}
-          ry={1}
-          fill={val >= 0 ? '#6366f1' : '#f43f5e'}
-          style={{ transition: 'all 0.2s', opacity: 0.85 }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.opacity = '1';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.opacity = '0.85';
-          }}
-        >
-          <title>{`Val: ${val}`}</title>
-        </rect>
-      );
-    });
+    // The geometry is decided in lib/chartBars.ts, which both renderers share.
+    // It was forty lines of arithmetic written out twice, and a geometry
+    // difference is a chart that is subtly wrong in one of them -- the kind
+    // nobody notices, because a bar an eighth too tall still reads as data.
+    return chartBars(history, { width: svgWidth, height: svgHeight, padding }).map((bar, idx) => (
+      <rect
+        key={idx}
+        x={bar.x}
+        y={bar.y}
+        width={bar.width}
+        height={bar.height}
+        rx={1}
+        ry={1}
+        fill={bar.negative ? '#f43f5e' : '#6366f1'}
+        style={{ transition: 'all 0.2s', opacity: 0.85 }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.opacity = '1';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.opacity = '0.85';
+        }}
+      >
+        <title>{`Val: ${history[idx]}`}</title>
+      </rect>
+    ));
   }, [history, trackedBlockId]);
 
   return (

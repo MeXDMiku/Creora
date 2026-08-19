@@ -53,6 +53,7 @@ import { slotValuesFrom } from '../src/lib/useSlotValues';
 import { slotNameOf, slotNameForNodeType } from '../src/state/atoms';
 import { interpretSave, shouldKeepAutosaving, PageStamps } from '../src/lib/savePage';
 import { describeRowWriteError, withoutRow } from '../src/lib/rowWrite';
+import { chartBars, MIN_BAR_HEIGHT } from '../src/lib/chartBars';
 import { visibleRows, rowSlots, compareCells, slotNamesFor, rowMatchesSearch, MAX_RENDERED_ROWS, rowIndexesForStep, coerceForColumn, rowMatchesFormula, columnsUsedByFormula, calcExampleFor, calcExampleWithFilter, shareExampleFor, isoDate, isoToDateInput, dateInputToIso, displayCell, COLUMN_TYPE_LABELS, listRowLines, listIsEmpty } from '../src/lib/rows';
 import {
   parseSlot,
@@ -5858,6 +5859,74 @@ group('the List block is drawn once, not twice');
   check('and a boolean reads like a word', displayCell(true, 'boolean'), 'Yes');
   check('a column the tracked table does not declare still reads as text',
     displayCell('anything', undefined), 'anything');
+}
+
+
+group('the history chart is measured once, and measured honestly');
+{
+  /**
+   * EIGHTH DRIFT. Forty lines of arithmetic written out twice, once in the
+   * editor's block and once in the published renderer -- and arithmetic is the
+   * worst thing to keep in two places. A rendering difference is visible; a
+   * geometry difference is a chart that is subtly wrong in one of them, which
+   * nobody notices, because a bar an eighth too tall still reads as data.
+   *
+   * It was also entirely unchecked in both.
+   */
+  const box = { width: 100, height: 50, padding: 4 };
+
+  check('no history, no bars', chartBars([], box), []);
+  check('and nothing at all is not a crash', chartBars(undefined, box), []);
+  check('one value fills the width', chartBars([5], box)[0].width, 100);
+  check('bars share the width, with a gap between them',
+    chartBars([1, 2, 3], box).map(b => Math.round(b.width * 100) / 100),
+    [32, 32, 32]);
+  check('and they are laid out left to right',
+    chartBars([1, 2, 3], box).map(b => Math.round(b.x)), [0, 34, 68]);
+
+  /**
+   * ZERO IS ALWAYS IN RANGE. Without it a chart of 100, 101, 102 draws as a
+   * full-height cliff and reads as a tripling -- the classic way to make a
+   * chart lie without writing a single wrong number.
+   */
+  const flat = chartBars([100, 101, 102], box);
+  check('A NEARLY FLAT SERIES DRAWS AS NEARLY FLAT, not as a cliff',
+    Math.max(...flat.map(b => b.height)) - Math.min(...flat.map(b => b.height)) < 2,
+    true);
+  check('and the tallest bar is close to full height, since 102 is near the top',
+    flat[2].height > 35, true);
+
+  /**
+   * A bar is never thinner than 2px, so a zero is a visible line. "No bar" and
+   * "a bar of zero" mean different things.
+   */
+  check('A ZERO IS STILL A LINE, not nothing at all', chartBars([0, 10], box)[0].height, MIN_BAR_HEIGHT);
+  check('and it sits on the baseline', chartBars([0, 10], box)[0].y <= box.height, true);
+
+  /**
+   * Negatives hang BELOW the baseline. Flipping them up would draw a fall as a
+   * rise, which is worse than not drawing it at all.
+   */
+  const mixed = chartBars([10, -10], box);
+  check('a fall is marked as a fall', mixed.map(b => b.negative), [false, true]);
+  check('AND IT HANGS BELOW WHERE THE RISE STARTS, rather than being flipped up',
+    mixed[1].y > mixed[0].y, true);
+  check('every bar stays inside the box',
+    chartBars([10, -10, 3], box).every(b => b.y >= -1 && b.y + b.height <= box.height + 1), true);
+
+  check('a value that is not a number is left out rather than drawn as NaN',
+    chartBars([1, NaN as any, Infinity as any, 2], box).length, 2);
+
+  /**
+   * And both renderers ask for it rather than working it out.
+   */
+  const chartSrc = readFileSync('src/blocks/HistoryChartBlock.tsx', 'utf8');
+  const pubChartSrc = readFileSync('src/components/PublishedRenderer.tsx', 'utf8');
+  check('the editor asks for the geometry', chartSrc.includes('chartBars(history'), true);
+  check('AND SO DOES THE PUBLISHED PAGE', pubChartSrc.includes('chartBars(history'), true);
+  check('NEITHER STILL WORKS IT OUT ITSELF',
+    /const baselineY = /.test(chartSrc + pubChartSrc), false);
+  check('nor keeps half of it', /const barPadding = /.test(chartSrc + pubChartSrc), false);
 }
 
 say(`\n${passed} passed, ${failed} failed`);

@@ -14,6 +14,7 @@ import { computeDatabaseOutput } from '../lib/databaseOutput';
 import { CustomHtmlView } from '../blocks/CustomHtmlBlock';
 import { RepeatView } from '../blocks/RepeatBlock';
 import { ListRowsView } from '../blocks/ListBlock';
+import { chartBars } from '../lib/chartBars';
 import { FieldView, FieldError } from '../blocks/FieldView';
 import { refreshPageValue, buildParamsFromTemplate } from '../lib/pageValue';
 import { parseParams } from '../lib/pageParams';
@@ -976,51 +977,31 @@ function RenderedBlock({ block }: { block: ExtractedBlock }) {
         </text>
       );
     } else {
-      const maxVal = Math.max(...history, 1);
-      const minVal = Math.min(...history, 0);
-      const range = maxVal - minVal === 0 ? 1 : maxVal - minVal;
-
-      const barPadding = 2;
-      const numBars = history.length;
-      const barWidth = (svgWidth - (numBars - 1) * barPadding) / numBars;
-
-      const baselineY = svgHeight - ((0 - minVal) / range) * svgHeight;
-
-      chartContent = history.map((val: number, idx: number) => {
-        let barHeight = (Math.abs(val) / range) * (svgHeight - 2 * padding);
-        if (barHeight < 2) {
-          barHeight = 2;
-        }
-
-        let yPos = baselineY - barHeight;
-        if (val < 0) {
-          yPos = baselineY;
-        }
-
-        const xPos = idx * (barWidth + barPadding);
-
-        return (
-          <rect
-            key={idx}
-            x={xPos}
-            y={yPos}
-            width={barWidth}
-            height={barHeight}
-            rx={1}
-            ry={1}
-            fill={val >= 0 ? '#6366f1' : '#f43f5e'}
-            style={{ transition: 'all 0.2s', opacity: 0.85 }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.opacity = '1';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.opacity = '0.85';
-            }}
-          >
-            <title>{`Val: ${val}`}</title>
-          </rect>
-        );
-      });
+      // Shared geometry -- see lib/chartBars.ts. This was a second copy of the
+      // same forty lines of arithmetic, and a chart drawn to different maths in
+      // the editor and on the published page is wrong in the way nobody
+      // notices.
+      chartContent = chartBars(history, { width: svgWidth, height: svgHeight, padding }).map((bar, idx) => (
+        <rect
+          key={idx}
+          x={bar.x}
+          y={bar.y}
+          width={bar.width}
+          height={bar.height}
+          rx={1}
+          ry={1}
+          fill={bar.negative ? '#f43f5e' : '#6366f1'}
+          style={{ transition: 'all 0.2s', opacity: 0.85 }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.opacity = '1';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.opacity = '0.85';
+          }}
+        >
+          <title>{`Val: ${history[idx]}`}</title>
+        </rect>
+      ));
     }
 
     return (
