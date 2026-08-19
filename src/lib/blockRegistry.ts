@@ -299,6 +299,19 @@ export function withoutVisitorState<T extends Record<string, any>>(
   delete next.validationError;
   delete next.fetchError;
   delete next.uploadError;
+  /**
+   * `error` too, and it was missed until row-writes started using it.
+   *
+   * It holds "this did not save", "that formula could not be worked out" --
+   * things that were true for a moment on one person's screen. Saved into the
+   * page they become permanent: a network blip while the builder was working
+   * gets written into the blob and served to every visitor afterwards, with
+   * nothing to clear it, because nothing re-runs the thing that set it.
+   *
+   * Exactly the shape of the `dsad` bug described below -- a value that was
+   * true in the editor for a second, published for months.
+   */
+  delete next.error;
   next.loading = false;
 
   /**

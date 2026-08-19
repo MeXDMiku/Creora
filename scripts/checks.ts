@@ -5743,5 +5743,39 @@ group('a row that was not saved does not stay on the page');
     dateInputToIso('2026-08-20'));
 }
 
+
+group('a moment’s error is not saved into the page');
+{
+  /**
+   * `error` holds "this did not save" and "that formula could not be worked
+   * out" -- true for a moment, on one person's screen. Saved into the page it
+   * becomes permanent: a network blip while the builder was working gets
+   * written into the blob and served to every visitor afterwards, with nothing
+   * to clear it because nothing re-runs the thing that set it.
+   *
+   * The same shape as the bug that published `dsad` and `321dsa` on a live
+   * feedback form for months. Missed until row-writes started using the field.
+   */
+  const transient = {
+    value: 5,
+    blockName: 'Orders',
+    error: 'Could not reach the server, so this was not saved.',
+    validationError: 'Name is required',
+    touched: true,
+    loading: true,
+    fetchError: 'nope',
+    uploadError: 'nope',
+    rows: [{ id: 'r1' }],
+  };
+  const saved = withoutVisitorState(transient as any, 'databaseBlock');
+
+  check('A FAILURE MESSAGE IS NOT WRITTEN INTO THE PAGE', 'error' in saved, false);
+  check('and neither are the others that were already stripped',
+    ['validationError', 'touched', 'fetchError', 'uploadError'].some(k => k in saved), false);
+  check('loading is reset rather than removed, as it always was', saved.loading, false);
+  check('and the things that ARE the page survive',
+    [saved.value, saved.blockName, (saved as any).rows.length], [5, 'Orders', 1]);
+}
+
 say(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
