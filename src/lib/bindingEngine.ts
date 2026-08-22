@@ -670,6 +670,9 @@ export function executeWorkflow(
             which: step.which,
             applyToAll: step.applyToAll,
             tables: tableScope(store),
+            // The blocks on the page by name, so a match can say "belonging to
+            // me" -- which is most of what a row-changing step is ever for.
+            pageValues: blockValuesByName({ get: (a: any) => store.get(a) }),
           });
           if (matched.error) {
             /**
@@ -873,6 +876,9 @@ export function executeWorkflow(
             which: step.which,
             applyToAll: step.applyToAll,
             tables: tableScope(store),
+            // The blocks on the page by name, so a match can say "belonging to
+            // me" -- which is most of what a row-changing step is ever for.
+            pageValues: blockValuesByName({ get: (a: any) => store.get(a) }),
           });
           if (matched.error) {
             /**

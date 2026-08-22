@@ -44,6 +44,26 @@ export function slotValuesFrom(byName: Record<string, any>, slots: string[]): Re
   return out;
 }
 
+/**
+ * EVERY block's value, by the name printed on it.
+ *
+ * Different from useSlotValues on purpose. That one is asked for a LIST of
+ * names and deliberately leaves out the ones no block owns, so `{{today}}` can
+ * fall through to a built-in. A formula cannot be asked for its list in
+ * advance -- the names it uses are inside a condition, which is a string that
+ * has not been parsed yet -- so this hands over the lot and lets the expression
+ * engine pick.
+ *
+ * Read through an atom for the same reason useTableScope is: a value changing
+ * in another block has to move this list, or a filter reading "and me" would
+ * keep answering with whoever was signed in when the page last rendered. A
+ * stale answer is worse than a missing one, because it looks like an answer.
+ */
+export function useAllBlockValues(): Record<string, any> {
+  const valuesAtom = useMemo(() => atom((get) => blockValuesByName({ get })), []);
+  return useAtomValue(valuesAtom);
+}
+
 export function useSlotValues(slots: string[]): Record<string, any> {
   // Joined on a character a name cannot contain. It used to be a space,
   // which quietly broke every slot whose name had one in it -- {{Row number}},

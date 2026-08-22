@@ -273,6 +273,17 @@ export interface TableData {
 export type TableScope = Record<string, TableData>;
 
 /**
+ * How many table questions may be open at once.
+ *
+ * Two is what a real site needs -- "the author of the post this repost
+ * repeats" is a lookup inside a lookup -- and each level runs once per row of
+ * the level outside it, so three is rows cubed. The limit is a promise about
+ * how slow a page can get, not a limit on what can be asked: the answer to a
+ * deeper question belongs in a column.
+ */
+export const MAX_QUESTION_DEPTH = 2;
+
+/**
  * The functions that read a whole table.
  *
  * WHY THESE EXIST
@@ -477,8 +488,36 @@ function rowsWhere(
   where: string | null,
   options?: EvaluateOptions,
   outer?: Record<string, any>,
+  tables?: TableScope,
+  depth = 0,
 ): Record<string, any>[] {
   if (!where || !where.trim()) return rows;
+  /**
+   * HOW DEEP A QUESTION MAY GO, and why there is a limit at all.
+   *
+   * A condition can now ask about another table, which is what makes two hops
+   * sayable -- "the author of the post this repost repeats":
+   *
+   *     joinOf("Users", "Name",
+   *       '{{Row id}} == joinOf("Posts", "AuthorId", "{{Row id}} == RepostOfId")')
+   *
+   * The inner question runs once per row of the outer one, so two levels is
+   * rows x rows and three is rows cubed. Nothing recurses for ever -- the depth
+   * is fixed by the text somebody typed -- but a page that takes nine seconds
+   * to draw is broken in the way that matters, and it would be blamed on the
+   * data rather than on the sentence. So it stops, and says which sentence.
+   */
+  // `depth` counts the questions already open around this one, so the first
+  // level arrives as 0 and MAX_QUESTION_DEPTH is a count of LEVELS, not of
+  // nestings. Written as >= for that reason, and there is a check that asks for
+  // exactly one level too many.
+  if (depth >= MAX_QUESTION_DEPTH) {
+    throw new Error(
+      `A question inside a question inside a question — ${MAX_QUESTION_DEPTH + 1} levels deep. ` +
+      'Each level runs once per row of the one outside it, so this would be slow enough to look broken. ' +
+      'Store the answer in a column instead.',
+    );
+  }
   return rows.filter(row => {
     /**
      * TWO SCOPES, AND WHICH ONE A NAME MEANS IS DECIDED BY HOW IT IS SPELLED.
@@ -509,9 +548,22 @@ function rowsWhere(
      * `Status` and get the right answer.
      */
     const bound = bindSlots(where, name => (name === 'Row id' ? row?.id : row?.[name]), outer);
-    // The clock reaches a table's filter too, so
-    // countOf("Bookings", '{{Due}} > today') means what it reads as.
-    return truthy(evaluateExpression(bound.expression, bound.scope, undefined, options));
+    /**
+     * THE TABLES GO IN TOO, which they did not before.
+     *
+     * They were withheld and the refusal read "Tables cannot be read from here
+     * — countOf and sumOf work in a formula or a condition, not in page
+     * markup", which was doubly wrong: this IS a condition, and the sentence
+     * blamed the wrong place. What it actually blocked was every question that
+     * needs two hops, which on a site with users and posts is most of them.
+     *
+     * The clock goes in for the same reason it always did, so
+     * countOf("Bookings", '{{Due}} > today') means what it reads as.
+     */
+    return truthy(evaluateExpression(bound.expression, bound.scope, tables, {
+      ...(options || {}),
+      depth: depth + 1,
+    }));
   });
 }
 
@@ -612,11 +664,11 @@ function callTableFunction(
 
   if (name === 'countOf') {
     if (args.length > 2) throw new Error('countOf takes a table and, if you want, a condition');
-    return rowsWhere(table.rows, asWhere(args[1]), options, outer).length;
+    return rowsWhere(table.rows, asWhere(args[1]), options, outer, tables, options?.depth ?? 0).length;
   }
 
   const column = columnNamed(table, asName(args[1], 'a column name'));
-  const kept = rowsWhere(table.rows, asWhere(args[2]), options, outer);
+  const kept = rowsWhere(table.rows, asWhere(args[2]), options, outer, tables, options?.depth ?? 0);
 
   switch (name) {
     case 'sumOf':
@@ -792,6 +844,14 @@ export interface EvaluateOptions {
    * own, and a check that cannot pin them cannot check them.
    */
   now?: Date;
+  /**
+   * How many table questions are already open around this one.
+   *
+   * Carried rather than counted, because the nesting happens through a string:
+   * a condition is text until the moment it is run, so there is no call stack
+   * to look at. See MAX_QUESTION_DEPTH and rowsWhere.
+   */
+  depth?: number;
 }
 
 export function evaluateExpression(
@@ -909,7 +969,7 @@ export function evaluateExpression(
          */
         const called = node.callee?.name;
         if (typeof called === 'string' && called in TABLE_FUNCTIONS) {
-          return callTableFunction(called, node.arguments || [], walk, tables, { now: clock() }, scope);
+          return callTableFunction(called, node.arguments || [], walk, tables, { now: clock(), depth: options?.depth ?? 0 }, scope);
         }
         if (typeof called === 'string' && called in DATE_FUNCTIONS) {
           return DATE_FUNCTIONS[called](node.arguments.map(walk), clock());

@@ -72,6 +72,13 @@ export interface ViewSpec {
    * count of rows in a DIFFERENT table.
    */
   tables?: TableScope;
+  /**
+   * The blocks on this page by name, so a filter or a sort can mention one:
+   * "posts by people I follow", "rows belonging to me", "cheaper than the
+   * number in that box". Without it a list can only be filtered by constants
+   * and by its own columns, which rules out most of what a real site does.
+   */
+  pageValues?: Record<string, any>;
   /** Passed through so `{{Due}} > today` means today and not the epoch. */
   now?: Date;
   /** 1-based. Out of range is clamped, never empty. */
@@ -136,6 +143,7 @@ function passesFilter(row: Row, spec: ViewSpec, index: number, report?: (e: stri
     const answer = rowMatchesFormula(row, spec.filterFormula, {
       rowNumber: index + 1,
       tables: spec.tables,
+      pageValues: spec.pageValues,
       now: spec.now,
     });
     // The error used to be worked out here and DROPPED. A filter nobody can
@@ -239,6 +247,7 @@ export function visibleRows(rows: Row[] | undefined | null, spec: ViewSpec = {})
       const answer = rowFormulaValue(row, sortFormula, {
         rowNumber: i + 1,
         tables: spec.tables,
+        pageValues: spec.pageValues,
         now: spec.now,
       });
       if (answer.error) report(answer.error);
@@ -481,6 +490,8 @@ export interface RowStepMatch {
   /** What `which` used to be. `which` wins when both are set. */
   applyToAll?: boolean;
   tables?: TableScope;
+  /** The blocks on the page, by name, so a match can say "belonging to me". */
+  pageValues?: Record<string, any>;
   now?: Date;
 }
 
@@ -523,6 +534,7 @@ export function rowIndexesForStep(
       const answer = rowFormulaValue(row, formula, {
         rowNumber: index + 1,
         tables: match.tables,
+        pageValues: match.pageValues,
         now: match.now,
       });
       if (answer.error) {
@@ -585,6 +597,14 @@ export interface RowFormulaOptions {
   rowNumber?: number;
   /** The other tables, so a row formula can ask about them. */
   tables?: TableScope;
+  /**
+   * The blocks on the page, by name -- so a filter can say "and me".
+   *
+   * Supplied by the caller rather than read here, because reading it needs a
+   * store and this file is pure on purpose: every decision in it can be run by
+   * `npm run check` without React.
+   */
+  pageValues?: Record<string, any>;
   now?: Date;
 }
 
@@ -620,22 +640,45 @@ export function rowFormulaValue(
 
   const rowIdOf = options.rowIdOf ?? ((r: Record<string, any>) => r?.id);
   /**
-   * WHAT A BARE NAME CAN REACH, and why it is only these two.
+   * WHAT A BARE NAME CAN REACH.
    *
-   * The columns are deliberately NOT here. A bare `Price` still fails with
-   * "use {{Price}}", which is the sentence that teaches the syntax -- putting
-   * the columns in scope would make the wrong spelling silently work and the
-   * two spellings mean subtly different things.
+   * Three layers, outermost first, each winning over the one before it -- the
+   * same order and the same rule as a repeater's markup, so there is one thing
+   * to learn rather than one per box:
    *
-   * `RowId` and `RowNumber` are here because a relation needs them and neither
-   * is a column name:
+   *   1. the blocks on the page, by the name printed on them
+   *   2. this row's own columns
+   *   3. `RowId` and `RowNumber`
    *
-   *     avgOf("Reviews", "Rating", '{{ClassId}} == RowId')
+   * WHY THE PAGE IS HERE, WHICH WAS THE WHOLE OF THE PROBLEM
+   * Almost every list on a real site is filtered by WHO IS LOOKING -- a home
+   * feed, a cart, "my orders", "people I do not follow yet". Written the
+   * obvious way:
    *
-   * They are spelled the same as the repeater's own slots offer them, so there
-   * is one spelling to learn rather than one per place.
+   *     countOf("Follows", '{{FollowerId}} == Me and {{FollowingId}} == AuthorId')
+   *
+   * both `Me` and `AuthorId` are bare names reaching outward, and neither could
+   * be reached. The answer came back "there is no block called Me" about a
+   * block sitting on the page, and the list quietly showed everything.
+   *
+   * WHY THE COLUMNS ARE HERE, HAVING BEEN DELIBERATELY LEFT OUT
+   * They were left out so a bare `Price` would fail with "use {{Price}}", which
+   * teaches the syntax. But inside a CONDITION the two spellings genuinely mean
+   * different rows -- `{{AuthorId}}` is the row being tested and `AuthorId` is
+   * the row doing the asking -- and there was no way to say the second one at
+   * all. Writing `{{AuthorId}}` there is the obvious guess and it silently
+   * matches NOTHING: an empty list with no error, which is the worst answer
+   * this project knows how to give.
+   *
+   * The teaching survives where it matters. A misspelling reaches none of the
+   * three layers and still says so.
    */
-  const outer: Record<string, any> = { RowId: rowIdOf(row) ?? '' };
+  const outer: Record<string, any> = { ...(options.pageValues || {}) };
+  for (const key of Object.keys(row || {})) {
+    if (key === 'id') continue; // reachable as RowId, so a column called id can win
+    outer[key] = row[key];
+  }
+  outer.RowId = rowIdOf(row) ?? '';
   if (typeof options.rowNumber === 'number') outer.RowNumber = options.rowNumber;
 
   const bound = bindSlots(

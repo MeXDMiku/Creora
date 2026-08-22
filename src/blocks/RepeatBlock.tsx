@@ -17,6 +17,7 @@ import { useBlockDrag } from '../hooks/useBlockDrag';
 import { blockToCSS } from '../lib/renderBlockStyles';
 import { sanitizeHtml, findSlots, fillSlots } from '../lib/sanitizeHtml';
 import { useTableScope } from '../lib/useTableScope';
+import { useAllBlockValues } from '../lib/useSlotValues';
 import { useSlotValues } from '../lib/useSlotValues';
 import { useDatabaseRows } from '../hooks/useDatabaseRows';
 import { visibleRows, rowSlots } from '../lib/rows';
@@ -119,6 +120,16 @@ export function RepeatView({
    * another table too -- "hide the full ones" is a count of rows somewhere else.
    */
   const tables = useTableScope();
+  /**
+   * The blocks on the page by name, so a filter or a sort can mention one.
+   *
+   * "Posts by people I follow", "rows belonging to me", "cheaper than that
+   * box" -- almost every list on a real site is filtered by something OUTSIDE
+   * the row, and a filter could only see constants and its own columns. The
+   * answer to writing `and Me` was "there is no block called Me", about a block
+   * sitting on the same page.
+   */
+  const namedValues = useAllBlockValues();
 
   const view = useMemo(
     () =>
@@ -135,6 +146,7 @@ export function RepeatView({
         sortFormula: state?.sortFormula,
         sortDirection,
         tables,
+        pageValues: namedValues,
         page,
         pageSize: state?.pageSize,
         maxRows: state?.maxRows,
@@ -151,6 +163,7 @@ export function RepeatView({
       state?.sortFormula,
       sortDirection,
       tables,
+      namedValues,
       page,
       state?.pageSize,
       state?.maxRows,

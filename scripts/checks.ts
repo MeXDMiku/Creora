@@ -4031,12 +4031,29 @@ group('a repeater can filter rows with a formula');
   check('and so does a half-typed one', keep('{{Price}} >'), ['r1', 'r2', 'r3']);
 
   /**
-   * "Referenced block Price does not exist" would send somebody looking for a
-   * block. The message has to name the thing they can act on.
+   * A BARE COLUMN NAME WORKS NOW, AND USED TO BE A TEACHING ERROR.
+   *
+   * It said "Use {{Price}} to mean a column", which was a good message for the
+   * wrong rule. The two spellings had to stop being different the moment a
+   * CONDITION needed to name the row doing the asking:
+   *
+   *     countOf("Follows", '{{FollowingId}} == AuthorId')
+   *
+   * `{{FollowingId}}` is the follow being tested; `AuthorId` is the post doing
+   * the asking. There was no way to say the second one, and writing
+   * `{{AuthorId}}` there matches NOTHING and reports no error at all — an empty
+   * list with nothing to explain it, which is the worst answer available.
+   *
+   * So a bare name reaches outward: the page, then this row, then RowId. Same
+   * order and same rule as the markup next to it. See rowFormulaValue.
    */
-  const bare = rowMatchesFormula(rows[0], 'Price > 100');
-  check('a bare column name is explained, not just refused', bare.error?.includes('Use {{Price}} to mean a column'), true);
-  check('and the row is kept while it is wrong', bare.pass, true);
+  check('A BARE COLUMN NAME MEANS THIS ROW’S COLUMN', rowMatchesFormula(rows[0], 'Price > 100').pass,
+    rowMatchesFormula(rows[0], '{{Price}} > 100').pass);
+  check('and it is not an error any more', rowMatchesFormula(rows[0], 'Price > 100').error, null);
+  const misspelt = rowMatchesFormula(rows[0], 'Prcie > 100');
+  check('A MISSPELLING STILL SAYS SO, which is what the message was for',
+    (misspelt.error || '').includes('Prcie'), true);
+  check('and the row is kept while it is wrong', misspelt.pass, true);
 
   check('which columns a formula uses', columnsUsedByFormula('{{Price}} * {{Qty}} > {{Price}}'), ['Price', 'Qty']);
   check('none when there are none', columnsUsedByFormula('1 > 2'), []);
@@ -4422,10 +4439,11 @@ group('a formula written in the wrong spelling says which one');
   check('and a real comparison can still be false',
     rowMatchesFormula({ Price: 6 }, '{{Price}} > 100').pass, false);
 
-  // A bare name in a row filter already had its own message and keeps it.
-  const bare = rowMatchesFormula({ Price: 600 }, 'Price > 100');
-  check('a bare name in a row filter still says to use braces',
-    (bare.error || '').includes('{{Price}}'), true);
+  // A bare name that reaches NOTHING still gets the message. A bare name that
+  // reaches a column is now simply the column -- see the group above for why.
+  const bare = rowMatchesFormula({ Price: 600 }, 'Prcie > 100');
+  check('a bare name reaching nothing still says to use braces',
+    (bare.error || '').includes('{{Prcie}}'), true);
 
   // The rule on its own, both directions.
   check('braces with a filter, in a place that takes braces',
@@ -7303,10 +7321,13 @@ group('a list can be filtered and ordered by something worked out');
   const brokenFilter = visibleRows(CLASSES, { filterFormula: '{{Capacity}} >' });
   check('A BROKEN FILTER KEEPS EVERY ROW', brokenFilter.rows.length, 3);
   check('AND SAYS SO, which it did not before', !!brokenFilter.formulaError, true);
-  const brokenSort = visibleRows(CLASSES, { sortFormula: 'Capacity > 1' });
+  const brokenSort = visibleRows(CLASSES, { sortFormula: 'Capcity > 1' });
   check('a broken sort leaves the order alone', titles(brokenSort), ['Wheel throwing', 'Hand-building', 'Glazing']);
   check('and explains the spelling, since that is the likely cause',
-    String(brokenSort.formulaError).includes('{{Capacity}}'), true);
+    String(brokenSort.formulaError).includes('{{Capcity}}'), true);
+  check('while the correctly spelled bare name simply works',
+    titles(visibleRows(CLASSES, { sortFormula: 'Capacity', sortDirection: 'desc' })),
+    ['Wheel throwing', 'Glazing', 'Hand-building']);
   check('only the first complaint, not one per row',
     (brokenFilter.formulaError || '').split('\n').length, 1);
 
@@ -7385,6 +7406,124 @@ group('a list can be filtered and ordered by something worked out');
       workflows: [],
     } as any).some(p => p.title.includes('filters on a column called "Prcie"')),
     true);
+}
+
+
+group('a list can be filtered by who is looking');
+{
+  /**
+   * FOUND BY BUILDING A SECOND SITE. See docs/BUILT_TWO_TO_FIND_OUT.md.
+   *
+   * A working social app -- feed, replies, likes, reposts, follows, profiles,
+   * notifications, search. Four tables and THREE OF THEM ARE JOIN TABLES: a
+   * like is a pair, a follow is a pair of the SAME table twice, and a reply is
+   * a post pointing at a post.
+   *
+   * Twenty of its questions were put to the engine by RUNNING them. Fourteen
+   * already worked, out of the relation work. The six that did not were nearly
+   * all one thing, and it is the mirror of the last one:
+   *
+   *     A LIST'S FILTER COULD NOT SEE THE PAGE IT WAS STANDING ON.
+   *
+   * `countOf("Follows", '{{FollowerId}} == Me')` answered "there is no block
+   * called Me", about a block on the same page. Every list on a real site is
+   * filtered by who is looking -- a home feed, a cart, "my orders", "people I
+   * do not follow yet" -- and none of them were sayable.
+   *
+   * Worse, the obvious repair is a trap. Writing `{{Me}}` compares the tested
+   * row against a column it does not have: that matches NOTHING and reports NO
+   * ERROR. An empty list with nothing to explain it.
+   */
+  const XUSERS = [
+    { id: 'u1', Handle: 'maya', Name: 'Maya Okonkwo' },
+    { id: 'u2', Handle: 'tomas', Name: 'Tomas Reid' },
+    { id: 'u4', Handle: 'ada', Name: 'Ada L' },
+  ];
+  const XPOSTS = [
+    { id: 'p1', AuthorId: 'u1', Body: 'eleven cylinders #pottery', ReplyToId: '', RepostOfId: '' },
+    { id: 'p3', AuthorId: 'u4', Body: 'first class tonight #pottery', ReplyToId: '', RepostOfId: '' },
+    { id: 'p5', AuthorId: 'u9', Body: 'clay does not care', ReplyToId: '', RepostOfId: '' },
+    { id: 'p4', AuthorId: 'u1', Body: 'You will be fine.', ReplyToId: 'p3', RepostOfId: '' },
+    { id: 'p10', AuthorId: 'u2', Body: '', ReplyToId: '', RepostOfId: 'p3' },
+  ];
+  const XFOLLOWS = [
+    { id: 'f1', FollowerId: 'u4', FollowingId: 'u1' },
+    { id: 'f2', FollowerId: 'u4', FollowingId: 'u2' },
+  ];
+  const XLIKES = [
+    { id: 'k1', PostId: 'p1', UserId: 'u4' },
+    { id: 'k2', PostId: 'p1', UserId: 'u2' },
+    { id: 'k3', PostId: 'p3', UserId: 'u1' },
+  ];
+  const xtables = {
+    Users: { rows: XUSERS, columns: ['Handle', 'Name'] },
+    Posts: { rows: XPOSTS, columns: ['AuthorId', 'Body', 'ReplyToId', 'RepostOfId'] },
+    Follows: { rows: XFOLLOWS, columns: ['FollowerId', 'FollowingId'] },
+    Likes: { rows: XLIKES, columns: ['PostId', 'UserId'] },
+  };
+  // What a Visitor block and a search box on the page are worth.
+  const xpage = { Me: 'u4', SearchBox: 'pottery' };
+  const xids = (r: any) => r.rows.map((x: any) => x.id);
+  const xlist = (rows: any[], spec: any) => visibleRows(rows, { ...spec, tables: xtables, pageValues: xpage });
+  const FEED = `{{ReplyToId}} == "" and (AuthorId == Me or countOf("Follows", '{{FollowerId}} == Me and {{FollowingId}} == AuthorId') > 0)`;
+  const NOTFOLLOWED = `RowId != Me and countOf("Follows", '{{FollowerId}} == Me and {{FollowingId}} == RowId') == 0`;
+
+  const feed = xlist(XPOSTS, { filterFormula: FEED });
+  check('THE HOME FEED: posts by people I follow, plus my own, without replies',
+    xids(feed), ['p1', 'p3', 'p10']);
+  check('and it did not merely fail open, which is what a broken filter does',
+    feed.formulaError, null);
+  check('SOMEBODY ELSE GETS A DIFFERENT FEED, which is the whole point',
+    xids(visibleRows(XPOSTS, { tables: xtables, pageValues: { Me: 'u1' }, filterFormula: FEED })), ['p1']);
+
+  check('WHO TO FOLLOW: people I do not follow and am not',
+    xids(xlist(XUSERS, { filterFormula: NOTFOLLOWED })), []);
+  check('and for somebody who follows nobody, everyone else',
+    xids(visibleRows(XUSERS, { tables: xtables, pageValues: { Me: 'u2' }, filterFormula: NOTFOLLOWED })), ['u1', 'u4']);
+
+  check('MY LIKES: rows joined to me through a table of pairs',
+    xids(xlist(XPOSTS, { filterFormula: `countOf("Likes", '{{PostId}} == RowId and {{UserId}} == Me') > 0` })), ['p1']);
+
+  check('A SEARCH BOX ON THE PAGE FILTERS THE LIST',
+    xids(xlist(XPOSTS, { filterFormula: `SearchBox == "" or contains({{Body}}, SearchBox)` })), ['p1', 'p3']);
+  check('and an empty box shows everything rather than nothing',
+    xids(visibleRows(XPOSTS, { tables: xtables, pageValues: { SearchBox: '' }, filterFormula: `SearchBox == "" or contains({{Body}}, SearchBox)` })).length, 5);
+
+  check('AND A SORT CAN SEE THE PAGE TOO',
+    xids(xlist(XPOSTS, { sortFormula: `countOf("Likes", '{{PostId}} == RowId and {{UserId}} == Me')`, sortDirection: 'desc' }))[0], 'p1');
+
+  /**
+   * THE THREE LAYERS AND WHICH WINS: the page, then this row, then RowId --
+   * outermost first, each beating the one before it. The same order as the
+   * markup beside it, so there is one rule and not one per box.
+   */
+  check('A ROW OWN COLUMN BEATS A BLOCK WITH THE SAME NAME',
+    visibleRows([{ id: 'r1', Me: 'the column' }], { tables: xtables, pageValues: { Me: 'the block' }, filterFormula: `Me == "the column"` }).rows.length, 1);
+  check('and a block is what a name means when no column has it',
+    visibleRows([{ id: 'r1', Other: 1 }], { tables: xtables, pageValues: { Me: 'the block' }, filterFormula: `Me == "the block"` }).rows.length, 1);
+  check('a name in neither is still an error somebody can act on',
+    (visibleRows([{ id: 'r1' }], { tables: xtables, pageValues: xpage, filterFormula: `Nonsense == 1` }).formulaError || '').includes('Nonsense'), true);
+
+  /**
+   * THE OTHER HALF: a condition can reach another table now, so a question can
+   * take two hops. It used to be refused with a message naming the wrong place
+   * entirely -- "not in page markup", said inside a condition.
+   */
+  const xcard = (row: any, f: string) => ran(() => evaluateExpression(f, { ...rowSlots(row as any, 0), ...xpage }, xtables));
+  check('TWO HOPS: the author of the post this repost repeats',
+    xcard(XPOSTS[4], `joinOf("Users", "Name", '{{Row id}} == joinOf("Posts", "AuthorId", "{{Row id}} == RepostOfId")')`), 'Ada L');
+  check('one hop still works, unchanged',
+    xcard(XPOSTS[0], `joinOf("Users", "Name", '{{Row id}} == AuthorId')`), 'Maya Okonkwo');
+
+  /**
+   * AND IT STOPS. Each level runs once per row of the level outside it, so
+   * three levels is rows cubed. Nothing recurses for ever -- the depth is fixed
+   * by the text somebody typed -- but a page that takes nine seconds to draw is
+   * broken in the way that matters, and would be blamed on the data.
+   */
+  const TOODEEP = `countOf("Posts", 'countOf("Posts", "countOf(\\'Users\\', \\'{{Row id}} == RowId\\') > 0") > 0')`;
+  check('THREE LEVELS REFUSES RATHER THAN CRAWLING', String(xcard(XPOSTS[4], TOODEEP)).includes('3 levels deep'), true);
+  check('and says what to do instead of only refusing', String(xcard(XPOSTS[4], TOODEEP)).includes('Store the answer in a column'), true);
 }
 
 
@@ -7725,7 +7864,7 @@ group('a slot can contain a slot');
  * Raise it in the same commit that adds the checks, the way the drift budget
  * above is raised: a number changed where it can be seen in a diff.
  */
-const EXPECTED_CHECKS = 1792;
+const EXPECTED_CHECKS = 1811;
 reachedTheEnd = true;
 if (passed + failed !== EXPECTED_CHECKS) {
   failed++;
