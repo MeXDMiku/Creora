@@ -30,6 +30,7 @@ import { guessMappings, whyItCannotWork, draftFromWorkflow, defaultWireDraft } f
 import { wireSentence } from './lib/wireWords'
 import { PlacementControls } from './components/PlacementControls'
 import { HealthPanel } from './components/HealthPanel'
+import { QuestionsPanel } from './components/QuestionsPanel'
 import { WireOverlay } from './components/WireOverlay'
 import { supabase } from './lib/supabase'
 import { ensureSession } from './lib/session'
@@ -1865,6 +1866,7 @@ function App() {
   const [canvasMode, setCanvasMode] = useAtom(canvasModeAtom)
   const [editingBreakpoint, setEditingBreakpoint] = useAtom(editingBreakpointAtom)
   const [showHealth, setShowHealth] = useState(false)
+  const [showQuestions, setShowQuestions] = useState(false)
   const [zoom, setZoom] = useAtom(canvasZoomAtom)
 
   const activePageIdRef = useRef(PAGE_ID)
@@ -3986,6 +3988,24 @@ function App() {
           </div>
 
           <button
+            onClick={() => setShowQuestions((v: boolean) => !v)}
+            title="Ask something of this page's tables, and use the answer like a table"
+            style={{
+              padding: '6px 12px',
+              marginLeft: '8px',
+              border: '1px solid #cbd5e1',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '13px',
+              fontWeight: 600,
+              background: showQuestions ? '#475569' : '#ffffff',
+              color: showQuestions ? '#ffffff' : '#475569',
+            }}
+          >
+            ? Questions
+          </button>
+
+          <button
             onClick={() => setShowHealth((v: boolean) => !v)}
             title="What this page is, and what on it cannot work"
             style={{
@@ -4380,6 +4400,7 @@ function App() {
       {!isPreviewMode && <Inspector editor={editor} />}
       {showRuns && <RunsPanel onClose={() => setShowRuns(false)} />}
       {showHealth && <HealthPanel onClose={() => setShowHealth(false)} />}
+      {showQuestions && <QuestionsPanel onClose={() => setShowQuestions(false)} />}
     </div>
   )
 }

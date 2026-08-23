@@ -377,6 +377,15 @@ So the rule is stronger than "foreground":
 
 > **A control run must not outlive the single call that started it.**
 
+It happened a third time the same afternoon, by a route that is not even a
+mistake: **the bridge to the working copy dropped mid-run.** `if (at !== -1)`
+was left as `if (false)` in `queries.ts`, and four checks about circular
+questions went red twenty minutes later. Nothing was done wrong — the network
+went away. So the rule is not really about backgrounding at all:
+
+> **After every control run, the first thing is `npm run check`. If it is not
+> green, `git diff src/` before thinking about anything else.**
+
 Each control re-runs the whole suite (~3s), so all 57 take about three minutes —
 longer than one call to the tools that reach this repo. **Run them in
 name-filtered chunks that each finish inside one call**, and confirm the tree is

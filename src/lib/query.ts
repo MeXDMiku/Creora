@@ -130,7 +130,16 @@ export function runQuery(
   tables: TableScope | undefined,
   page?: Record<string, any>,
 ): Record<string, any>[] {
-  const known = Object.keys(tables || {});
+  /**
+   * The names to offer back when one is wrong.
+   *
+   * IDS ARE LEFT OUT ON PURPOSE, the same as tableNamed in formula.ts. The
+   * panel showed a builder `There is: Submissions, databaseBlock__x0zomnlfbm`,
+   * which is noise in the one sentence that has to be readable — and the
+   * decision had already been made once, three files away, so this was a copy
+   * of the rule that had drifted rather than a new question.
+   */
+  const known = Object.keys(tables || {}).filter(name => !name.includes('__'));
   const sources: QuerySource[] = Array.isArray(def.from)
     ? def.from
     : [{ table: String(def.from ?? ''), where: def.where, as: def.as }];
@@ -246,6 +255,12 @@ export function runQuery(
   return skip ? rows.slice(skip) : rows;
 }
 
+/** Whether this question names any table at all yet. */
+export function hasATable(def: QueryDef): boolean {
+  const sources = Array.isArray(def?.from) ? def.from : [{ table: String(def?.from ?? '') }];
+  return sources.some(src => String(src?.table ?? '').trim().length > 0);
+}
+
 export interface QueryPreview {
   rows: Record<string, any>[];
   columns: string[];
@@ -273,6 +288,17 @@ export function previewQuery(
   limit = 8,
 ): QueryPreview {
   const sentence = describeQuery(def);
+  /**
+   * A QUESTION WITH NO TABLE IS NOT ASKED WRONGLY, IT IS NOT ASKED YET.
+   *
+   * Found the first time the panel was opened: pressing "Ask something" put a
+   * red box on screen before the builder had done anything, saying
+   * `There is no table called ""`. That is the tool blaming somebody for not
+   * having finished a sentence they just started, and it is exactly the
+   * "vague errors" complaint these tools collect. The sentence beside the
+   * boxes already says the useful thing — "Pick a table to ask about."
+   */
+  if (!hasATable(def)) return { rows: [], columns: [], sentence, error: null };
   try {
     const rows = runQuery(def, tables, page);
     const shown = rows.slice(0, limit);

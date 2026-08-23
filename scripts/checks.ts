@@ -55,7 +55,7 @@ import { interpretSave, shouldKeepAutosaving, PageStamps } from '../src/lib/save
 import { describeRowWriteError, withoutRow } from '../src/lib/rowWrite';
 import { ruleAllows, ruleToSql, rulesToMigration, ruleWarnings } from '../src/lib/rules';
 import { runQuery, applyKeep, previewQuery, describeQuery } from '../src/lib/query';
-import { resolveQueries, queryDependsOn, queriesMentioning, describeNamedQuery, columnsOf, pageNamesIn } from '../src/lib/queries';
+import { resolveQueries, queryDependsOn, queriesMentioning, describeNamedQuery, columnsOf, pageNamesIn, parseKeep, keepAsLine } from '../src/lib/queries';
 import { chartBars, MIN_BAR_HEIGHT } from '../src/lib/chartBars';
 import { timerStep, timerResetValue } from '../src/lib/useTimer';
 import { duplicatedRuns, duplicatedLineCount } from './rendererDrift';
@@ -7778,7 +7778,27 @@ group('a question keeps its answer, and the page reads it like a table');
   check('THE RESOLVER NEVER THROWS, whatever it is handed',
     ran(() => Object.keys(resolve(base as any, [
       q('a', 'X', null as any), q('b', 'Y', { from: 'Sales', keep: { n: 'nonsense' } }),
-    ]).errors).length), 2);
+    ]).errors)), ['b']);
+  /**
+   * A HALF-WRITTEN QUESTION IS NOT A BROKEN ONE.
+   *
+   * Found by opening the panel for the first time: pressing "Ask something"
+   * put a red box on screen before the builder had typed anything, saying
+   * `There is no table called ""`. Telling somebody off for not having
+   * finished a sentence they just started is the "vague errors" complaint
+   * these tools collect, delivered before they even begin.
+   */
+  check('A QUESTION WITH NO TABLE IS NOT ASKED WRONGLY, IT IS NOT ASKED YET',
+    resolve(base as any, [q('a', 'Later', { from: '' })]).errors, {});
+  check('and it is not a table either, since there is nothing in it',
+    Object.keys(resolve(base as any, [q('a', 'Later', { from: '' })]).tables).includes('Later'), false);
+  check('nor does its preview complain',
+    previewQuery({ from: '' }, base as any).error, null);
+  check('while the sentence beside it still says what to do',
+    describeNamedQuery(q('a', 'Later', { from: '' }) as any), 'Later is not asked yet — pick a table to ask about.');
+  check('AND THE LIST OF TABLES OFFERED BACK LEAVES OUT IDS, which are noise in the one sentence that must read',
+    ran(() => runQuery({ from: 'Nope' }, { Sales: { rows: [], columns: [] }, databaseBlock__x1: { rows: [], columns: [] } } as any)),
+    'threw: There is no table called "Nope". There is: Sales.');
 
   // --- a question about who is looking ------------------------------------
   const mine = resolve(base as any, [
@@ -7872,6 +7892,50 @@ group('a question keeps its answer, and the page reads it like a table');
     columnsOf([{ id: '1', a: 1 }, { id: '2', b: 2 }]), ['a', 'b']);
   check('AND AN EMPTY ANSWER DECLARES NO COLUMNS, so columnNamed does not guess at a typo',
     columnsOf([]), []);
+}
+
+group('the box a builder fills in');
+{
+  /**
+   * The panel is mostly markup, and markup is not what this file checks. Two
+   * things in it are not markup: the one line of parsing it does, and whether
+   * it is REACHABLE. The second is the one that ships broken — a primitive
+   * that works perfectly and has no way in is the same as a missing primitive,
+   * and nothing else in this file would notice.
+   */
+  check('KEEP IS WRITTEN AS ONE LINE, because two boxes per value is a form nobody fills in',
+    parseKeep('taken = sum of {{Pence}}, sold = count'),
+    { taken: 'sum of {{Pence}}', sold: 'count' });
+  check('spacing does not matter', parseKeep('a=count,b = count'), { a: 'count', b: 'count' });
+  check('a part with no = is dropped rather than guessed at', parseKeep('count'), {});
+  check('and an equals inside the value survives',
+    parseKeep('same = {{A}} == {{B}}'), { same: '{{A}} == {{B}}' });
+  check('an empty box is no kept values, not a broken one', parseKeep(''), {});
+  check('a trailing comma does not invent a nameless one', parseKeep('a = count,'), { a: 'count' });
+  check('and it writes back out the way it was typed in, so the box shows what was said',
+    keepAsLine(parseKeep('taken = sum of {{Pence}}, sold = count')), 'taken = sum of {{Pence}}, sold = count');
+
+  const panel = readFileSync('src/components/QuestionsPanel.tsx', 'utf8');
+  const app = readFileSync('src/App.tsx', 'utf8');
+  /**
+   * FOUND BY A CONTROL COMING BACK GREEN. This check used to be
+   * `app.includes('<QuestionsPanel')`, which stays true when the panel is
+   * rendered behind `{false && ...}` — the exact way a feature gets switched
+   * off. It tested that the NAME was in the file. Both halves of the gate now
+   * have to be there, spelled the way they are actually wired.
+   */
+  check('THE PANEL IS REACHABLE — a primitive with no way in is a missing primitive',
+    app.includes('{showQuestions && <QuestionsPanel')
+      && app.includes('setShowQuestions((v: boolean) => !v)'), true);
+  check('and it previews what came out, which is the one feature these tools are judged on',
+    panel.includes('previewQuery('), true);
+  check('through the same tables the page will use, not a second copy of the rule',
+    panel.includes('rawTableScope(') && panel.includes('formulaScope('), true);
+  check('and it reads back as a sentence', panel.includes('describeNamedQuery('), true);
+  check('a bad name is refused in the panel, by the same rule the resolver uses',
+    panel.includes('queryNameProblem('), true);
+  check('AND IT SAYS WHEN AN ANSWER DEPENDS ON WHO IS LOOKING, since an empty list is not an error',
+    panel.includes('pageNamesIn('), true);
 }
 
 group('who may do what, said once, enforced at the store');
@@ -8649,7 +8713,7 @@ group('a slot can contain a slot');
  * Raise it in the same commit that adds the checks, the way the drift budget
  * above is raised: a number changed where it can be seen in a diff.
  */
-const EXPECTED_CHECKS = 1986;
+const EXPECTED_CHECKS = 2004;
 reachedTheEnd = true;
 if (passed + failed !== EXPECTED_CHECKS) {
   failed++;

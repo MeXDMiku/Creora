@@ -460,6 +460,41 @@ const CONTROLS = [
     with: `    void row; // control: no columns`,
     expect: ['THE COLUMNS IT INVENTED'],
   },
+  {
+    name: 'panel: keep stops parsing what a builder types',
+    file: 'src/lib/queries.ts',
+    find: `    if (name) out[name] = part.slice(at + 1).trim();`,
+    with: `    void name; // control: nothing kept`,
+    expect: ['KEEP IS WRITTEN AS ONE LINE'],
+  },
+  {
+    name: 'panel: a part with no equals is guessed at instead of dropped',
+    file: 'src/lib/queries.ts',
+    find: `    if (at === -1) continue;`,
+    with: `    if (at === -1) { out[part.trim()] = part.trim(); continue; }`,
+    expect: ['a part with no = is dropped rather than guessed at'],
+  },
+  {
+    name: 'panel: the way in is removed',
+    file: 'src/App.tsx',
+    find: `      {showQuestions && <QuestionsPanel onClose={() => setShowQuestions(false)} />}`,
+    with: `      {false && <QuestionsPanel onClose={() => setShowQuestions(false)} />}`,
+    expect: ['THE PANEL IS REACHABLE'],
+  },
+  {
+    name: 'panel: it stops showing what came out',
+    file: 'src/components/QuestionsPanel.tsx',
+    find: `        const preview = previewQuery(q.def, { ...tables }, page, 8)`,
+    with: `        const preview = { rows: [], columns: [], sentence: '', error: null } // control`,
+    expect: ['it previews what came out'],
+  },
+  {
+    name: 'panel: it stops saying an answer depends on who is looking',
+    file: 'src/components/QuestionsPanel.tsx',
+    find: `        const wants = pageNamesIn(q.def).filter(n => !(n in page))`,
+    with: `        const wants = [] // control`,
+    expect: ['SAYS WHEN AN ANSWER DEPENDS ON WHO IS LOOKING'],
+  },
 ];
 
 /**

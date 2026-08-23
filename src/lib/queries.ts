@@ -39,7 +39,7 @@
  *             `resolveQueries` never throws; each failure is attached to the
  *             query that caused it and every other query still runs.
  */
-import { runQuery, describeQuery, type QueryDef } from './query';
+import { runQuery, describeQuery, hasATable, type QueryDef } from './query';
 import { slotNamesIn, type TableScope, type TableData } from './formula';
 
 export interface NamedQuery {
@@ -180,10 +180,11 @@ export function resolveQueries(
     if (errors[q.id]) return;
 
     // 3. Ask it. A failure is attached to this query and nothing else stops.
+    // A half-written question is not a broken one. It simply is not a table
+    // yet, so it does not become one and nobody is told off for it.
+    if (!q.def || typeof q.def !== 'object' || !hasATable(q.def)) return;
+
     try {
-      if (!q.def || typeof q.def !== 'object') {
-        throw new Error('this question has nothing in it yet');
-      }
       const rows = runQuery(q.def, tables, page);
       tables[q.name] = { rows, columns: columnsOf(rows) };
       done.add(q.name);
@@ -225,6 +226,9 @@ export function columnsOf(rows: Record<string, any>[]): string[] {
  */
 export function describeNamedQuery(q: NamedQuery): string {
   const name = String(q?.name ?? '').trim() || 'This question';
+  // "Question is Pick a table to ask about." is two sentences wearing one
+  // sentence's clothes. Said properly, it is the only instruction needed.
+  if (!hasATable(q?.def || ({} as QueryDef))) return `${name} is not asked yet — pick a table to ask about.`;
   return `${name} is ${describeQuery(q?.def || ({} as QueryDef))}`;
 }
 
@@ -259,6 +263,34 @@ export function pageNamesIn(def: QueryDef): string[] {
   const names = new Set<string>();
   for (const text of texts) for (const n of slotNamesIn(text)) names.add(n);
   return [...names];
+}
+
+/**
+ * `taken = sum of {{Pence}}, sold = count` as one line, and back again.
+ *
+ * IN THIS FILE AND NOT IN THE PANEL because the check suite cannot import a
+ * .tsx — which sounds like a tooling detail and is really the right answer
+ * anyway: this is the vocabulary of a query, not a detail of one screen. It
+ * lived in the panel for about ten minutes and could not be checked there.
+ *
+ * One line rather than two boxes per kept value, because a table of inputs is
+ * a form nobody fills in. A part with no `=` is DROPPED rather than guessed
+ * at: guessing here would silently keep something the builder did not ask for.
+ */
+export function parseKeep(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const part of String(text || '').split(',')) {
+    const at = part.indexOf('=');
+    if (at === -1) continue;
+    const name = part.slice(0, at).trim();
+    if (name) out[name] = part.slice(at + 1).trim();
+  }
+  return out;
+}
+
+/** The same thing written back out, so the box shows what was typed into it. */
+export function keepAsLine(keep: Record<string, string> | undefined): string {
+  return Object.entries(keep || {}).map(([name, phrase]) => `${name} = ${phrase}`).join(', ');
 }
 
 export type { TableData };
