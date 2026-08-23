@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { getCollectionPrivate, setCollectionPrivate } from '../lib/collections';
 import { computeDatabaseOutput } from '../lib/databaseOutput';
 import { isoDate, COLUMN_TYPE_LABELS } from '../lib/rows';
+import { rulesToMigration, ruleWarnings, RULE_OPERATIONS } from '../lib/rules';
 import type { ColumnType } from '../types/creora';
 import { blockRuntimeAtom, triggerSaveAtom, getBlockTypeDisplayName } from '../state/atoms';
 import { recalculateAllFormulas } from '../lib/bindingEngine';
@@ -30,6 +31,7 @@ export default function DatabaseBlockInspector({ blockId }: { blockId: string; e
   const [isPrivate, setIsPrivate] = useState(false);
   const [privacyError, setPrivacyError] = useState<string | null>(null);
   const [privacyBusy, setPrivacyBusy] = useState(true);
+  const [ruleNote, setRuleNote] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -565,6 +567,63 @@ export default function DatabaseBlockInspector({ blockId }: { blockId: string; e
             style={inputStyle}
           />
         </label>
+
+        {/*
+          WHO MAY DO WHAT. Four sentences, in the same language as a filter.
+          Written here and enforced in the DATABASE -- the button below turns
+          them into a migration, and until that is run they are only written.
+          The block says which, because that gap is the one place in this
+          product where something can be said and not yet be true.
+        */}
+        <div style={{ border: '1px solid #fecaca', background: '#fff7f7', borderRadius: '6px', padding: '10px', marginBottom: '12px' }}>
+          <div style={{ fontWeight: 600, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px', color: '#b91c1c', marginBottom: '2px' }}>
+            Who may
+          </div>
+          <div style={{ fontSize: '11px', color: '#7f1d1d', lineHeight: 1.4, marginBottom: '8px' }}>
+            <code>anybody</code>, <code>nobody</code>, <code>signed in</code>, or a
+            sentence like <code>{'{{Owner}} == Me'}</code>. Also <code>MyRole</code> and{' '}
+            <code>MyEmail</code>. Blank means <b>nobody</b>, which is the safe default.
+          </div>
+          {RULE_OPERATIONS.map((op) => (
+            <label key={op} style={{ display: 'block', marginBottom: '6px', fontSize: '12px' }}>
+              {op === 'read' ? 'read' : op === 'insert' ? 'add' : op === 'update' ? 'change' : 'remove'}
+              <input
+                type="text"
+                value={(runtimeState?.rules as any)?.[op] || ''}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setRuntimeState(prev => ({ ...prev, rules: { ...(prev as any)?.rules, [op]: v } }));
+                  triggerSave(prev => prev + 1);
+                }}
+                placeholder={op === 'read' ? 'anybody' : '{{Owner}} == Me'}
+                style={{ ...inputStyle, fontFamily: 'ui-monospace, monospace' }}
+              />
+            </label>
+          ))}
+          {ruleWarnings(runtimeState?.blockName || 'this table', (runtimeState?.rules as any) || {}, columns).map((w, i) => (
+            <div key={i} style={{ fontSize: '11px', color: '#b45309', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '4px', padding: '6px 8px', marginTop: '6px', lineHeight: 1.4 }}>
+              {w}
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={() => {
+              try {
+                const sql = rulesToMigration(runtimeState?.blockName || 'table', (runtimeState?.rules as any) || {});
+                navigator.clipboard?.writeText(sql);
+                setRuleNote('Copied. Supabase → SQL Editor → paste → Run. Until you do, these rules are written and NOT running.');
+              } catch (err: any) {
+                setRuleNote(err?.message || 'Those rules could not be turned into a migration.');
+              }
+            }}
+            style={{ marginTop: '8px', width: '100%', padding: '7px', borderRadius: '5px', border: '1px solid #b91c1c', background: '#fff', color: '#b91c1c', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}
+          >
+            Copy the migration that makes these real
+          </button>
+          {ruleNote && (
+            <div style={{ fontSize: '11px', color: '#7f1d1d', marginTop: '6px', lineHeight: 1.4 }}>{ruleNote}</div>
+          )}
+        </div>
 
         <label style={controlLabelStyle}>
           Text Color

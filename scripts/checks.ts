@@ -7620,6 +7620,24 @@ group('who may do what, said once, enforced at the store');
   check('a rule that cannot compile stops the whole migration rather than half-writing one',
     String(ran(() => rulesToMigration('posts', { read: 'countOf("X") > 0' }))).includes('cannot ask about another table'), true);
 
+  /**
+   * THROUGH THE PATH THE PANEL ACTUALLY USES. Every check above hands the
+   * migration builder a tidy object; the Database block hands it whatever the
+   * builder typed, including nothing, and a table name that is a display name
+   * rather than an identifier.
+   */
+  const fromPanel = ran(() => rulesToMigration('Kiln Bookings', {
+    read: 'anybody', insert: '{{Booked by}} == Me', update: '', delete: '',
+  }));
+  check('A DISPLAY NAME BECOMES A REAL TABLE IDENTIFIER',
+    String(fromPanel).includes('alter table public.kiln_bookings enable row level security'), true);
+  check('and the boxes left blank become "nobody", not a missing policy',
+    // Two: the blank update and the blank delete. A missing policy would read
+    // as "not configured yet" to whoever looks at the database next.
+    (String(fromPanel).match(/using \(false\)/g) || []).length, 2);
+  check('with the update one blank in both halves',
+    String(fromPanel).includes('for update using (false) with check (false)'), true);
+
   // ---------------------------------------------------------- the warnings
   const cols = (...names: string[]) => names.map(n => ({ name: n }));
   check('a table nothing can read is called out',
@@ -8229,7 +8247,7 @@ group('a slot can contain a slot');
  * Raise it in the same commit that adds the checks, the way the drift budget
  * above is raised: a number changed where it can be seen in a diff.
  */
-const EXPECTED_CHECKS = 1901;
+const EXPECTED_CHECKS = 1904;
 reachedTheEnd = true;
 if (passed + failed !== EXPECTED_CHECKS) {
   failed++;

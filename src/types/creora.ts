@@ -221,6 +221,16 @@ export interface BlockProps {
   trackedBlockId?: string;
   history?: number[];
   columns?: { name: string; type: ColumnType; unique?: boolean }[];
+  /**
+   * Who may read and write these rows, in the same language as a filter.
+   *
+   * Written here, ENFORCED IN THE DATABASE -- the panel compiles them into a
+   * migration. The gap between writing one and running it is the only place in
+   * this product where something can be said and not yet be true, so the block
+   * shows which are written and which are running, and they must not look the
+   * same. See src/lib/rules.ts.
+   */
+  rules?: { read?: string; insert?: string; update?: string; delete?: string; unique?: string[][] };
   rows?: { id: string; [key: string]: any }[];
   outputMode?: string;
   targetPageId?: string;
