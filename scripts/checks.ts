@@ -45,7 +45,7 @@ import { getBlockTypeDisplayName } from '../src/state/atoms';
 import { remapBlockIds, shouldRemapOnImport, remapFormulaExpression } from '../src/lib/remapBlockIds';
 import { summarisePageData, describeWhatWillBeLost, describeDeleteError } from '../src/lib/pageDelete';
 import { toCsv, csvCell, csvFileName } from '../src/lib/csv';
-import { evaluateExpression, FORMULA_FUNCTION_NAMES, explainUnreadableFormula } from '../src/lib/formula';
+import { evaluateExpression, FORMULA_FUNCTION_NAMES, explainUnreadableFormula, facetsOf, addFacets } from '../src/lib/formula';
 import { stepConditionResult, formulaScope, recalculateAllFormulas, runPageLoadWorkflows, fetchListBlockRows, shouldFetchListRows } from '../src/lib/bindingEngine';
 import { safeUrl, isSafeUrlValue, schemeOf, stripIgnorable } from '../src/lib/urls';
 import { fillSlots, leadingSlotName, findSlots as findSlotsForCheck } from '../src/lib/sanitizeHtml';
@@ -63,7 +63,7 @@ import { startingPace, nextPace, rowsFingerprint, POLL_FAST_MS, POLL_SLOW_MS, PO
 import { BLOCK_DISPLAY_NAMES } from '../src/lib/blockRegistry';
 import { RULE_TYPES as AUDIT_RULES } from '../src/lib/validation';
 import { TABLE_FUNCTION_NAMES, DATE_FUNCTION_NAMES } from '../src/lib/formula';
-import { visibleRows, rowFormulaValue, rowSlots, compareCells, slotNamesFor, rowMatchesSearch, MAX_RENDERED_ROWS, rowIndexesForStep, coerceForColumn, rowMatchesFormula, columnsUsedByFormula, calcExampleFor, calcExampleWithFilter, shareExampleFor, styleExampleFor, isoDate, isoToDateInput, dateInputToIso, displayCell, COLUMN_TYPE_LABELS, listRowLines, listIsEmpty } from '../src/lib/rows';
+import { visibleRows, rowFormulaValue, rowSlots, compareCells, slotNamesFor, rowMatchesSearch, MAX_RENDERED_ROWS, rowIndexesForStep, coerceForColumn, rowMatchesFormula, columnsUsedByFormula, calcExampleFor, calcExampleWithFilter, shareExampleFor, styleExampleFor, statusExampleFor, isoDate, isoToDateInput, dateInputToIso, displayCell, COLUMN_TYPE_LABELS, listRowLines, listIsEmpty } from '../src/lib/rows';
 import {
   parseSlot,
   applyFilters,
@@ -2794,7 +2794,19 @@ group('a formula that cannot be answered says so, instead of returning zero');
   check('too few arguments', say('round()').err, 'round() needs 1 to 2 values, and was given 0');
   check('too many arguments', say('abs(1, 2)').err, 'abs() needs 1 value, and was given 2');
   check('if needs at least two', say('if(true)').err, 'if() needs 2 to 3 values, and was given 1');
-  check('a dot is explained rather than ignored', say('A.b', { A: 1 }).err, 'A formula refers to a block by its own name, not with a dot');
+  /**
+   * A DOT USED TO BE ALWAYS WRONG, and now it is how a block's other three
+   * answers are asked for -- see facetsOf. So the message changed rather than
+   * the check being deleted: `A.b` where A is a block names the five things A
+   * actually has, which is what stops somebody trying `.rows`, `.length` and
+   * `.data` in turn.
+   */
+  check('A DOT ON A BLOCK NAMES THE FACETS IT DOES HAVE',
+    say('A.b', { A: 1 }).err, '"A" has no b. It has: loading, failed, error, empty, count.');
+  check('and a dot on a name that is no block says that instead',
+    say('Nope.loading', { A: 1 }).err, 'There is no block called "Nope".');
+  check('while a dot on something that is not a name at all says what a dot is for',
+    (say('(1 + 2).x', {}).err || '').includes('A dot only works after a block'), true);
   check('two formulas at once', say('1; 2').err, 'One formula at a time -- remove the comma or semicolon');
   check('unreadable text', say('((((').err, 'That formula could not be read. Check the brackets and quotes.');
   check('a function name is not case fussy', say('ROUND(2.5)').ok, 3);
@@ -3277,6 +3289,56 @@ group('one click does not cost one query per link of the chain');
   // Two List blocks, both tracking the same Database.
   check('both List blocks are asked for rows', fetchListBlockRows(store.get(allBlockIdsAtom), store, countingFetch), 2);
   check('and that is all that is asked', queries, 2);
+  /**
+   * AND IT SAYS WHETHER IT IS BUSY, AND WHETHER IT FAILED.
+   *
+   * This used to do neither. A read that failed printed a console warning -- to
+   * nobody, on somebody else's published page -- and the list went on showing
+   * whatever it had before, for ever. `Orders.loading` and `Orders.failed` were
+   * false the whole time because nothing ever set them, which is the runtime
+   * half of the three answers a fetching block has.
+   */
+  {
+    const live = createStore();
+    live.set(allBlockIdsAtom, [L1]);
+    live.set(blockRuntimeAtom(L1), { ...base, value: '', trackedBlockId: DB, rows: [] });
+    let settle: (v: any) => void = () => {};
+    const slow = () => new Promise<any>(resolve => { settle = resolve; });
+
+    fetchListBlockRows(live.get(allBlockIdsAtom), live, slow);
+    check('THE FETCH SAYS IT IS BUSY BEFORE THE ANSWER ARRIVES',
+      facetsOf(live.get(blockRuntimeAtom(L1))).loading, true);
+    check('and does not claim to be empty while it is asking',
+      facetsOf(live.get(blockRuntimeAtom(L1))).empty, false);
+
+    settle({ data: [{ id: 'r1', row_data: { Name: 'Ada' } }] });
+    await Promise.resolve(); await Promise.resolve();
+    check('AND STOPS BEING BUSY WHEN IT ARRIVES',
+      facetsOf(live.get(blockRuntimeAtom(L1))).loading, false);
+    check('with the rows counted', facetsOf(live.get(blockRuntimeAtom(L1))).count, 1);
+  }
+  {
+    const broken = createStore();
+    broken.set(allBlockIdsAtom, [L1]);
+    broken.set(blockRuntimeAtom(L1), { ...base, value: '', trackedBlockId: DB, rows: [] });
+    fetchListBlockRows(broken.get(allBlockIdsAtom), broken,
+      async () => ({ error: { message: 'The network dropped that request' } }));
+    await Promise.resolve(); await Promise.resolve();
+    const f: any = facetsOf(broken.get(blockRuntimeAtom(L1)));
+    check('A READ THAT FAILS SAYS SO, INSTEAD OF WARNING A CONSOLE NOBODY READS',
+      [f.failed, f.error], [true, 'The network dropped that request']);
+    check('and it is not busy any more', f.loading, false);
+    check('and it does not claim there is nothing there', f.empty, false);
+
+    // The retry clears it. A stale error is a page saying it is broken when it
+    // is not, which is its own kind of wrong.
+    fetchListBlockRows(broken.get(allBlockIdsAtom), broken,
+      async () => ({ data: [{ id: 'r1', row_data: {} }] }));
+    await Promise.resolve(); await Promise.resolve();
+    check('AND A SUCCESSFUL RETRY CLEARS IT',
+      facetsOf(broken.get(blockRuntimeAtom(L1))).failed, false);
+  }
+
 
   // A block that is not a List is not asked, however its id reads.
   queries = 0;
@@ -7409,6 +7471,137 @@ group('a list can be filtered and ordered by something worked out');
 }
 
 
+group('a block that fetches has three answers, not one');
+{
+  /**
+   * PRIMITIVE D, from docs/CONNECTING_THE_TWO.md.
+   *
+   * Seven working sites were built against a fake Supabase -- with latency,
+   * with failures, with row rules -- and every one of them wrapped every read
+   * in a loading state and an error state. A builder could wire neither.
+   *
+   * Everything in this language assumes a block HAS A VALUE. A thing that comes
+   * from a store has three states and only one of them is a value. Half of it
+   * already existed and was unreachable: BlockRuntimeState has carried
+   * `loading` and `error` all along, and the language could not see them.
+   *
+   *     Orders.loading  Orders.failed  Orders.error  Orders.empty  Orders.count
+   */
+  const fresh   = { rows: null, loading: false, error: null };      // never asked
+  const asking  = { rows: null, loading: true, error: null };       // in flight
+  const gotSome = { rows: [1, 2, 3], loading: false, error: null };
+  const gotNone = { rows: [], loading: false, error: null };
+  const broke   = { rows: null, loading: false, error: 'The network dropped that' };
+  const again   = { rows: [1, 2, 3], loading: true, error: null };  // refreshing
+  const retried = { rows: [], loading: true, error: 'stale' };      // retrying after a failure
+  const failedEmpty = { rows: [], loading: false, error: 'gone' };  // failed, holding nothing
+
+  check('before anything is asked, nothing is claimed',
+    facetsOf(fresh), { loading: false, failed: false, error: '', count: 0, empty: false });
+  check('IN FLIGHT: loading, and NOT empty',
+    facetsOf(asking), { loading: true, failed: false, error: '', count: 0, empty: false });
+  check('answered with rows',
+    facetsOf(gotSome), { loading: false, failed: false, error: '', count: 3, empty: false });
+  check('ANSWERED WITH NOTHING is the only time empty is true',
+    facetsOf(gotNone), { loading: false, failed: false, error: '', count: 0, empty: true });
+  check('FAILED: the message is readable, and empty is false',
+    facetsOf(broke), { loading: false, failed: true, error: 'The network dropped that', count: 0, empty: false });
+  check('REFRESHING KEEPS THE COUNT IT ALREADY HAS, so a list does not blank itself',
+    facetsOf(again), { loading: true, failed: false, error: '', count: 3, empty: false });
+  check('and a retry after a failure is loading AND still failed, so both can be shown',
+    facetsOf(retried), { loading: true, failed: true, error: 'stale', count: 0, empty: false });
+
+  /**
+   * The invariants, as rules rather than as examples. The first two are the
+   * ones a visitor would otherwise find: "no orders yet" flashed at everybody
+   * for half a second, and "there are none" claimed after a read that failed.
+   */
+  const everyState = [fresh, asking, gotSome, gotNone, broke, again, retried, failedEmpty];
+  check('EMPTY IS NEVER TRUE WHILE LOADING',
+    everyState.some(s => { const f: any = facetsOf(s); return f.empty && f.loading; }), false);
+  /**
+   * Written against the STATE's error rather than the facet's `failed`, and a
+   * control is why. Saying "never both empty and failed" is vacuous the moment
+   * anything makes `failed` false -- it is stated in terms of the thing that
+   * would break. Reading the raw error instead means the rule survives the
+   * facet it is about.
+   */
+  check('EMPTY IS NEVER TRUE AFTER A FAILURE — a failed read is no evidence there is nothing',
+    everyState.filter(s => s.error).some(s => facetsOf(s).empty), false);
+  check('empty is never true with a count above zero',
+    everyState.some(s => { const f: any = facetsOf(s); return f.empty && f.count > 0; }), false);
+  check('and failed always comes with something to show',
+    everyState.every(s => { const f: any = facetsOf(s); return !f.failed || f.error !== ''; }), true);
+
+  // --- reaching them from a formula ---
+  const scope: Record<string, any> = { Orders: 0, Total: 12 };
+  addFacets(scope, 'Orders', gotNone);
+  addFacets(scope, 'databaseBlock__ab01', again);
+  scope['databaseBlock__ab01'] = 3;
+
+  const asks = (f: string, sc: Record<string, any> = scope) => ran(() => evaluateExpression(f, sc));
+  check('THE FACETS ARE REACHABLE BY THE NAME PRINTED ON THE BLOCK', asks('Orders.empty'), true);
+  check('and by its id, because that is what the editor writes', asks('databaseBlock__ab01.count'), 3);
+  check('THE BLOCK’S OWN VALUE IS UNTOUCHED, so nothing that worked stops working', asks('Orders'), 0);
+  check('two facets in one formula',
+    asks('if(Orders.empty, "none yet", Orders.count)'), 'none yet');
+  check('and one beside ordinary arithmetic', asks('Total + Orders.count'), 12);
+  check('spaces round the dot are allowed, because the parser allows them', asks('Orders . empty'), true);
+
+  /**
+   * WHAT MUST NOT BE TOUCHED. The rewrite that makes a dotted name a name is
+   * the part with edges, and each of these changes what a formula MEANS rather
+   * than making it fail -- the worst kind of wrong this project knows.
+   */
+  check('A NUMBER WITH A DECIMAL POINT IS NOT A FACET', asks('Total * 1.5'), 18);
+  check('and one written .5 is still not', asks('Total * .5'), 6);
+  check('A DOTTED NAME INSIDE QUOTES IS LEFT ALONE — it belongs to the inner call',
+    asks('text("Orders.count")'), 'Orders.count');
+  check('an ordinary name with no dot is untouched', asks('Total'), 12);
+
+  /**
+   * THE INVENTED NAME MOVES OUT OF THE WAY OF A REAL ONE. The same collision
+   * that was found the hard way in bindSlots, and the same answer.
+   */
+  const collides: Record<string, any> = { ...scope, __facet0: 99 };
+  check('a block really called __facet0 still means itself',
+    ran(() => evaluateExpression('Orders.count + __facet0', collides)), 99);
+
+  // --- refusals that teach ---
+  check('A FACET THAT DOES NOT EXIST NAMES THE ONES THAT DO',
+    String(asks('Orders.rows')), 'threw: "Orders" has no rows. It has: loading, failed, error, empty, count.');
+  check('and a name that is no block at all says that instead',
+    String(asks('Ordrs.loading')), 'threw: There is no block called "Ordrs".');
+
+  // --- and the names are FETCHED, or a facet in markup renders blank ---
+  /**
+   * THE PANEL'S EXAMPLE, RUN. It is printed where somebody will paste it, and
+   * `loading` and `error` existed unreachable for months precisely because
+   * nothing anywhere mentioned them.
+   */
+  const example = statusExampleFor('Orders');
+  check('the panel offers an example built from the builder’s own table',
+    example, '{{calc: if(Orders.loading, "Loading…", if(Orders.failed, Orders.error, ""))}}');
+  check('AND IT RENDERS WHAT IT PROMISES WHILE LOADING',
+    fillSlots(String(example), { 'Orders.loading': true, 'Orders.failed': false, 'Orders.error': '' }),
+    'Loading…');
+  check('and the message when it failed',
+    fillSlots(String(example), { 'Orders.loading': false, 'Orders.failed': true, 'Orders.error': 'gone' }),
+    'gone');
+  check('and nothing when it simply answered',
+    fillSlots(String(example), { 'Orders.loading': false, 'Orders.failed': false, 'Orders.error': '' }), '');
+  check('a table whose name cannot go before a dot is not offered one',
+    statusExampleFor('Row totals'), null);
+  check('nor is nothing at all', statusExampleFor(''), null);
+
+  check('A FACET USED ONLY IN MARKUP IS STILL ASKED FOR',
+    findSlotsForCheck('<p>{{calc: if(Orders.loading, "…", "")}}</p>'), ['Orders.loading']);
+  check('alongside an ordinary name in the same slot',
+    findSlotsForCheck('<p>{{calc: if(Orders.empty, Title, Orders.count)}}</p>'), ['Title', 'Orders.empty', 'Orders.count']);
+  check('and one inside a quoted condition belongs to the inner call, not the page',
+    findSlotsForCheck(`<p>{{calc: countOf("Bookings", '{{Status}} == "a.b"')}}</p>`), []);
+}
+
 group('a list can be filtered by who is looking');
 {
   /**
@@ -7864,7 +8057,7 @@ group('a slot can contain a slot');
  * Raise it in the same commit that adds the checks, the way the drift budget
  * above is raised: a number changed where it can be seen in a diff.
  */
-const EXPECTED_CHECKS = 1811;
+const EXPECTED_CHECKS = 1854;
 reachedTheEnd = true;
 if (passed + failed !== EXPECTED_CHECKS) {
   failed++;

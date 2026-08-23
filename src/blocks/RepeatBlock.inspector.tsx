@@ -3,7 +3,7 @@ import { useMemo } from 'react'
 import { blockRuntimeAtom, triggerSaveAtom, getBlockTypeDisplayName, getCanvasBlocks } from '../state/atoms'
 import { useStore } from 'jotai'
 import { sanitizeHtml } from '../lib/sanitizeHtml'
-import { MAX_RENDERED_ROWS, calcExampleFor, calcExampleWithFilter, shareExampleFor, styleExampleFor } from '../lib/rows'
+import { MAX_RENDERED_ROWS, calcExampleFor, calcExampleWithFilter, shareExampleFor, styleExampleFor, statusExampleFor } from '../lib/rows'
 import { FilterHelp } from '../components/FilterHelp'
 import { pagesListAtom, currentPageIdAtom } from '../state/atoms'
 
@@ -67,6 +67,7 @@ export default function RepeatBlockInspector({ blockId, editor }: { blockId: str
   // opposite of the bare names sitting beside them in the same slot.
   const shareExample = shareExampleFor(tracked?.blockName || 'Table', columns)
   const styleExample = styleExampleFor(columns)
+  const statusExample = statusExampleFor(tracked?.blockName || '')
 
   const set = (patch: Record<string, unknown>) => {
     setRuntimeState(prev => ({ ...prev, ...patch }))
@@ -163,6 +164,13 @@ export default function RepeatBlockInspector({ blockId, editor }: { blockId: str
               A row can read the whole table too, so it can show its share of it:{' '}
               <code>{shareExample}</code>. The table and the column go in quotes
               there; everything else in a slot does not.
+            </span>
+          )}
+          {statusExample && (
+            <span style={hintStyle}>
+              A table has three answers, not one — it is on its way, it failed,
+              or it answered. Say which: <code>{statusExample}</code>. Without
+              it a slow connection looks like an empty page.
             </span>
           )}
           {styleExample && (

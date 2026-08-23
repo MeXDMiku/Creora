@@ -854,6 +854,145 @@ export interface EvaluateOptions {
   depth?: number;
 }
 
+/**
+ * A BLOCK THAT FETCHES HAS THREE ANSWERS, NOT ONE.
+ *
+ * Everything in this language assumes a block HAS A VALUE. A thing that comes
+ * from a store has three states and only one of them is a value: it is on its
+ * way, it failed, or it answered. Every one of the seven sites built to test
+ * this engine wrapped every read in a loading state and an error state, and a
+ * builder could wire neither -- so a page made here is wrong the moment the
+ * network is slow, and looks broken rather than busy.
+ *
+ * Half of it already existed and was unreachable: BlockRuntimeState has carried
+ * `loading` and `error` all along. What was missing is that the language could
+ * not SEE them.
+ *
+ *     Orders.loading     on its way
+ *     Orders.failed      the last read failed
+ *     Orders.error       what it said, for showing
+ *     Orders.empty       it answered, and there was nothing
+ *     Orders.count       how many rows came back
+ */
+export const FACET_NAMES = ['loading', 'failed', 'error', 'empty', 'count'] as const;
+
+export function facetsOf(state: any): Record<string, any> {
+  const loading = !!state?.loading;
+  const failed = !!state?.error;
+  const rows = Array.isArray(state?.rows) ? state.rows : null;
+  return {
+    loading,
+    failed,
+    error: state?.error ?? '',
+    count: rows ? rows.length : 0,
+    /**
+     * EMPTY IS FALSE WHILE IT IS STILL LOADING, and false after a failure.
+     *
+     * "Nothing came back" and "nothing has come back YET" are different
+     * sentences and a page has to be able to say the second one. Conflating
+     * them is how a page flashes "no orders yet" at everybody who visits it
+     * half a second before showing five.
+     *
+     * False after a failure for a different reason: "there are no orders" is a
+     * claim about the data, and a read that failed is not evidence for it.
+     */
+    empty: !loading && !failed && !!rows && rows.length === 0,
+  };
+}
+
+/** Put one block's facets into a scope under a key, as dotted names. */
+export function addFacets(scope: Record<string, any>, key: string, state: any): Record<string, any> {
+  const f = facetsOf(state);
+  for (const name of FACET_NAMES) scope[`${key}.${name}`] = f[name];
+  return scope;
+}
+
+const FACET_NAME_RE = /^[A-Za-z_$][A-Za-z0-9_$]*/;
+
+/**
+ * Turn `Orders.loading` into a name, before anything is parsed.
+ *
+ * WHY A REWRITE AND NOT A BRANCH IN THE EVALUATOR
+ * jsep does parse it as a MemberExpression -- but that is the wrong reading.
+ * There is no object called Orders with a property on it; there is a block, and
+ * one of five things you can ask about it. Saying so as a rewrite means the
+ * evaluator is not touched at all, so nothing that works today can break, and
+ * conditions and row filters get it for free because they all end up here.
+ *
+ * The same shape as bindSlots, including the prefix that grows until the text
+ * is not using it -- that collision was found the hard way once already.
+ *
+ * `1.5` is safe without special-casing, because the name before the dot has to
+ * start with a letter. Anything inside quotes is left alone, because a table
+ * function's condition lives in a string and its names belong to the inner
+ * call.
+ */
+export function rewriteFacets(
+  text: string,
+  scope: Record<string, any>,
+): { expression: string; scope: Record<string, any>; error: string | null } {
+  const src = String(text ?? '');
+  if (!src.includes('.')) return { expression: src, scope, error: null };
+  let prefix = '__facet';
+  while (src.includes(prefix)) prefix = '_' + prefix;
+
+  const out: string[] = [];
+  const extra: Record<string, any> = {};
+  let index = 0;
+  let i = 0;
+  let quote: string | null = null;
+  let error: string | null = null;
+
+  while (i < src.length) {
+    const ch = src[i];
+    if (quote) {
+      if (ch === '\\' && i + 1 < src.length) { out.push(ch, src[i + 1]); i += 2; continue; }
+      if (ch === quote) quote = null;
+      out.push(ch);
+      i++;
+      continue;
+    }
+    if (ch === '"' || ch === "'") { quote = ch; out.push(ch); i++; continue; }
+
+    const head = FACET_NAME_RE.exec(src.slice(i));
+    if (!head) { out.push(ch); i++; continue; }
+    const objectName = head[0];
+    const afterName = i + objectName.length;
+    let k = afterName;
+    while (src[k] === ' ') k++;
+    if (src[k] !== '.') { out.push(objectName); i = afterName; continue; }
+    let m = k + 1;
+    while (src[m] === ' ') m++;
+    const tail = FACET_NAME_RE.exec(src.slice(m));
+    if (!tail) { out.push(objectName); i = afterName; continue; }
+    const propertyName = tail[0];
+    const dotted = `${objectName}.${propertyName}`;
+    const end = m + propertyName.length;
+
+    if (dotted in scope) {
+      const key = `${prefix}${index++}`;
+      extra[key] = scope[dotted];
+      out.push(key);
+      i = end;
+      continue;
+    }
+    /**
+     * A NAME THAT IS A BLOCK BUT NOT A FACET HAS TO SAY WHICH FACETS EXIST, or
+     * somebody tries `.rows`, then `.length`, then `.data`, and concludes the
+     * feature does not work.
+     */
+    if (!error) {
+      error = objectName in scope
+        ? `"${objectName}" has no ${propertyName}. It has: ${FACET_NAMES.join(', ')}.`
+        : `There is no block called "${objectName}".`;
+    }
+    out.push(objectName);
+    i = afterName;
+  }
+
+  return { expression: out.join(''), scope: { ...scope, ...extra }, error };
+}
+
 export function evaluateExpression(
   formula: string,
   scope: Record<string, any>,
@@ -861,6 +1000,16 @@ export function evaluateExpression(
   options?: EvaluateOptions,
 ): FormulaValue {
   if (!formula || formula.trim() === '') return 0;
+
+  /**
+   * `Orders.loading` becomes a name before anything is parsed. See
+   * rewriteFacets: a dotted name is one name with a dot in it, not a member
+   * access, and saying so here keeps the evaluator below untouched.
+   */
+  const bound = rewriteFacets(formula, scope);
+  if (bound.error) throw new Error(bound.error);
+  formula = bound.expression;
+  scope = bound.scope;
 
   let ast: any;
   try {
@@ -995,8 +1144,19 @@ export function evaluateExpression(
       case 'ArrayExpression':
         return node.elements.map(walk);
 
+      /**
+       * A DOT THAT SURVIVED THE REWRITE IS ONE NOBODY CAN ANSWER.
+       *
+       * rewriteFacets turns `Orders.loading` into a name before this runs, and
+       * refuses anything it does not recognise with a message naming the five
+       * facets. So a MemberExpression reaching here is something neither -- a
+       * dot on a number, a dot on a string, a dot on a function call -- and the
+       * message says the only thing a dot is for.
+       */
       case 'MemberExpression':
-        throw new Error('A formula refers to a block by its own name, not with a dot');
+        throw new Error(
+          'A dot only works after a block: Orders.loading, Orders.failed, Orders.error, Orders.empty, Orders.count',
+        );
 
       case 'Compound':
         throw new Error('One formula at a time -- remove the comma or semicolon');
@@ -1052,6 +1212,39 @@ export function identifiersIn(formula: string | undefined | null): string[] {
   }
 
   const found: string[] = [];
+  /**
+   * THE DOTTED NAMES, FOUND BEFORE THE WALK.
+   *
+   * `Orders.loading` parses as a MemberExpression, which the walk below does
+   * not visit -- so a facet used only in markup would never be fetched and
+   * would render blank. The same bug the condition scanning had, in a new
+   * place. Quoted text is skipped for the same reason it is in rewriteFacets.
+   */
+  const dotted: string[] = [];
+  {
+    let i = 0;
+    let quote: string | null = null;
+    while (i < text.length) {
+      const ch = text[i];
+      if (quote) {
+        if (ch === '\\' && i + 1 < text.length) { i += 2; continue; }
+        if (ch === quote) quote = null;
+        i++;
+        continue;
+      }
+      if (ch === '"' || ch === "'") { quote = ch; i++; continue; }
+      const head = /^[A-Za-z_$][A-Za-z0-9_$]*/.exec(text.slice(i));
+      if (!head) { i++; continue; }
+      const rest = text.slice(i + head[0].length);
+      const tail = /^\s*\.\s*([A-Za-z_$][A-Za-z0-9_$]*)/.exec(rest);
+      if (tail) {
+        dotted.push(`${head[0]}.${tail[1]}`);
+        i += head[0].length + tail[0].length;
+        continue;
+      }
+      i += head[0].length;
+    }
+  }
   const add = (name: string) => {
     const lowered = name.toLowerCase();
     // The words the language answers itself. Kept in step with the Identifier
@@ -1129,6 +1322,9 @@ export function identifiersIn(formula: string | undefined | null): string[] {
   };
 
   walk(ast);
+  // The dotted ones the walk cannot see, added after it so an ordinary name
+  // still comes first in the list -- the order is what a panel prints.
+  for (const name of dotted) add(name);
   return found;
 }
 

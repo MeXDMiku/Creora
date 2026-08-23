@@ -338,6 +338,22 @@ run and obvious from a control.
 it is a comment.**
 
 
+## Never run the controls in the background
+
+`npm run control` edits the working copy on purpose and puts it back afterwards.
+It restores on SIGINT, SIGTERM and SIGHUP, and none of that helps if the process
+is killed harder than that — or if **you edit the same files while it is
+running**, which is what happened: a background control run was cut off part way
+through and left `// control: no escalation` in `src/lib/formula.ts`.
+
+The damage was not the confusing part. Three checks went red an hour later, in a
+group unrelated to what was being worked on, and the obvious reading — *the
+change I just made broke the relation work* — was wrong.
+
+**Run it in the foreground, and do not touch the tree while it runs.** If a run
+is cut short, `grep -rn "control:" src/` names the damage in one line.
+
+
 ## The instrument lied a second time, quieter
 
 `npm run control` prints `SUITE STOPPED EARLY` when a run was cut short. It only

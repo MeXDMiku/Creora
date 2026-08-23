@@ -777,6 +777,25 @@ export function calcExampleWithFilter(example: string | null, symbol = '£'): st
 }
 
 /**
+ * A worked example of the three answers a fetching block has.
+ *
+ * WHY THE PANEL HAS TO SAY THIS
+ * `loading` and `error` existed on every block for months and nothing anywhere
+ * mentioned them, so no page ever had a loading state. A capability nobody can
+ * find is worth what one that does not exist is worth -- and this is the one a
+ * visitor notices first, because it is what a page does on a slow connection.
+ *
+ * Returns null without a table to name, because an example naming nothing
+ * teaches nothing. Checked by being RUN, like the others here.
+ */
+export function statusExampleFor(tableName: string | undefined | null): string | null {
+  const name = String(tableName ?? '').trim();
+  // A name with a space cannot go before a dot, the same limit bare names have.
+  if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name)) return null;
+  return `{{calc: if(${name}.loading, "Loading…", if(${name}.failed, ${name}.error, ""))}}`;
+}
+
+/**
  * A worked example of STYLE DRIVEN BY A VALUE, in the builder's own columns.
  *
  * WHY THIS IS AN EXAMPLE RATHER THAN A FEATURE

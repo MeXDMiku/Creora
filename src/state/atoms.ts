@@ -1,3 +1,4 @@
+import { addFacets } from '../lib/formula';
 import { atom } from 'jotai';
 import { atomFamily } from 'jotai/utils';
 import type { Workflow, FormulaBinding, PageSummary, BlockRuntimeState } from '../types/creora';
@@ -244,7 +245,18 @@ export function blockValuesByName(store: any): Record<string, any> {
   for (const id of (store.get(allBlockIdsAtom) || []) as string[]) {
     const state = store.get(blockRuntimeAtom(id));
     const name = slotNameOf(id, state);
-    if (!(name in byName)) byName[name] = state?.value;
+    if (!(name in byName)) {
+      byName[name] = state?.value;
+      /**
+       * AND ITS THREE OTHER ANSWERS. A block that fetches is loading, or
+       * failed, or has answered, and only the last of those is a value -- see
+       * facetsOf in formula.ts. Added HERE rather than in each caller so
+       * markup, formulas, conditions and row filters cannot disagree about
+       * what `Orders.loading` means; that split is the drift bug this project
+       * has had ten of.
+       */
+      addFacets(byName, name, state);
+    }
   }
   return byName;
 }

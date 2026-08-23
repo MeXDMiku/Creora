@@ -11,7 +11,7 @@ import { rowIndexesForStep, coerceForColumn } from './rows';
 import { safeUrl } from './urls';
 import { toCsv, csvFileName, downloadCsv } from './csv';
 import { evaluateCondition } from './conditions';
-import { evaluateExpression, truthy, type FormulaValue, explainUnreadableFormula, type TableScope } from './formula';
+import { addFacets, evaluateExpression, truthy, type FormulaValue, explainUnreadableFormula, type TableScope } from './formula';
 import { describeRowWriteError, withoutRow } from './rowWrite';
 export { evaluateCondition };
 import { renderTemplate } from './format';
@@ -184,7 +184,11 @@ export function formulaScope(store: ReturnType<typeof getDefaultStore>): Record<
    */
   const scope: Record<string, any> = { ...blockValuesByName({ get: (a: any) => store.get(a) }) };
   for (const blockId of store.get(allBlockIdsAtom)) {
-    scope[blockId] = store.get(blockRuntimeAtom(blockId))?.value ?? 0;
+    const state = store.get(blockRuntimeAtom(blockId));
+    scope[blockId] = state?.value ?? 0;
+    // By id as well as by name, because an id is what the editor writes and a
+    // name is what a person types. Same rule as the values above.
+    addFacets(scope, blockId, state);
   }
   return scope;
 }
@@ -1493,28 +1497,62 @@ export function fetchListBlockRows(
       const trackedId = listState?.trackedBlockId;
       if (trackedId) {
         issued += 1;
+        /**
+         * SAYING IT IS BUSY, AND SAYING WHEN IT FAILED.
+         *
+         * This used to do neither. A read that failed printed a console warning
+         * -- to nobody, on somebody else's published page -- and the list went
+         * on showing whatever it had before, for ever, with no way for the page
+         * to know. `Orders.loading` and `Orders.failed` were false the whole
+         * time because nothing ever set them.
+         *
+         * That is the runtime half of the three answers a fetching block has.
+         * See facetsOf in formula.ts for what they mean; this is where they
+         * come from.
+         */
+        store.set(listAtom, { ...store.get(listAtom), loading: true });
         fetchRows(trackedId)
           .then(({ data, error }: any) => {
+            const currentListState = store.get(listAtom);
             if (error) {
-              console.warn('[ListBlock recalculate] Supabase fetch error:', error.message);
+              store.set(listAtom, {
+                ...currentListState,
+                loading: false,
+                error: error.message || 'Those rows could not be loaded',
+              });
               return;
             }
-            if (data) {
-              const parsedRows = data.map((item: any) => ({
-                id: item.id,
-                ...item.row_data
-              }));
-              const currentListState = store.get(listAtom);
-              const currentListRows = currentListState?.rows || [];
-              if (parsedRows.length > 0 || currentListRows.length === 0) {
-                store.set(listAtom, {
-                  ...currentListState,
-                  rows: parsedRows
-                });
-              }
-            }
+            const parsedRows = (data || []).map((item: any) => ({
+              id: item.id,
+              ...item.row_data
+            }));
+            const currentListRows = currentListState?.rows || [];
+            /**
+             * The old rows are kept when a read comes back empty and there were
+             * rows before -- a deliberate guard that predates this, against a
+             * momentary empty answer blanking a list. It has a cost worth
+             * knowing: a table that genuinely becomes empty keeps showing its
+             * last rows until something else changes, so `.empty` stays false.
+             */
+            const keep = parsedRows.length === 0 && currentListRows.length > 0;
+            store.set(listAtom, {
+              ...currentListState,
+              rows: keep ? currentListRows : parsedRows,
+              loading: false,
+              // CLEARED ON SUCCESS. A stale error left behind is a page saying
+              // it is broken when it is not, which is its own kind of wrong.
+              error: null,
+            });
           })
-          .catch(() => { /* a refresh that fails must not take the page with it */ });
+          .catch((err: any) => {
+            // A refresh that fails must not take the page with it -- but it
+            // must not be silent either, which is what this used to be.
+            store.set(listAtom, {
+              ...store.get(listAtom),
+              loading: false,
+              error: err?.message || 'Those rows could not be loaded',
+            });
+          });
       }
     }
   }
