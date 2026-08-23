@@ -1,6 +1,7 @@
 import { getDefaultStore } from 'jotai';
 import type { TriggerEvent, StepCondition } from '../types/creora';
-import { blockRuntimeAtom, workflowsAtom, formulasAtom, allBlockIdsAtom, getBlockDefaultValue , recordRun, blockValuesByName, slotNameOf, type RunStep, switchPageFnAtom } from '../state/atoms';
+import { resolveQueries } from './queries';
+import { blockRuntimeAtom, workflowsAtom, formulasAtom, queriesAtom, allBlockIdsAtom, getBlockDefaultValue , recordRun, blockValuesByName, slotNameOf, type RunStep, switchPageFnAtom } from '../state/atoms';
 import { sendWebhook } from './webhook';
 import { computeDatabaseOutput } from './databaseOutput';
 import { validateValue } from './validation';
@@ -205,6 +206,18 @@ export function formulaScope(store: ReturnType<typeof getDefaultStore>): Record<
  * the thing that cannot be two blocks at once.
  */
 export function tableScope(store: ReturnType<typeof getDefaultStore>): TableScope {
+  return applyQueries(store, rawTableScope(store));
+}
+
+/**
+ * The blocks' tables alone.
+ *
+ * SEPARATE FROM tableScope because this is what a query is answered OVER, and
+ * a query answered over a scope that already contains queries would be reading
+ * a half-built table -- whichever ones happened to run first. The order queries
+ * run in is decided in queries.ts, by what they are about, not by luck.
+ */
+export function rawTableScope(store: ReturnType<typeof getDefaultStore>): TableScope {
   const tables: TableScope = {};
   for (const blockId of store.get(allBlockIdsAtom)) {
     const state = store.get(blockRuntimeAtom(blockId));
@@ -219,6 +232,29 @@ export function tableScope(store: ReturnType<typeof getDefaultStore>): TableScop
     tables[blockId] = table;
   }
   return tables;
+}
+
+/**
+ * The page's queries, answered over the page's tables.
+ *
+ * SPLIT OUT so a panel can see the failures. `tableScope` can only hand back
+ * tables -- it is read by markup, by conditions and by every formula on the
+ * page, and none of those can carry an error list. But a builder whose fourth
+ * question has a typo has to be TOLD, and told which one, so the same work is
+ * available here with the errors attached.
+ *
+ * Nothing here throws. A page whose query is wrong still shows every block on
+ * it; the query's own panel is where the sentence belongs.
+ */
+export function resolvePageQueries(store: ReturnType<typeof getDefaultStore>, base?: TableScope) {
+  const tables = base || rawTableScope(store);
+  return resolveQueries(tables, store.get(queriesAtom) || [], formulaScope(store));
+}
+
+function applyQueries(store: ReturnType<typeof getDefaultStore>, tables: TableScope): TableScope {
+  const saved = store.get(queriesAtom);
+  if (!saved || !saved.length) return tables;
+  return resolveQueries(tables, saved, formulaScope(store)).tables;
 }
 
 /**

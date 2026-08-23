@@ -392,6 +392,74 @@ const CONTROLS = [
     expect: [],
     wantStoppedEarly: true,
   },
+  // ---------------------------------------------------------------- queries
+  // The runtime, not the query itself: a named answer, the order they run in,
+  // and the three ways a name goes wrong.
+  {
+    name: 'queries: a question stops becoming a table',
+    file: 'src/lib/bindingEngine.ts',
+    find: `  return applyQueries(store, rawTableScope(store));`,
+    with: `  return rawTableScope(store);`,
+    expect: ['A QUESTION IS ANSWERED OVER THE PAGE'],
+  },
+  {
+    name: 'queries: they run in the order they were typed instead of what they are about',
+    file: 'src/lib/queries.ts',
+    find: `      if (upstream && upstream.id !== q.id) run(upstream);`,
+    with: `      void upstream; // control: no ordering`,
+    expect: ['EVEN WHEN IT IS WRITTEN FIRST'],
+  },
+  {
+    name: 'queries: a circle is followed instead of reported',
+    file: 'src/lib/queries.ts',
+    find: `    if (at !== -1) {`,
+    with: `    if (false) {`,
+    // A hang would be worse than a failure, so the control has to be able to
+    // end. `done` is never set for a looping query, so it simply answers wrong.
+    expect: ['A CIRCLE IS REPORTED RATHER THAN HUNG ON'],
+  },
+  {
+    name: 'queries: the loop is reported without saying which questions are in it',
+    file: 'src/lib/queries.ts',
+    find: `      const loop = [...visiting.slice(at), q.name];`,
+    with: `      const loop = [];`,
+    expect: ['NAMES THE LOOP'],
+  },
+  {
+    name: 'queries: a question may take a name a block already has',
+    file: 'src/lib/queries.ts',
+    find: `  if (takenBy.has(clean)) {`,
+    with: `  if (false) {`,
+    expect: ['MAY NOT TAKE THE NAME OF A TABLE ALREADY ON THE PAGE', 'THE BLOCK KEEPS ITS TABLE'],
+  },
+  {
+    name: 'queries: a name that already means something everywhere is allowed',
+    file: 'src/lib/queries.ts',
+    find: `  if (RESERVED_NAMES.some(r => r.toLowerCase() === clean.toLowerCase())) {`,
+    with: `  if (false) {`,
+    expect: ['A NAME THAT ALREADY MEANS SOMETHING EVERYWHERE IS REFUSED'],
+  },
+  {
+    name: 'queries: one bad question takes the others down with it',
+    file: 'src/lib/queries.ts',
+    find: '      errors[q.id] = `"${q.name}" could not be answered: ${String(err?.message || err)}`;',
+    with: `      throw err;`,
+    expect: ['DOES NOT STOP THE OTHERS', 'NEVER THROWS'],
+  },
+  {
+    name: 'queries: a table named only inside a formula stops counting as a dependency',
+    file: 'src/lib/queries.ts',
+    find: `      const name = String(m[1]).trim();`,
+    with: `      const name = ''; // control: formulas hide their tables`,
+    expect: ['A TABLE NAMED ONLY INSIDE A FORMULA'],
+  },
+  {
+    name: 'queries: an answer stops declaring the columns it invented',
+    file: 'src/lib/queries.ts',
+    find: `    for (const key of Object.keys(row || {})) if (key !== 'id') seen.add(key);`,
+    with: `    void row; // control: no columns`,
+    expect: ['THE COLUMNS IT INVENTED'],
+  },
 ];
 
 /**

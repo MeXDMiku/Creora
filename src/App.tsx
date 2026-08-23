@@ -4,7 +4,7 @@ import StarterKit from '@tiptap/starter-kit'
 import { useSetAtom, useAtom, useAtomValue, useStore } from 'jotai'
 import { PageStamps, interpretSave, shouldKeepAutosaving } from './lib/savePage'
 import { measurePage, verdictForPage } from './lib/pageSize'
-import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, slotNameOf, slotNameForNodeType, getCanvasBlocks, shapeRoleDataType, currentPageIdAtom, currentPageIsPublishedAtom, pagesListAtom, switchPageFnAtom, isPreviewModeAtom, canvasModeAtom, editingBreakpointAtom, canvasZoomAtom } from './state/atoms'
+import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, queriesAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, slotNameOf, slotNameForNodeType, getCanvasBlocks, shapeRoleDataType, currentPageIdAtom, currentPageIsPublishedAtom, pagesListAtom, switchPageFnAtom, isPreviewModeAtom, canvasModeAtom, editingBreakpointAtom, canvasZoomAtom } from './state/atoms'
 import { summarisePageData, describeWhatWillBeLost, downloadPageData, deletePage } from './lib/pageDelete'
 import { newBlockId, defaultRuntimeForNodeType, defaultAttrsForNodeType, BLOCK_FOOTPRINT, nodeTypeFromBlockId, shortBlockId, isBlockNodeType, withoutVisitorState, portableTypeFromNodeType, nodeTypeFromPortableType, type BlockNodeType } from './lib/blockRegistry'
 import { ButtonBlock } from './blocks/ButtonBlock'
@@ -2128,6 +2128,7 @@ function App() {
 
     const workflows = store.get(workflowsAtom)
     const formulas = store.get(formulasAtom)
+    const queries = store.get(queriesAtom)
     const connections = store.get(connectionsAtom)
 
     const activeName = pagesList.find(p => p.id === activePageIdRef.current)?.name || 'Page 1'
@@ -2145,6 +2146,7 @@ function App() {
       blocks: blocksArray,
       workflows,
       formulas,
+      queries,
       databases: [],
       documentContent: editor.getJSON(),
       positions: positionsRecord,
@@ -2239,6 +2241,7 @@ function App() {
         store.set(connectionsAtom, [])
         store.set(workflowsAtom, [])
         store.set(formulasAtom, [])
+        store.set(queriesAtom, [])
         store.set(allBlockIdsAtom, [])
         editor?.commands.clearContent()
 
@@ -2320,6 +2323,7 @@ function App() {
         store.set(connectionsAtom, connections)
         store.set(workflowsAtom, importedPage.workflows || [])
         store.set(formulasAtom, importedPage.formulas || [])
+        store.set(queriesAtom, (importedPage as any).queries || [])
 
         if (editor) {
           editor.commands.setContent(docContent)
@@ -2765,6 +2769,7 @@ function App() {
         const workflows = store.get(workflowsAtom)
         const connections = store.get(connectionsAtom)
         const formulas = store.get(formulasAtom)
+        const queries = store.get(queriesAtom)
 
         /**
          * pageName is in here because save_page REPLACES the whole blocks blob.
@@ -2782,6 +2787,7 @@ function App() {
           runtimeStates,
           connections,
           formulas,
+          queries,
           // Only written when it is actually known. Writing undefined would
           // repeat the bug with extra steps.
           ...(currentName ? { pageName: currentName } : {}),
@@ -3155,8 +3161,17 @@ function App() {
     const unsubFormulas = store.sub(formulasAtom, () => {
       saveToSupabase()
     })
+    /**
+     * A question is page state like any other, so it saves like any other.
+     * Connections were left out of this exact list once and the page quietly
+     * forgot them on reload -- an omission that looks like nothing in a diff.
+     */
+    const unsubQueries = store.sub(queriesAtom, () => {
+      saveToSupabase()
+    })
     return () => {
       unsubWorkflows()
+      unsubQueries()
       unsubConnections()
       unsubFormulas()
     }
@@ -3210,6 +3225,7 @@ function App() {
       const workflows = store.get(workflowsAtom)
       const connections = store.get(connectionsAtom)
       const formulas = store.get(formulasAtom)
+      const queries = store.get(queriesAtom)
 
       const pageName = pagesList.find(p => p.id === pageId)?.name || 'Page 1'
 
@@ -3219,6 +3235,7 @@ function App() {
         runtimeStates,
         connections,
         formulas,
+        queries,
         pageName
       }
 
@@ -3287,6 +3304,7 @@ function App() {
     store.set(connectionsAtom, [])
     store.set(workflowsAtom, [])
     store.set(formulasAtom, [])
+    store.set(queriesAtom, [])
     setSelectedBlockId(null)
 
     // 4. Update active page state and persist to localStorage
@@ -3335,6 +3353,7 @@ function App() {
 
         // Populate formulas
         store.set(formulasAtom, blocksData.formulas || [])
+        store.set(queriesAtom, blocksData.queries || [])
 
         // Populate workflows
         store.set(workflowsAtom, workflowsData || [])
@@ -3434,6 +3453,7 @@ function App() {
       runtimeStates: {},
       connections: [],
       formulas: [],
+      queries: [],
       pageName: newPageName
     }
 
@@ -3499,6 +3519,7 @@ function App() {
             runtimeStates: {},
             connections: [],
             formulas: [],
+            queries: [],
             pageName: 'Page 1'
           }
           
@@ -3578,6 +3599,7 @@ function App() {
 
           // Populate formulas
           store.set(formulasAtom, blocksData.formulas || [])
+          store.set(queriesAtom, blocksData.queries || [])
 
           // Populate workflows
           store.set(workflowsAtom, workflowsData || [])

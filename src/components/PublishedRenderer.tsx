@@ -31,6 +31,7 @@ import {
   pageParamsAtom,
   workflowsAtom,
   formulasAtom,
+  queriesAtom,
   connectionsAtom,
   allBlockIdsAtom,
   blockValuesByName,
@@ -1219,6 +1220,14 @@ export default function PublishedRenderer() {
         // Populate Jotai store
         store.set(workflowsAtom, workflowsData);
         store.set(formulasAtom, blocksData.formulas || []);
+        /**
+         * A PUBLISHED PAGE HAS TO ASK THE SAME QUESTIONS THE EDITOR DID.
+         * Without this the queries are simply absent when a visitor arrives:
+         * `sumOf("ByMonth", "taken")` refuses for a table that "does not
+         * exist", and the repeater that showed the answer shows nothing --
+         * on the version of the page that actual people see, and nowhere else.
+         */
+        store.set(queriesAtom, blocksData.queries || []);
         store.set(connectionsAtom, blocksData.connections || []);
 
         const blockIds = blocks.map((b) => b.id);

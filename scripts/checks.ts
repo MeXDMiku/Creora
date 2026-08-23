@@ -13,7 +13,7 @@ import { execFileSync } from 'node:child_process';
 import { createStore } from 'jotai';
 import { validateValue, isValidPattern, RULE_TYPES } from '../src/lib/validation';
 import type { ValidationRule } from '../src/lib/validation';
-import { blockRuntimeAtom, workflowsAtom, allBlockIdsAtom, workflowRunsAtom, formulasAtom, switchPageFnAtom } from '../src/state/atoms';
+import { blockRuntimeAtom, workflowsAtom, allBlockIdsAtom, workflowRunsAtom, formulasAtom, queriesAtom, switchPageFnAtom } from '../src/state/atoms';
 import { executeWorkflow, validationErrorFor, markValidated } from '../src/lib/bindingEngine';
 import { evaluateCondition } from '../src/lib/conditions';
 import { describeCollectionError, MIGRATION_DOC } from '../src/lib/collections';
@@ -46,7 +46,7 @@ import { remapBlockIds, shouldRemapOnImport, remapFormulaExpression } from '../s
 import { summarisePageData, describeWhatWillBeLost, describeDeleteError } from '../src/lib/pageDelete';
 import { toCsv, csvCell, csvFileName } from '../src/lib/csv';
 import { evaluateExpression, FORMULA_FUNCTION_NAMES, explainUnreadableFormula, facetsOf, addFacets } from '../src/lib/formula';
-import { stepConditionResult, formulaScope, recalculateAllFormulas, runPageLoadWorkflows, fetchListBlockRows, shouldFetchListRows } from '../src/lib/bindingEngine';
+import { stepConditionResult, formulaScope, recalculateAllFormulas, runPageLoadWorkflows, fetchListBlockRows, shouldFetchListRows, tableScope, rawTableScope, resolvePageQueries } from '../src/lib/bindingEngine';
 import { safeUrl, isSafeUrlValue, schemeOf, stripIgnorable } from '../src/lib/urls';
 import { fillSlots, leadingSlotName, findSlots as findSlotsForCheck } from '../src/lib/sanitizeHtml';
 import { slotValuesFrom } from '../src/lib/useSlotValues';
@@ -55,6 +55,7 @@ import { interpretSave, shouldKeepAutosaving, PageStamps } from '../src/lib/save
 import { describeRowWriteError, withoutRow } from '../src/lib/rowWrite';
 import { ruleAllows, ruleToSql, rulesToMigration, ruleWarnings } from '../src/lib/rules';
 import { runQuery, applyKeep, previewQuery, describeQuery } from '../src/lib/query';
+import { resolveQueries, queryDependsOn, queriesMentioning, describeNamedQuery, columnsOf, pageNamesIn } from '../src/lib/queries';
 import { chartBars, MIN_BAR_HEIGHT } from '../src/lib/chartBars';
 import { timerStep, timerResetValue } from '../src/lib/useTimer';
 import { duplicatedRuns, duplicatedLineCount } from './rendererDrift';
@@ -7642,6 +7643,237 @@ group('a named question, answered over tables');
     describeQuery({ from: '' }), 'Pick a table to ask about.');
 }
 
+group('a question keeps its answer, and the page reads it like a table');
+{
+  /**
+   * PRIMITIVE A'S RUNTIME. `query.ts` could already answer a question; this is
+   * what makes the answer usable — the question gets a NAME, and every part of
+   * the page that already knows how to read a table reads the answer too.
+   *
+   * The three ways a named question goes wrong are the whole of this group,
+   * because a builder must never find any of them out by watching a page be
+   * wrong: a name that clashes, a question about a question, and a circle.
+   */
+  const base = {
+    Sales: {
+      rows: [
+        { id: '1', At: '2026-05-04', Product: 'Mug', Pence: 1800 },
+        { id: '2', At: '2026-05-19', Product: 'Bowl', Pence: 4200 },
+        { id: '3', At: '2026-06-02', Product: 'Mug', Pence: 1800 },
+        { id: '4', At: '2026-06-21', Product: 'Bowl', Pence: 4200 },
+      ],
+      columns: ['At', 'Product', 'Pence'],
+    },
+    Orders: {
+      rows: [
+        { id: 'o1', Customer: 'c1', Total: 1800 },
+        { id: 'o2', Customer: 'c2', Total: 4200 },
+        { id: 'o3', Customer: 'c1', Total: 4200 },
+      ],
+      columns: ['Customer', 'Total'],
+    },
+  };
+  const q = (id: string, name: string, def: any) => ({ id, name, def });
+  /**
+   * EVERY CALL IN THIS GROUP GOES THROUGH HERE.
+   *
+   * The promise of queries.ts is that it never throws — a page whose fourth
+   * question has a typo still shows the other three. A check that DIES when
+   * that promise breaks cannot be the check that proves it: two controls came
+   * back "went red, but not where it should", because removing the cycle guard
+   * blows the stack and removing the error-catch rethrows, and both killed the
+   * suite before a single named check could report. Same lesson as ran(),
+   * one level up.
+   */
+  const resolve = (base: any, qs: any[], page?: any) => {
+    try {
+      return resolveQueries(base, qs, page);
+    } catch (e: any) {
+      const why = `THREW, WHICH THIS FILE PROMISES NOT TO DO: ${e?.message ?? String(e)}`;
+      return { tables: {} as any, errors: { a: why, b: why, c: why } as any, order: [why] };
+    }
+  };
+
+  // --- the answer is a table --------------------------------------------
+  const byProduct = resolve(base as any, [
+    q('a', 'ByProduct', { from: 'Sales', groupBy: '{{Product}}', keep: { taken: 'sum of {{Pence}}' } }),
+  ]);
+  check('A QUESTION\'S ANSWER ARRIVES AS A TABLE UNDER ITS OWN NAME',
+    Object.keys(byProduct.tables).includes('ByProduct'), true);
+  check('with the rows the question asked for',
+    byProduct.tables.ByProduct?.rows,
+    // Each group carries an id of its own: a repeater keys its rows by id, and
+    // a list of rows with no ids is a list React redraws from scratch.
+    [{ id: 'g0', group: 'Mug', taken: 3600 }, { id: 'g1', group: 'Bowl', taken: 8400 }]);
+  check('AND THE COLUMNS IT INVENTED, so sumOf can be written against them',
+    byProduct.tables.ByProduct?.columns, ['group', 'taken']);
+  check('the page\'s own tables are still there', Object.keys(byProduct.tables).includes('Sales'), true);
+  check('and nothing went wrong', byProduct.errors, {});
+  check('the order it ran in is reported', byProduct.order, ['ByProduct']);
+
+  // --- a question about a question --------------------------------------
+  const stacked = resolve(base as any, [
+    q('b', 'Best', { from: 'ByProduct', orderBy: '{{taken}}', direction: 'desc', limit: 1 }),
+    q('a', 'ByProduct', { from: 'Sales', groupBy: '{{Product}}', keep: { taken: 'sum of {{Pence}}' } }),
+  ]);
+  check('A QUESTION MAY BE ABOUT ANOTHER QUESTION',
+    stacked.tables.Best?.rows, [{ id: 'g1', group: 'Bowl', taken: 8400 }]);
+  check('EVEN WHEN IT IS WRITTEN FIRST — the order is what they are about, not what order they were typed in',
+    stacked.order, ['ByProduct', 'Best']);
+  check('and neither of them failed', stacked.errors, {});
+
+  // --- a circle -----------------------------------------------------------
+  const circle = resolve(base as any, [
+    q('a', 'A', { from: 'B' }),
+    q('b', 'B', { from: 'A' }),
+  ]);
+  check('A CIRCLE IS REPORTED RATHER THAN HUNG ON',
+    String(circle.errors.a || '').includes('about each other'), true);
+  check('and the report NAMES THE LOOP, because a page that says only "something is wrong" is the complaint about every one of these tools',
+    String(circle.errors.a || '').includes('A → B → A'), true);
+  check('both questions in the loop are told, not just the one that noticed',
+    Object.keys(circle.errors).sort(), ['a', 'b']);
+  check('and a circle does not put a half-built table on the page',
+    Object.keys(circle.tables).sort(), ['Orders', 'Sales']);
+
+  const longer = resolve(base as any, [
+    q('a', 'A', { from: 'B' }), q('b', 'B', { from: 'C' }), q('c', 'C', { from: 'A' }),
+  ]);
+  check('a longer circle is caught too', Object.keys(longer.errors).length, 3);
+
+  // --- a name that clashes ------------------------------------------------
+  const shadow = resolve(base as any, [q('a', 'Sales', { from: 'Orders' })]);
+  check('A QUESTION MAY NOT TAKE THE NAME OF A TABLE ALREADY ON THE PAGE',
+    String(shadow.errors.a || '').includes('already called "Sales"'), true);
+  check('AND THE BLOCK KEEPS ITS TABLE — the page shows what it showed before, not the question\'s answer',
+    shadow.tables.Sales?.rows.length, 4);
+
+  const twice = resolve(base as any, [
+    q('a', 'Totals', { from: 'Sales' }), q('b', 'Totals', { from: 'Orders' }),
+  ]);
+  check('two questions cannot share one name', String(twice.errors.b || '').includes('already called "Totals"'), true);
+  check('and the first one still works', twice.tables.Totals?.rows.length, 4);
+
+  check('a question with no name says what to do about it',
+    String(resolve(base as any, [q('a', '  ', { from: 'Sales' })]).errors.a || '').includes('Give this question a name'), true);
+  check('a name that could never be typed into a formula is refused',
+    String(resolve(base as any, [q('a', '2 Sales!', { from: 'Sales' })]).errors.a || '').includes('cannot be a name'), true);
+  check('AND A NAME THAT ALREADY MEANS SOMETHING EVERYWHERE IS REFUSED',
+    String(resolve(base as any, [q('a', 'Me', { from: 'Sales' })]).errors.a || '').includes('already means something'), true);
+  check('the check on that is not case-sensitive, because "me" and "Me" are the same mistake',
+    String(resolve(base as any, [q('a', 'me', { from: 'Sales' })]).errors.a || '').includes('already means something'), true);
+
+  // --- one bad question does not take the page down -----------------------
+  const mixed = resolve(base as any, [
+    q('a', 'Good', { from: 'Sales', keep: { n: 'count' } }),
+    q('b', 'Bad', { from: 'Salez' }),
+    q('c', 'AlsoGood', { from: 'Orders', keep: { n: 'count' } }),
+  ]);
+  check('A QUESTION THAT CANNOT BE ANSWERED DOES NOT STOP THE OTHERS',
+    mixed.order, ['Good', 'AlsoGood']);
+  check('and the failure NAMES THE QUESTION, not just the problem',
+    String(mixed.errors.b || '').startsWith('"Bad" could not be answered'), true);
+  check('and says what was actually wrong inside it',
+    String(mixed.errors.b || '').includes('There is no table called "Salez"'), true);
+  check('THE RESOLVER NEVER THROWS, whatever it is handed',
+    ran(() => Object.keys(resolve(base as any, [
+      q('a', 'X', null as any), q('b', 'Y', { from: 'Sales', keep: { n: 'nonsense' } }),
+    ]).errors).length), 2);
+
+  // --- a question about who is looking ------------------------------------
+  const mine = resolve(base as any, [
+    q('a', 'Mine', { from: 'Orders', where: '{{Customer}} == Me' }),
+  ], { Me: 'c1' });
+  check('A QUESTION CAN BE ABOUT WHO IS LOOKING', mine.tables.Mine?.rows.length, 2);
+  check('and answers differently for somebody else',
+    resolve(base as any, [q('a', 'Mine', { from: 'Orders', where: '{{Customer}} == Me' })],
+      { Me: 'c2' }).tables.Mine?.rows.length, 1);
+  check('the names it needs from the page can be listed before it runs',
+    pageNamesIn({ from: 'Orders', where: '{{Customer}} == {{Me}}' } as any), ['Customer', 'Me']);
+
+  // --- what a question is about, for renames ------------------------------
+  check('what a question is about includes the table it reads',
+    queryDependsOn({ from: 'Sales' } as any), ['Sales']);
+  check('both tables of a union', queryDependsOn({ from: [{ table: 'Likes' }, { table: 'Follows' }] } as any),
+    ['Likes', 'Follows']);
+  check('AND A TABLE NAMED ONLY INSIDE A FORMULA, which is how a dependency hides',
+    queryDependsOn({ from: 'Sales', keep: { share: 'first {{Pence}} / sumOf("Orders", "Total")' } } as any),
+    ['Sales', 'Orders']);
+  check('so the page can say what renaming a table would break',
+    queriesMentioning('Orders', [
+      q('a', 'One', { from: 'Sales' }), q('b', 'Two', { from: 'Orders' }),
+    ] as any).map((x: any) => x.name), ['Two']);
+  check('and a question reads back as a sentence with its name in front',
+    describeNamedQuery(q('a', 'ByProduct', { from: 'Sales', groupBy: '{{Product}}' }) as any),
+    'ByProduct is rows from Sales, grouped by {{Product}}.');
+
+  // --- and the page really does read it -----------------------------------
+  /**
+   * THROUGH THE SAME DOOR THE PAGE USES.
+   *
+   * Everything above calls resolveQueries directly, which proves the resolver
+   * and proves nothing about whether anything is WIRED to it. That gap is the
+   * one that ships: a primitive that works perfectly and is never called. So
+   * this last part goes through tableScope with a real store, exactly as a
+   * formula on a page does.
+   */
+  {
+    const store = createStore();
+    const id = 'databaseBlock__q0001';
+    store.set(allBlockIdsAtom, [id]);
+    store.set(blockRuntimeAtom(id), {
+      ...defaultRuntimeForNodeType('databaseBlock'),
+      blockName: 'Sales',
+      columns: [{ name: 'Product' }, { name: 'Pence' }],
+      rows: [
+        { id: '1', Product: 'Mug', Pence: 1800 },
+        { id: '2', Product: 'Bowl', Pence: 4200 },
+        { id: '3', Product: 'Mug', Pence: 1800 },
+      ],
+    });
+
+    const scopeOf = () => ran(() => tableScope(store as any)) as any;
+    check('with no questions saved, the page has only its blocks\' tables',
+      Object.keys(scopeOf()).includes('ByProduct'), false);
+
+    store.set(queriesAtom, [
+      { id: 'a', name: 'ByProduct', def: { from: 'Sales', groupBy: '{{Product}}', keep: { taken: 'sum of {{Pence}}' } } },
+    ]);
+    const scope = scopeOf();
+    check('A QUESTION IS ANSWERED OVER THE PAGE AND ITS ANSWER IS ON THE PAGE',
+      scope.ByProduct?.rows, [{ id: 'g0', group: 'Mug', taken: 3600 }, { id: 'g1', group: 'Bowl', taken: 4200 }]);
+    check('AND A FORMULA CAN TOTAL IT BY NAME, which is the whole point of giving it one',
+      evaluateExpression('sumOf("ByProduct", "taken")', {}, scope), 7800);
+    check('and the block it was asked about is untouched',
+      scope.Sales?.rows.length, 3);
+    check('THE TABLES A QUESTION IS ANSWERED OVER NEVER INCLUDE ANOTHER ANSWER',
+      Object.keys(ran(() => rawTableScope(store as any)) as any).includes('ByProduct'), false);
+
+    // A row arriving changes the answer. A query that answered once and then
+    // stayed put would be a stale number on a dashboard, which is the failure
+    // this project keeps naming as the worst one.
+    store.set(blockRuntimeAtom(id), {
+      ...store.get(blockRuntimeAtom(id)),
+      rows: [...store.get(blockRuntimeAtom(id)).rows, { id: '4', Product: 'Mug', Pence: 1000 }],
+    });
+    check('A ROW ARRIVING CHANGES THE ANSWER, rather than leaving a stale number on the page',
+      scopeOf().ByProduct?.rows[0], { id: 'g0', group: 'Mug', taken: 4600 });
+
+    // And the failures are readable from the same store, by the panel.
+    store.set(queriesAtom, [{ id: 'a', name: 'ByProduct', def: { from: 'Salez' } }]);
+    check('and a question that cannot be answered is readable, named, from the store',
+      String((ran(() => resolvePageQueries(store as any)) as any)?.errors?.a || '').startsWith('"ByProduct" could not be answered'), true);
+    check('while the page still shows every block on it',
+      Object.keys(scopeOf()).includes('Sales'), true);
+  }
+
+  // --- the columns of an answer -------------------------------------------
+  check('the columns of an answer come from the rows, since a query invents them',
+    columnsOf([{ id: '1', a: 1 }, { id: '2', b: 2 }]), ['a', 'b']);
+  check('AND AN EMPTY ANSWER DECLARES NO COLUMNS, so columnNamed does not guess at a typo',
+    columnsOf([]), []);
+}
+
 group('who may do what, said once, enforced at the store');
 {
   /**
@@ -8417,7 +8649,7 @@ group('a slot can contain a slot');
  * Raise it in the same commit that adds the checks, the way the drift budget
  * above is raised: a number changed where it can be seen in a diff.
  */
-const EXPECTED_CHECKS = 1942;
+const EXPECTED_CHECKS = 1986;
 reachedTheEnd = true;
 if (passed + failed !== EXPECTED_CHECKS) {
   failed++;

@@ -1,6 +1,7 @@
 import { addFacets } from '../lib/formula';
 import { atom } from 'jotai';
 import { atomFamily } from 'jotai/utils';
+import type { NamedQuery } from '../lib/queries';
 import type { Workflow, FormulaBinding, PageSummary, BlockRuntimeState } from '../types/creora';
 import { nodeTypeFromBlockId, defaultValueForNodeType, defaultRuntimeForNodeType, shortBlockId, isBlockNodeType, BLOCK_DISPLAY_NAMES, type BlockNodeType } from '../lib/blockRegistry';
 import type { BlockPlacement } from '../lib/layout';
@@ -293,6 +294,21 @@ export function getCanvasBlocks(editor: any, store: any, excludeBlockId?: string
 }
 
 export const formulasAtom = atom<FormulaBinding[]>([]);
+
+/**
+ * The questions this page asks of its own tables.
+ *
+ * A query is saved with the page, not with a block, because the answer is not
+ * one block's business -- "sales by month" feeds a repeater, a total and a
+ * condition at once, and hanging it off whichever block happened to show it
+ * first would mean deleting that block deletes the question.
+ *
+ * Kept here as ids-and-names only; running them is resolveQueries in
+ * lib/queries.ts, and the result arrives in tableScope under each name.
+ *
+ * LOG 2026-08-23  Added with primitive A's runtime wiring.
+ */
+export const queriesAtom = atom<NamedQuery[]>([]);
 /** Publish state of the page currently open in the editor. Set on load from get_page. */
 export const currentPageIsPublishedAtom = atom<boolean>(false);
 export const currentPageIdAtom = atom<string>('00000000-0000-0000-0000-000000000001');

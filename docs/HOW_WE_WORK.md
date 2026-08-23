@@ -353,6 +353,82 @@ change I just made broke the relation work* — was wrong.
 **Run it in the foreground, and do not touch the tree while it runs.** If a run
 is cut short, `grep -rn "control:" src/` names the damage in one line.
 
+### It happened twice more, by two routes neither of which felt like backgrounding
+
+**2026-08-23.** The rule above was already written down, and I broke it twice in
+one afternoon without once thinking "I am running the controls in the
+background".
+
+*The first route was `node -e "import('./scripts/control.mjs')"`* — to check the
+file still parsed after editing it. `control.mjs` runs at import. Three seconds
+later the shell ended, and `bindSlots` was left with `const scope = {}`. Fifty-six
+checks went red, in seven groups, none of them the one I was working on, and the
+obvious reading was again the wrong one: *the query wiring broke the relations*.
+I bisected my own new code for ten minutes before running `git diff src/`, which
+answered it instantly. **`git diff src/` first, always, when unrelated checks go
+red.** It costs one second and it is right more often than reasoning is.
+
+*The second route was `nohup … &` plus polling*, so I could work in the cloud lab
+meanwhile. `nohup` did not save it: the run died with the shell that started it,
+and this time the restore only got as far as the first file. `formulaScope` was
+left with `const scope = {}` and two more checks were red.
+
+So the rule is stronger than "foreground":
+
+> **A control run must not outlive the single call that started it.**
+
+Each control re-runs the whole suite (~3s), so all 57 take about three minutes —
+longer than one call to the tools that reach this repo. **Run them in
+name-filtered chunks that each finish inside one call**, and confirm the tree is
+green between chunks:
+
+```
+node scripts/control.mjs "relation"    node scripts/control.mjs "facets:"
+node scripts/control.mjs "list:"       node scripts/control.mjs "rules:"
+node scripts/control.mjs "feed:"       node scripts/control.mjs "query:"
+node scripts/control.mjs "step:"       node scripts/control.mjs "queries:"
+```
+
+Note the colons. `"query"` also matches every `queries:` control, which is
+sixteen of them and over the limit — the thing the chunking exists to avoid.
+
+
+## `git checkout --` cannot undo anything in this working copy
+
+The repo is reached over a mount that forbids `unlink`. `git checkout -- <file>`
+deletes the file before writing it back, so it fails with
+
+```
+error: unable to unlink old 'src/App.tsx': Operation not permitted
+```
+
+and leaves the mess in place — which is a bad thing to discover while cleaning up
+after a half-applied control run. What works is writing over it:
+
+```
+git show HEAD:src/App.tsx > src/App.tsx
+```
+
+Same for the stale `.git/index.lock` git keeps failing to remove: it cannot be
+deleted, but it can be moved (`mv .git/index.lock _to_delete/`), and until it is,
+`git checkout` and friends refuse with "Another git process seems to be running".
+`git add` and `git commit` work through it, which is why this is easy to miss.
+
+
+## A search-and-replace that is a substring of another one
+
+While wiring `queriesAtom` into `App.tsx` I replaced
+`"    const formulas = store.get(formulasAtom)\n"` — four spaces — and asserted
+it appeared once. It appeared three times, because the four-space string is a
+**substring of the eight-space one**. The assert passed for the wrong reason and
+the file came out with `const queries` declared three times in one scope.
+
+Indentation is not a distinguishing anchor when you are matching a prefix. Either
+match whole lines (split on `\n`, compare `line.strip()`, and re-indent from the
+line you matched) or anchor on something that is not whitespace. `tsc` catches
+the duplicate-declaration version of this mistake; it does not catch the version
+where the line simply lands in the wrong one of three places.
+
 
 ## The instrument lied a second time, quieter
 
