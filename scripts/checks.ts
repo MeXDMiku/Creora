@@ -53,6 +53,7 @@ import { slotValuesFrom } from '../src/lib/useSlotValues';
 import { slotNameOf, slotNameForNodeType } from '../src/state/atoms';
 import { interpretSave, shouldKeepAutosaving, PageStamps } from '../src/lib/savePage';
 import { describeRowWriteError, withoutRow } from '../src/lib/rowWrite';
+import { ruleAllows, ruleToSql, rulesToMigration, ruleWarnings } from '../src/lib/rules';
 import { chartBars, MIN_BAR_HEIGHT } from '../src/lib/chartBars';
 import { timerStep, timerResetValue } from '../src/lib/useTimer';
 import { duplicatedRuns, duplicatedLineCount } from './rendererDrift';
@@ -7471,6 +7472,177 @@ group('a list can be filtered and ordered by something worked out');
 }
 
 
+group('who may do what, said once, enforced at the store');
+{
+  /**
+   * PRIMITIVE C from docs/CONNECTING_THE_TWO.md, and the only one of the six
+   * that is a SAFETY problem rather than a convenience. Everything else being
+   * missing makes a site harder to build; this being missing makes a built site
+   * unsafe, in a way nobody can see from outside, because hiding a block looks
+   * exactly like withholding a row.
+   *
+   * Checked twice over -- what a rule MEANS and what it COMPILES TO -- because
+   * a rule that reads correctly and compiles to something else is worse than no
+   * rule: it is a rule you would rely on.
+   */
+  const ada = { id: 'u1', role: 'customer', email: 'ada@example.com' };
+  const agent = { id: 'a1', role: 'agent', email: 'p@example.com' };
+  const out = null;
+
+  const mine = '{{Owner}} == Me';
+  check('my own row', ruleAllows(mine, { Owner: 'u1' }, ada), true);
+  check('somebody else’s', ruleAllows(mine, { Owner: 'u2' }, ada), false);
+
+  /**
+   * THE ONE THAT WOULD HAVE SHIPPED. `{{Owner}} == Me` with no session made Me
+   * blank, and a row with a blank Owner made it blank == blank -- true. A
+   * signed-out stranger matched every ownerless row.
+   *
+   * And Postgres would NOT have agreed: `owner = auth.uid()` with both null is
+   * NULL, which a policy reads as refuse. The page would have shown what the
+   * database hid, and only one of them is the real answer.
+   */
+  /**
+   * A blank text column holds `''`, not null -- which is the case that leaks
+   * and the case a control proved the first version of this check missed. With
+   * `Me` blank for a signed-out visitor, `'' == ''` is TRUE, and a stranger
+   * matched every ownerless row. The null case is here too because a number or
+   * date column blanks that way instead.
+   */
+  check('AND SIGNED OUT IS NOT A MATCH FOR A BLANK OWNER',
+    ruleAllows(mine, { Owner: '' }, out), false);
+  check('nor for a null one, which is how a number or a date blanks',
+    ruleAllows(mine, { Owner: null }, out), false);
+  check('nor a blank one when signed in as somebody else',
+    ruleAllows(mine, { Owner: null }, ada), false);
+  check('and a rule about an email is the same',
+    ruleAllows('{{Email}} == MyEmail', { Email: null }, out), false);
+  check('while a rule about a role still works signed out, because "anon" is an answer',
+    ruleAllows('MyRole == "anon"', {}, out), true);
+
+  check('anybody', ruleAllows('anybody', {}, out), true);
+  check('nobody', ruleAllows('nobody', {}, agent), false);
+  check('signed in', ruleAllows('signed in', {}, ada), true);
+  check('and signed in is false when you are not', ruleAllows('signed in', {}, out), false);
+  check('NO RULE AT ALL MEANS NOBODY, which is the safe default',
+    ruleAllows('', {}, agent), false);
+  /**
+   * A BROKEN RULE REFUSES, which is the opposite of every other formula here.
+   * A filter that fails open shows too many rows and somebody sees it; a rule
+   * that fails open is a leak, and a leak is invisible to the person it happens
+   * to. The two point opposite ways on purpose.
+   */
+  check('AND A RULE THAT CANNOT BE WORKED OUT REFUSES',
+    ruleAllows('{{Owner}} ===== Me', { Owner: 'u1' }, ada), false);
+
+  const byRole = 'MyRole == "agent" or {{Author}} == Me';
+  check('an agent sees everything', ruleAllows(byRole, { Author: 'u9' }, agent), true);
+  check('a customer sees their own', ruleAllows(byRole, { Author: 'u1' }, ada), true);
+  check('and not the rest', ruleAllows(byRole, { Author: 'u9' }, ada), false);
+
+  /** Column-shaped security as a row rule -- why "hide the block" is not a model. */
+  const notInternal = 'MyRole == "agent" or {{Internal}} == false';
+  check('a customer sees an ordinary message', ruleAllows(notInternal, { Internal: false }, ada), true);
+  check('AND NOT AN INTERNAL NOTE ON THEIR OWN TICKET', ruleAllows(notInternal, { Internal: true }, ada), false);
+  check('while an agent sees both', ruleAllows(notInternal, { Internal: true }, agent), true);
+
+  // ---------------------------------------------------------- compiling
+  /**
+   * Through ran(), so a control that breaks the compiler turns these RED rather
+   * than taking the whole suite down with them -- the lesson from the harness
+   * at the top of this file, applied where it was needed again.
+   */
+  const toSql = (rule: string, table = 't') => ran(() => ruleToSql(rule, table));
+  check('a column and Me', toSql('{{Owner}} == Me', 'notes'), 'owner = auth.uid()');
+  /**
+   * A TEXT VALUE MUST BECOME A SQL STRING, NOT A COLUMN NAME.
+   *
+   * The first version of this check had the bug written into its own expected
+   * value -- it asserted `= "agent"`, which in SQL means the COLUMN agent.
+   * Postgres would have said "column agent does not exist" or, worse, compared
+   * against a real column of that name and said nothing. A check written from
+   * the same wrong idea as the code cannot catch the code, so this one says the
+   * quote kind out loud.
+   */
+  check('A ROLE BECOMES A SQL STRING IN SINGLE QUOTES, not an identifier in double',
+    toSql('MyRole == "agent"', 'tickets'), "auth.jwt() ->> 'role' = 'agent'");
+  check('and no double quotes survive anywhere',
+    String(toSql('MyRole == "agent" or {{Owner}} == Me')).includes('"'), false);
+  check('AN APOSTROPHE INSIDE A VALUE IS DOUBLED, not left to end the string early',
+    toSql(`{{Name}} == "O'Brien"`), "name = 'O''Brien'");
+  /**
+   * A NAME WITH AN ACCENT IN IT IS NOT EXOTIC. The safety test used to run on
+   * the whole statement and could not tell a letter in a comparison from a
+   * letter inside a quoted value, so it refused this -- and refusing a security
+   * rule sends somebody to write it some other way, which for a security rule
+   * means writing it wrong.
+   */
+  check('and a value with an accent in it is allowed through',
+    toSql('{{Name}} == "José"'), "name = 'José'");
+  check('while something genuinely untranslatable is still refused',
+    String(toSql('{{A}} == Me && {{B}}')).includes('cannot be told'), true);
+  check('anybody and nobody are literal', [toSql('anybody'), toSql('nobody')], ['true', 'false']);
+  check('an empty rule compiles to false, not to nothing', toSql(''), 'false');
+  check('signed in', toSql('signed in'), 'auth.uid() is not null');
+  check('and / or survive', toSql('{{A}} == Me and {{B}} != 1'), 'a = auth.uid() and b <> 1');
+  check('a column name with a space becomes a real identifier',
+    toSql('{{Row owner}} == Me'), 'row_owner = auth.uid()');
+
+  /**
+   * THE REFUSALS ARE THE POINT. Anything the compiler does not understand must
+   * never become `true`.
+   */
+  const refuse = (rule: string) => toSql(rule, 'posts');
+  check('a rule that asks about another table is refused',
+    String(refuse(`countOf("Likes", '{{PostId}} == Me') > 0`)).includes('cannot ask about another table'), true);
+  check('and says what to do instead',
+    String(refuse('sumOf("Orders", "Total") > 100')).includes('Put the answer in a column'), true);
+  check('something it simply cannot translate is refused too',
+    String(refuse('{{A}} == Me ? 1 : 2')).includes('the database cannot be told'), true);
+
+  // ---------------------------------------------------------- the migration
+  const sql = rulesToMigration('bookings', {
+    read: 'anybody', insert: '{{User id}} == Me', update: '{{User id}} == Me', delete: 'nobody',
+    unique: [['Slot id', 'User id']],
+  });
+  check('it turns row level security on', sql.includes('enable row level security'), true);
+  check('and it is one transaction', sql.includes('begin;') && sql.trim().endsWith('commit;'), true);
+  check('IT DROPS BEFORE IT CREATES, so running it twice is safe',
+    (sql.match(/drop policy if exists/g) || []).length, 4);
+  check('AN INSERT POLICY USES WITH CHECK',
+    sql.includes('for insert with check (user_id = auth.uid())'), true);
+  check('AND AN UPDATE USES BOTH, or a row can be changed OUT of your reach',
+    sql.includes('for update using (user_id = auth.uid()) with check (user_id = auth.uid())'), true);
+  check('a delete nobody may do is a policy saying false, not a missing policy',
+    sql.includes('for delete using (false)'), true);
+  check('and uniqueness across two columns comes with it',
+    sql.includes('create unique index if not exists bookings_unique_slot_id_user_id on public.bookings (slot_id, user_id);'), true);
+  check('a rule that cannot compile stops the whole migration rather than half-writing one',
+    String(ran(() => rulesToMigration('posts', { read: 'countOf("X") > 0' }))).includes('cannot ask about another table'), true);
+
+  // ---------------------------------------------------------- the warnings
+  const cols = (...names: string[]) => names.map(n => ({ name: n }));
+  check('a table nothing can read is called out',
+    ruleWarnings('orders', { read: 'nobody' }, cols('Total'))[0].includes('will be empty'), true);
+  check('personal columns readable by anybody are called out',
+    ruleWarnings('people', { read: 'anybody' }, cols('Name', 'Email'))[0].includes('reaches every visitor'), true);
+  /**
+   * THE ONE NOBODY EXPECTS. An add rule of "signed in" on a table with an owner
+   * column lets anybody signed in write a row IN SOMEBODY ELSE'S NAME, and
+   * nothing about the page looks wrong afterwards.
+   */
+  const forged = ruleWarnings('notes', { read: 'signed in', insert: 'signed in' }, cols('Owner', 'Body'));
+  check('AN ADD RULE THAT DOES NOT PIN THE OWNER IS CALLED OUT',
+    forged.some(w => w.includes('another person')), true);
+  check('and it says the sentence to write', forged.some(w => w.includes('{{Owner}} == Me')), true);
+  check('a rule that does pin it is not accused',
+    ruleWarnings('notes', { read: 'signed in', insert: '{{Owner}} == Me' }, cols('Owner', 'Body'))
+      .some(w => w.includes('another person')), false);
+  check('and a table with no owner column is not accused either',
+    ruleWarnings('logs', { read: 'signed in', insert: 'signed in' }, cols('Message'))
+      .some(w => w.includes('another person')), false);
+}
+
 group('a block that fetches has three answers, not one');
 {
   /**
@@ -8057,7 +8229,7 @@ group('a slot can contain a slot');
  * Raise it in the same commit that adds the checks, the way the drift budget
  * above is raised: a number changed where it can be seen in a diff.
  */
-const EXPECTED_CHECKS = 1854;
+const EXPECTED_CHECKS = 1901;
 reachedTheEnd = true;
 if (passed + failed !== EXPECTED_CHECKS) {
   failed++;
