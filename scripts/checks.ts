@@ -54,6 +54,7 @@ import { slotNameOf, slotNameForNodeType } from '../src/state/atoms';
 import { interpretSave, shouldKeepAutosaving, PageStamps } from '../src/lib/savePage';
 import { describeRowWriteError, withoutRow } from '../src/lib/rowWrite';
 import { ruleAllows, ruleToSql, rulesToMigration, ruleWarnings } from '../src/lib/rules';
+import { runQuery, applyKeep, previewQuery, describeQuery } from '../src/lib/query';
 import { chartBars, MIN_BAR_HEIGHT } from '../src/lib/chartBars';
 import { timerStep, timerResetValue } from '../src/lib/useTimer';
 import { duplicatedRuns, duplicatedLineCount } from './rendererDrift';
@@ -7472,6 +7473,175 @@ group('a list can be filtered and ordered by something worked out');
 }
 
 
+group('a named question, answered over tables');
+{
+  /**
+   * PRIMITIVE A from docs/CONNECTING_THE_TWO.md. Four gaps, one idea: a list
+   * whose rows are not the rows of one table -- group-by, unions, store-side
+   * paging, dedupe.
+   *
+   * WHAT THE RESEARCH CHANGED. Node tools have existed since Sutherland
+   * proposed defining programs as diagrams in 1966, and the same thing kills
+   * them: expressions that are code wearing a costume. The clearest current
+   * case is n8n, whose own reviewers say non-coders fall off at things like
+   * `{{ $json.customer.email.split('@')[0] }}`.
+   *
+   * So KEEP is seven English phrases, and anything else is refused BY LISTING
+   * THE SEVEN -- because the other thing reviewers say kills these tools is an
+   * error with no name and no place in it.
+   */
+  const SALES = [
+    { id: 's1', At: '2026-05-04', Product: 'Mug', Channel: 'shop', Pence: 1800, Customer: 'c1' },
+    { id: 's2', At: '2026-05-19', Product: 'Bowl', Channel: 'stall', Pence: 4200, Customer: 'c2' },
+    { id: 's3', At: '2026-06-02', Product: 'Mug', Channel: 'shop', Pence: 1800, Customer: 'c1' },
+    { id: 's4', At: '2026-06-21', Product: 'Tool', Channel: 'wholesale', Pence: 900, Customer: 'c3' },
+    { id: 's5', At: '2026-07-08', Product: 'Bowl', Channel: 'shop', Pence: 4200, Customer: 'c2' },
+    { id: 's6', At: '2026-07-30', Product: 'Mug', Channel: 'stall', Pence: 1800, Customer: 'c4' },
+  ];
+  const LIKES = [
+    { id: 'k1', PostId: 'p1', Who: 'u2', At: '2026-08-19T10:00:00Z' },
+    { id: 'k2', PostId: 'p9', Who: 'u3', At: '2026-08-19T12:00:00Z' },
+    { id: 'k3', PostId: 'pX', Who: 'u5', At: '2026-08-19T13:00:00Z' },
+  ];
+  const FOLLOWS = [
+    { id: 'f1', Follower: 'u4', Following: 'u1', At: '2026-08-19T11:00:00Z' },
+    { id: 'f2', Follower: 'u5', Following: 'u9', At: '2026-08-19T09:00:00Z' },
+  ];
+  const T = {
+    Sales: { rows: SALES, columns: ['At', 'Product', 'Channel', 'Pence', 'Customer'] },
+    Likes: { rows: LIKES, columns: ['PostId', 'Who', 'At'] },
+    Follows: { rows: FOLLOWS, columns: ['Follower', 'Following', 'At'] },
+  };
+  const ask = (def: any, page?: any) => ran(() => runQuery(def, T as any, page));
+  const cell = (rows: any, col: string) => Array.isArray(rows) ? rows.map((r: any) => r[col]) : rows;
+  /**
+   * A query that throws comes back from ran() as a STRING, and `.reduce` on a
+   * string takes the whole suite down rather than failing one check. A control
+   * proved that the hard way. Anything that indexes into a result goes through
+   * here, so a broken query is a red line and not a crash.
+   */
+  const list = (v: any): any[] => (Array.isArray(v) ? v : []);
+
+  // --- what nothing in the language could do -------------------------------
+  const byMonth = ask({
+    from: 'Sales', groupBy: 'left({{At}}, 7)',
+    keep: { taken: 'sum of {{Pence}}', sold: 'count' }, orderBy: '{{group}}',
+  });
+  check('GROUP BY MONTH, and nobody listed the months in advance',
+    cell(byMonth, 'group'), ['2026-05', '2026-06', '2026-07']);
+  check('with the money added up per bucket', cell(byMonth, 'taken'), [6000, 2700, 6000]);
+  check('and the rows counted', cell(byMonth, 'sold'), [2, 2, 2]);
+  check('THE BUCKETS ADD UP TO THE WHOLE, or the grouping lost something',
+    list(byMonth).reduce((t, r) => t + r.taken, 0), SALES.reduce((t, s) => t + s.Pence, 0));
+
+  check('KEEP WITH NO GROUPING IS ONE ROW FOR THE WHOLE TABLE',
+    ask({ from: 'Sales', keep: { taken: 'sum of {{Pence}}', orders: 'count' } }),
+    [{ id: 'total', taken: 14700, orders: 6 }]);
+
+  /**
+   * TOP N, and it has to be able to tell an ordered slice from an unordered
+   * one. With limit 2 the answer is the same either way on this data -- a
+   * control proved the check could not fail. Limit 1 discriminates: the best
+   * seller is Bowl and the FIRST one seen is Mug.
+   */
+  const top = (n: number) => cell(ask({
+    from: 'Sales', groupBy: '{{Product}}', keep: { p: 'sum of {{Pence}}' },
+    orderBy: '{{p}}', direction: 'desc', limit: n,
+  }), 'group');
+  check('TOP ONE IS THE BEST SELLER, not the first one seen', top(1), ['Bowl']);
+  check('and top two are the two best', top(2), ['Bowl', 'Mug']);
+  check('how many customers is a group-by whose answer is its own length',
+    list(ask({ from: 'Sales', groupBy: '{{Customer}}' })).length, 4);
+  check('AND THE ANSWER IS SMALLER THAN THE DATA, which is the point',
+    JSON.stringify(byMonth).length < JSON.stringify(SALES).length, true);
+
+  // --- the union, which is the notifications feed --------------------------
+  const feed = ask({
+    from: [
+      { table: 'Likes', where: '{{PostId}} != "pX"', as: { kind: '"liked your post"', who: '{{Who}}', at: '{{At}}' } },
+      { table: 'Follows', where: '{{Following}} == "u1"', as: { kind: '"followed you"', who: '{{Follower}}', at: '{{At}}' } },
+    ],
+    orderBy: '{{at}}', direction: 'desc',
+  });
+  check('TWO TABLES BECOME ONE LIST, in time order',
+    list(feed).map(r => `${r.who}:${r.kind}`),
+    ['u3:liked your post', 'u4:followed you', 'u2:liked your post']);
+  check('and rows of different shapes came out the same shape',
+    Object.keys(list(feed)[0] || {}).sort(), ['at', 'kind', 'who']);
+  check('a row the filter excluded is not in it', list(feed).some(r => r.who === 'u5'), false);
+
+  // --- dedupe, and the ambiguity a control found ---------------------------
+  const POSTS = [{ id: 'p1', Author: 'u1', At: '3' }, { id: 'p2', Author: 'u2', At: '2' }, { id: 'p3', Author: 'u1', At: '1' }];
+  const P = { Posts: { rows: POSTS, columns: ['Author', 'At'] } };
+  const one = (extra: any) => ran(() => runQuery({ from: 'Posts', oneRowPer: '{{Author}}', ...extra }, P as any));
+  check('with nothing said, one row per keeps the first it meets',
+    list(one({})).map(r => r.id), ['p1', 'p2']);
+  check('THE NEWEST PER AUTHOR SAYS WHICH ONE IT WANTS',
+    list(one({ keepThe: 'largest of {{At}}' })).map(r => r.id), ['p1', 'p2']);
+  check('AND THE OLDEST IS A DIFFERENT ANSWER, which is how you know the box does something',
+    list(one({ keepThe: 'smallest of {{At}}' })).map(r => r.id), ['p3', 'p2']);
+  check('and a way of choosing nobody understands says what does work',
+    String(one({ keepThe: 'newest {{At}}' })).includes('Try: largest of'), true);
+
+  // --- paging the store does ----------------------------------------------
+  const many = { T: { rows: Array.from({ length: 40 }, (_, i) => ({ id: `r${i}`, N: i })), columns: ['N'] } };
+  const page2 = ran(() => runQuery({ from: 'T', orderBy: '{{N}}', skip: 10, limit: 10 }, many as any));
+  check('page two is ten rows', list(page2).length, 10);
+  check('and starts where page one stopped', list(page2)[0]?.N, 10);
+
+  // --- a query can be about who is looking ---------------------------------
+  check('A QUERY CAN BE ABOUT WHO IS LOOKING',
+    cell(ask({ from: 'Sales', where: '{{Customer}} == Me', keep: { spent: 'sum of {{Pence}}' } }, { Me: 'c1' }), 'spent'),
+    [3600]);
+  check('and somebody else gets a different answer',
+    cell(ask({ from: 'Sales', where: '{{Customer}} == Me', keep: { spent: 'sum of {{Pence}}' } }, { Me: 'c2' }), 'spent'),
+    [8400]);
+
+  // --- the seven phrases, which is what a builder types --------------------
+  const rows = SALES;
+  check('count', applyKeep('count', rows), 6);
+  check('sum of', applyKeep('sum of {{Pence}}', rows), 14700);
+  check('average of', applyKeep('average of {{Pence}}', rows), 2450);
+  check('smallest of', applyKeep('smallest of {{At}}', rows), '2026-05-04');
+  check('largest of', applyKeep('largest of {{At}}', rows), '2026-07-30');
+  check('first', applyKeep('first {{Product}}', rows), 'Mug');
+  check('list of', applyKeep('list of {{Product}}', rows.slice(0, 3)), 'Mug, Bowl, Mug');
+  check('AND ANYTHING ELSE IS REFUSED BY LISTING THE SEVEN',
+    String(ran(() => applyKeep('total of {{Pence}}', rows))).includes('Try: count, sum of {{Column}}'), true);
+
+  check('a table that is not there names the ones that are',
+    String(ask({ from: 'Salez' })).includes('There is: Sales, Likes, Follows.'), true);
+
+  // --- RUN IT AND SHOW WHAT CAME OUT ---------------------------------------
+  /**
+   * The feature every review of every node tool points at as the one that makes
+   * them usable, and the reason n8n's users forgive the rest of it. Nothing in
+   * Creora can show a builder what a block actually holds, so a group-by would
+   * be written blind -- and you cannot tell a right answer from a wrong one
+   * without seeing the rows.
+   */
+  const good = previewQuery({ from: 'Sales', groupBy: '{{Channel}}', keep: { taken: 'sum of {{Pence}}' } }, T as any);
+  check('A PREVIEW SHOWS THE ROWS THAT COME OUT', good.rows.map(r => r.group), ['shop', 'stall', 'wholesale']);
+  check('and names the columns, so the markup can be written against them',
+    good.columns, ['group', 'taken']);
+  check('with nothing wrong to report', good.error, null);
+  check('AND A BROKEN QUERY PREVIEWS AS AN ERROR RATHER THAN THROWING',
+    previewQuery({ from: 'Nope' }, T as any).error?.includes('There is no table called "Nope"'), true);
+  check('a preview that failed hands back no rows rather than stale ones',
+    previewQuery({ from: 'Nope' }, T as any).rows, []);
+  check('and it is capped, so a preview of forty thousand rows is not a page',
+    previewQuery({ from: 'T' }, many as any, {}, 8).rows.length, 8);
+
+  // --- and it reads back as a sentence -------------------------------------
+  check('THE QUERY READS BACK AS ONE SENTENCE',
+    describeQuery({ from: 'Sales', groupBy: 'left({{At}}, 7)', keep: { taken: 'sum of {{Pence}}' }, orderBy: '{{group}}' }),
+    'rows from Sales, grouped by left({{At}}, 7), keeping taken = sum of {{Pence}}, ordered by {{group}}, smallest first.');
+  check('a union says both tables', describeQuery({ from: [{ table: 'Likes' }, { table: 'Follows' }] }),
+    'rows from Likes and Follows.');
+  check('and an empty one says what to do rather than nothing',
+    describeQuery({ from: '' }), 'Pick a table to ask about.');
+}
+
 group('who may do what, said once, enforced at the store');
 {
   /**
@@ -8247,7 +8417,7 @@ group('a slot can contain a slot');
  * Raise it in the same commit that adds the checks, the way the drift budget
  * above is raised: a number changed where it can be seen in a diff.
  */
-const EXPECTED_CHECKS = 1904;
+const EXPECTED_CHECKS = 1942;
 reachedTheEnd = true;
 if (passed + failed !== EXPECTED_CHECKS) {
   failed++;

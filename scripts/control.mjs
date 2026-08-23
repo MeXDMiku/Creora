@@ -325,6 +325,59 @@ const CONTROLS = [
     expect: ['AN ADD RULE THAT DOES NOT PIN THE OWNER IS CALLED OUT'],
   },
   {
+    name: 'query: grouping stops grouping',
+    file: 'src/lib/query.ts',
+    find: `      if (!buckets.has(flat)) buckets.set(flat, { key, rows: [] });`,
+    with: `      if (true) buckets.set(flat + Math.random(), { key, rows: [] });`,
+    expect: ['GROUP BY MONTH'],
+  },
+  {
+    name: 'query: the limit is applied before the order instead of after',
+    file: 'src/lib/query.ts',
+    find: `  if (String(def.orderBy ?? '').trim()) {`,
+    with: `  if (def.limit && def.limit > 0) rows = rows.slice(0, def.limit);\n  if (String(def.orderBy ?? '').trim()) {`,
+    expect: ["TOP ONE IS THE BEST SELLER"],
+  },
+  {
+    name: 'query: "keeping the" stops choosing and takes whatever is first',
+    file: 'src/lib/query.ts',
+    find: `      if (!choose) return group[0];`,
+    with: `      return group[0];`,
+    expect: ['AND THE OLDEST IS A DIFFERENT ANSWER'],
+  },
+  {
+    name: 'query: a union stops reshaping its rows',
+    file: 'src/lib/query.ts',
+    find: `      src.as
+        ? kept.map(r => {`,
+    with: `      false
+        ? kept.map(r => {`,
+    expect: ['and rows of different shapes came out the same shape'],
+  },
+  {
+    name: 'query: an unknown keep phrase is accepted silently',
+    file: 'src/lib/query.ts',
+    find: `  if (!word) throw new Error(\`"\${text}" is not something to keep. \${KEEP_HELP}\`);`,
+    with: `  if (!word) return rows.length;`,
+    expect: ['AND ANYTHING ELSE IS REFUSED BY LISTING THE SEVEN'],
+  },
+  {
+    name: 'query: a preview throws instead of reporting',
+    file: 'src/lib/query.ts',
+    find: `  } catch (err: any) {
+    return { rows: [], columns: [], sentence, error: String(err?.message || 'That question could not be answered') };`,
+    with: `  } catch (err: any) {
+    return { rows: [], columns: [], sentence, error: null };`,
+    expect: ['AND A BROKEN QUERY PREVIEWS AS AN ERROR RATHER THAN THROWING'],
+  },
+  {
+    name: 'query: a preview stops being capped',
+    file: 'src/lib/query.ts',
+    find: `    const shown = rows.slice(0, limit);`,
+    with: `    const shown = rows;`,
+    expect: ['it is capped, so a preview of forty thousand rows is not a page'],
+  },
+  {
     name: 'the harness itself: a check that throws must be red, not silent',
     file: 'scripts/checks.ts',
     find: `  const card = (row: any, f: string) => ran(() => evaluateExpression(f, { ...row, RowId: row.id }, tables));`,
