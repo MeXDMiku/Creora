@@ -661,6 +661,13 @@ const CONTROLS = [
     expect: ['AN UNFINISHED FIELD THE ACTION DOES NOT READ DOES NOT BLOCK IT'],
   },
   {
+    name: 'thread: sorting by a path stops being reading order',
+    file: 'src/lib/rows.ts',
+    find: `export function compareCells(a: any, b: any): number {`,
+    with: `export function compareCells(a: any, b: any): number {\n  if (typeof a === 'string' && typeof b === 'string') return b.localeCompare(a);`,
+    expect: ['SORTING BY THE PATH IS READING ORDER'],
+  },
+  {
     name: 'live: a connection makes the page slower than it was',
     file: 'src/lib/liveChanges.ts',
     find: `  if (!live.connected) return pace.intervalMs;`,

@@ -8287,6 +8287,62 @@ group('the box a builder fills in');
     panel.includes('pageNamesIn('), true);
 }
 
+group('a thread of unknown depth');
+{
+  /**
+   * THE SEVEN-SITES PROBE CALLED THIS IMPOSSIBLE, AND READING SAID SO TOO.
+   *
+   * MAX_QUESTION_DEPTH is 2, so a lookup inside a lookup inside a lookup is
+   * refused -- deliberately, because each level runs once per row of the level
+   * outside it and three levels is rows-cubed. From that it followed that a
+   * Reddit comment tree could not be drawn, and that is what was written down.
+   *
+   * It was wrong. A tree does not need nested lookups at DRAW time. It needs a
+   * SORT KEY. Reddit and Hacker News both store a materialised path and sort by
+   * it; depth is then how long the path is, and indent is a number. Nothing
+   * recurses and nothing is nested.
+   *
+   * Found by trying it rather than by reasoning about it, which is the third
+   * time in two days that reading gave the opposite answer.
+   */
+  const thread = [
+    { id: 'c1', Path: '0001',                Body: 'top level A' },
+    { id: 'c5', Path: '0002',                Body: 'top level B' },
+    { id: 'c2', Path: '0001.0001',           Body: 'reply to A' },
+    { id: 'c3', Path: '0001.0001.0001',      Body: 'deeper' },
+    { id: 'c4', Path: '0001.0001.0001.0001', Body: 'deeper still' },
+    { id: 'c6', Path: '0001.0002',           Body: 'second reply to A' },
+  ];
+  const tables: any = { Comments: { rows: thread, columns: ['Path', 'Body'] } };
+  const depthOf = (r: any) =>
+    ran(() => rowFormulaValue(r, '(len({{Path}}) + 1) / 5', {}).value);
+
+  check('SORTING BY THE PATH IS READING ORDER, at any depth',
+    visibleRows(thread, { sortColumn: 'Path', sortDirection: 'asc' } as any).rows.map(r => r.id),
+    ['c1', 'c2', 'c3', 'c4', 'c6', 'c5']);
+  check('and a formula gives it too, so no stored column is needed to sort',
+    visibleRows(thread, { sortFormula: '{{Path}}', sortDirection: 'asc' } as any).rows.map(r => r.id),
+    ['c1', 'c2', 'c3', 'c4', 'c6', 'c5']);
+
+  check('HOW DEEP A COMMENT IS, is how long its path is', depthOf(thread[0]), 1);
+  check('two levels down', depthOf(thread[2]), 2);
+  check('AND FOUR, which is past the depth a nested lookup is allowed',
+    depthOf(thread[4]), 4);
+
+  /**
+   * The count that a nested lookup genuinely could not do: everything BELOW
+   * this comment, however far down. One startswith, no nesting.
+   */
+  const under = (r: any) => ran(() => rowFormulaValue(
+    r,
+    `countOf("Comments", 'startswith({{Path}}, concat(Path, "."))')`,
+    { tables },
+  ).value);
+  check('EVERYTHING BELOW A COMMENT, AT ANY DEPTH', under(thread[0]), 4);
+  check('and below one further down', under(thread[2]), 2);
+  check('a leaf has nothing below it', under(thread[4]), 0);
+}
+
 group('being told, instead of asking');
 {
   /**
@@ -9586,7 +9642,7 @@ group('a slot can contain a slot');
  * Raise it in the same commit that adds the checks, the way the drift budget
  * above is raised: a number changed where it can be seen in a diff.
  */
-const EXPECTED_CHECKS = 2175;
+const EXPECTED_CHECKS = 2183;
 reachedTheEnd = true;
 if (passed + failed !== EXPECTED_CHECKS) {
   failed++;

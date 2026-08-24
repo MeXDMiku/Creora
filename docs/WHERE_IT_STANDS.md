@@ -1,5 +1,30 @@
 # Where Creora stands — 24 August 2026
 
+> ## The one thing that matters now
+>
+> **Eight of the thirty-four mechanisms behind X, YouTube, Twitch, Reddit,
+> Facebook, Gmail and IBM-style B2B are written, checked, and doing nothing** —
+> because the migrations have never been run. That is now the single largest
+> gap between what this engine can do and what a visitor would meet, and it is
+> not a coding problem.
+>
+> ```
+> supabase/RUN_ALL_MIGRATIONS.sql   ->  Supabase  ->  SQL Editor  ->  paste  ->  Run
+> ```
+>
+> Ten migrations, one paste, safe to run more than once. Until then: hiding is
+> not withholding, a slot can be booked twice, two tabs overwrite each other,
+> and every page polls instead of being told.
+>
+> **Where the seven sites stand, `npm run sites`:**
+>
+> | | |
+> | ---: | :--- |
+> | **23** | sayable today — 12 as a formula, 6 as a question, 5 as an action |
+> | **8** | written and correct, waiting on that paste |
+> | **3** | genuinely missing: a long job, a scheduler, a window on a big table |
+
+
 **2,129 checks passing, `tsc` clean, working tree clean, 98 negative controls
 all behaving. Six commits, unpushed.**
 

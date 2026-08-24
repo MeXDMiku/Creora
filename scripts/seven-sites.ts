@@ -117,8 +117,27 @@ const T = (rows: any[], columns: string[]) => ({ rows, columns });
     'joinOf("Comments", "Body", \'{{ParentId}} == joinOf("Comments", "Row id", "{{ParentId}} == RowId")\')', opts);
   record('Reddit', 'two levels of nesting', twoDeep.ok ? 'FORMULA' : 'NO', twoDeep.said);
 
-  record('Reddit', 'A COMMENT TREE OF UNKNOWN DEPTH', 'NO', null,
-    'MAX_QUESTION_DEPTH is 2, on purpose: each level runs once per row of the level outside it, so three levels is rows-cubed.');
+  /**
+   * CALLED IMPOSSIBLE BY THIS FILE'S FIRST RUN, AND IT WAS WRONG.
+   * A tree needs a SORT KEY, not nested lookups. Reddit and HN both store a
+   * materialised path; depth is how long the path is, indent is a number, and
+   * nothing recurses. MAX_QUESTION_DEPTH never comes into it.
+   */
+  const treeTables: TableScope = {
+    Comments: T([
+      { id: 'c1', Path: '0001', Body: 'top' },
+      { id: 'c2', Path: '0001.0001', Body: 'reply' },
+      { id: 'c3', Path: '0001.0001.0001', Body: 'deeper' },
+      { id: 'c4', Path: '0001.0001.0001.0001', Body: 'deeper still' },
+    ], ['Path', 'Body']),
+  };
+  const deep = ask({ id: 'c4', Path: '0001.0001.0001.0001' }, '(len({{Path}}) + 1) / 5', { tables: treeTables });
+  const below = ask({ id: 'c1', Path: '0001' },
+    `countOf("Comments", 'startswith({{Path}}, concat(Path, "."))')`, { tables: treeTables });
+  record('Reddit', 'A COMMENT TREE OF UNKNOWN DEPTH',
+    deep.said === 4 && below.said === 3 ? 'FORMULA' : 'NO',
+    { depth: deep.said, below: below.said },
+    'Was CANNOT until today. A tree is a sort key, not a nested lookup: store a path, sort by it, indent by its length.');
 
   const score = ask({ id: 'p1' }, 'sumOf("Votes", "Dir", \'{{PostId}} == RowId\')', opts);
   record('Reddit', 'a vote score, up minus down', score.ok && score.said === 1 ? 'FORMULA' : 'NO', score.said);
@@ -263,12 +282,15 @@ const T = (rows: any[], columns: string[]) => ({ rows, columns });
 
   record('YouTube', 'A LONG JOB NOBODY WAITS FOR (transcode)', 'NO', null,
     'An action is ONE transaction that finishes before it replies. There is nowhere to put work that takes minutes and reports back.');
-  record('YouTube', 'telling the uploader when it finished', 'NO', null,
-    'Primitive E — a trigger for "a row changed" that nothing on the page asked for.');
-  record('Twitch', 'a channel going live while I am looking at it', 'NO', null,
-    'The page can poll, and does. Push is primitive E: Supabase realtime, free tier, not built.');
-  record('Twitch', 'a concurrent viewer count', 'NO', null,
-    'Same primitive. A poll shows a number; it cannot show it changing without asking.');
+  /**
+   * PRIMITIVE E, BUILT 24 AUG. The chain that reacts to rows arriving already
+   * ran end to end; only the KNOWING was missing. So these three are one piece
+   * of work, and the work is done -- it is the MIGRATION that is not run.
+   */
+  const E = 'lib/liveChanges.ts and migration 0010. The signal carries no data: the page is told "block X changed" and re-reads through the same RPC, so nothing is opened up. Without the migration it polls exactly as before, and says so on the block.';
+  record('YouTube', 'telling the uploader when it finished', 'MIGRATION', null, E);
+  record('Twitch', 'a channel going live while I am looking at it', 'MIGRATION', null, E);
+  record('Twitch', 'a concurrent viewer count', 'MIGRATION', null, E);
   record('Twitch', 'chat at the rate a chat actually runs', 'NO', null,
     'Every row a Database block loads reaches the browser. There is no window, so a busy chat is the whole history, every time.');
   record('YouTube', 'a nightly digest, or billing on the 1st', 'NO', null,
