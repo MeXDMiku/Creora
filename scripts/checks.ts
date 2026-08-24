@@ -48,6 +48,10 @@ import { toCsv, csvCell, csvFileName } from '../src/lib/csv';
 import { evaluateExpression, FORMULA_FUNCTION_NAMES, explainUnreadableFormula, facetsOf, addFacets } from '../src/lib/formula';
 import { guardDefaultFor, stepConditionResult, formulaScope, recalculateAllFormulas, runPageLoadWorkflows, fetchListBlockRows, shouldFetchListRows, tableScope, rawTableScope, resolvePageQueries } from '../src/lib/bindingEngine';
 import { safeUrl, isSafeUrlValue, schemeOf, stripIgnorable } from '../src/lib/urls';
+import {
+  topicFor, blockIdFromTopic, idleLive, paceFor, afterSignal, afterFetch, afterConnection,
+  shouldFetchNow, describeLive, LIVE_HEARTBEAT_MS, SIGNAL_COALESCE_MS,
+} from '../src/lib/liveChanges';
 import { fillSlots, leadingSlotName, findSlots as findSlotsForCheck } from '../src/lib/sanitizeHtml';
 import { slotValuesFrom } from '../src/lib/useSlotValues';
 import { slotNameOf, slotNameForNodeType } from '../src/state/atoms';
@@ -6794,8 +6798,21 @@ group('a page left open does not spend the month');
     (dbSrc.match(/return true;/g) || []).length >= 2 && (pubSrc.match(/return true;/g) || []).length >= 2, true);
 
   const hookSrc = readFileSync('src/hooks/usePollWhileVisible.ts', 'utf8');
+  /**
+   * SAY WHAT IT MEANS. This looked for the literal `pace.current.intervalMs`,
+   * which stopped being there the day the pace started going through paceFor()
+   * -- a change that made the claim MORE true and turned the check red. A check
+   * that hard-codes an internal detail is a comment, which HOW_WE_WORK already
+   * says once about a renamed prefix.
+   */
   check('the hook follows the pace rather than a fixed interval',
-    hookSrc.includes('pace.current.intervalMs'), true);
+    /paceFor\(live\.current, pace\.current/.test(hookSrc), true);
+  check('AND THE LIVE PATH CANNOT GO SLOWER THAN THE PACE IT SHORTCUTS',
+    readFileSync('src/lib/liveChanges.ts', 'utf8').includes('if (!live.connected) return pace.intervalMs;'), true);
+  check('and it listens as well as asking, or nothing is ever told',
+    hookSrc.includes('topicFor(blockId)') && hookSrc.includes("'broadcast'"), true);
+  check('AND SOMETHING RENDERS WHICH OF THE TWO IT IS DOING',
+    readFileSync('src/blocks/DatabaseBlock.tsx', 'utf8').includes('describeLive('), true);
   check('and still pauses when the tab is hidden',
     hookSrc.includes("document.visibilityState !== 'visible'"), true);
   check('COMING BACK TO THE TAB STARTS FAST AGAIN, since somebody just chose to look',
@@ -6826,7 +6843,7 @@ group('every migration in one paste, and that paste stays true');
    * would quietly remove checks rather than fail any, and the run would end
    * green with a smaller number nobody was reading. Raise it when you add one.
    */
-  check('every migration on disk is accounted for', migrationFiles().length, 9);
+  check('every migration on disk is accounted for', migrationFiles().length, 10);
 
   /**
    * A BUNDLE THAT HAS DRIFTED IS WORSE THAN NO BUNDLE: somebody pastes it and
@@ -7159,13 +7176,32 @@ group('the server checks WHAT is written, not only who writes it');
    * reorder the pipeline silently, and the symptom would be a double booking
    * nobody could reproduce.
    */
-  const triggerNames: string[] = [];
+  /**
+   * READ THE TIMING, NOT THE NAME. This used to collect every `create trigger`
+   * and drop the ones whose NAME contained "update" -- a stand-in for "before
+   * insert" that held only while every trigger in the project was a BEFORE one.
+   * 0010 added an AFTER trigger, which is not in this pipeline at all (Postgres
+   * runs every BEFORE trigger before any AFTER one, whatever they are called),
+   * and the check went red about an ordering it was never protecting.
+   *
+   * A stand-in that happens to be right is a check that will be wrong later.
+   */
+  const triggers: { name: string; timing: string; event: string }[] = [];
   for (const file of migrationFiles()) {
     const sql = readFileSync(`supabase/migrations/${file}`, 'utf8');
-    for (const m of sql.matchAll(/^create trigger\s+(\S+)/gm)) triggerNames.push(m[1]);
+    for (const m of sql.matchAll(/^create trigger\s+(\S+)\s*\n\s*(before|after)\s+([a-z ]+?)(?:\s+of\s|\s+on\s)/gim)) {
+      triggers.push({ name: m[1], timing: m[2].toLowerCase(), event: m[3].trim().toLowerCase() });
+    }
   }
-  const inserts = triggerNames.filter(n => !n.includes('update')).sort();
+  const inserts = triggers
+    .filter(t => t.timing === 'before' && t.event === 'insert')
+    .map(t => t.name)
+    .sort();
   check('there are triggers to order at all', inserts.length >= 3, true);
+  check('AND THE TIMING WAS ACTUALLY READ, or the ordering below proves nothing',
+    triggers.every(t => t.timing === 'before' || t.timing === 'after'), true);
+  check('an AFTER trigger is outside this pipeline and is not ordered against it',
+    triggers.some(t => t.timing === 'after'), true);
   check('LIMITS RUN FIRST, refusing the cheapest case before any work',
     inserts[0].includes('limits'), true);
   check('THEN SHAPE, so a value is tidied before anything compares it',
@@ -8249,6 +8285,79 @@ group('the box a builder fills in');
     panel.includes('queryNameProblem('), true);
   check('AND IT SAYS WHEN AN ANSWER DEPENDS ON WHO IS LOOKING, since an empty list is not an error',
     panel.includes('pageNamesIn('), true);
+}
+
+group('being told, instead of asking');
+{
+  /**
+   * PRIMITIVE E. Three of the seven things the site probe could not say are
+   * this one piece of work: a channel going live while you watch, a viewer
+   * count, an upload finishing.
+   *
+   * It is not a new trigger. The chain that reacts to rows arriving already
+   * runs end to end -- fetchListBlockRows puts rows on the block, the block
+   * fires onChange, everything downstream follows. Only the KNOWING was
+   * missing, so this supplies the knowing and changes nothing else.
+   */
+  check('everyone watching one table listens to the same name',
+    topicFor('databaseBlock__abc'), 'creora:rows:databaseBlock__abc');
+  check('and the name says which block, so one page can watch several',
+    blockIdFromTopic(topicFor('databaseBlock__abc')), 'databaseBlock__abc');
+  check('something that is not ours is not ours', blockIdFromTopic('realtime:other'), null);
+
+  /**
+   * THE RULE THAT MAKES THIS SAFE TO SHIP: live is a shortcut, not a licence.
+   * pollPace refuses to ever stop asking, because a table that has quietly
+   * given up is worse than a slow one. A live connection that dies without
+   * saying so must therefore cost ONE ROUND, not silence.
+   */
+  const fast = { intervalMs: 4000, quietRounds: 0 };
+  const slow = { intervalMs: 60000, quietRounds: 9 };
+  const off = idleLive();
+  check('with no connection the pace is exactly what it was', paceFor(off, fast, 1000), 4000);
+  check('and when it had slowed down, still exactly what it was', paceFor(off, slow, 1000), 60000);
+
+  const up = afterConnection(off, true);
+  check('CONNECTED BUT UNPROVEN NEVER SLOWS ANYTHING DOWN',
+    paceFor(up, fast, 1000), 4000);
+  const proven = afterSignal(up, 1000);
+  check('and once it has actually delivered something, it rests at the floor',
+    paceFor(proven, fast, 1200), LIVE_HEARTBEAT_MS);
+  check('WHICH IS THE SLOWEST IT ALREADY WENT, so the worst case is unchanged',
+    LIVE_HEARTBEAT_MS, 60000);
+  check('and losing the connection puts the old pace straight back',
+    paceFor(afterConnection(proven, false), fast, 1200), 4000);
+
+  /**
+   * A BURST IS ONE READ. Twenty people posting inside a second is twenty
+   * broadcasts, and reading twenty times would cost more egress than the
+   * polling this replaces -- the whole point, inverted.
+   */
+  let live = afterSignal(idleLive(), 1000);
+  check('a signal that has just landed waits for the burst to settle',
+    shouldFetchNow(live, 1000 + SIGNAL_COALESCE_MS - 1), false);
+  check('AND THEN READS ONCE', shouldFetchNow(live, 1000 + SIGNAL_COALESCE_MS), true);
+  live = afterSignal(live, 1050);
+  live = afterSignal(live, 1120);
+  check('three signals in a burst are still one read',
+    shouldFetchNow(live, 1120 + SIGNAL_COALESCE_MS), true);
+  live = afterFetch(live, 1400);
+  check('and once read, it does not read again on its own', shouldFetchNow(live, 9999), false);
+  check('a heartbeat with nothing to fetch fetches nothing',
+    shouldFetchNow(idleLive(), 9999), false);
+  check('but a NEW signal after a read is a new read',
+    shouldFetchNow(afterSignal(live, 5000), 5000 + SIGNAL_COALESCE_MS), true);
+
+  /**
+   * A builder cannot see a websocket. They can see whether their page is being
+   * told or asking, and that difference is the entire feature.
+   */
+  check('with no connection it says what to do about it',
+    describeLive(idleLive(), 0).includes('migration'), true);
+  check('connected and quiet does not read as broken',
+    describeLive(afterConnection(idleLive(), true), 0).includes('Nothing has changed yet'), true);
+  check('and once it is working it says so, with how long ago',
+    describeLive(afterSignal(afterConnection(idleLive(), true), 0), 3000).includes('3s ago'), true);
 }
 
 group('the row a visitor names');
@@ -9477,7 +9586,7 @@ group('a slot can contain a slot');
  * Raise it in the same commit that adds the checks, the way the drift budget
  * above is raised: a number changed where it can be seen in a diff.
  */
-const EXPECTED_CHECKS = 2147;
+const EXPECTED_CHECKS = 2175;
 reachedTheEnd = true;
 if (passed + failed !== EXPECTED_CHECKS) {
   failed++;

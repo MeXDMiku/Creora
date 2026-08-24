@@ -66,7 +66,7 @@ so `if(...)` and `Price > 100` both silently answered **0**.
 
 **4 column types** — text, number, boolean, **date**.
 
-**9 migrations**, all `SECURITY DEFINER` with RLS on and no policies, so every
+**10 migrations**, all `SECURITY DEFINER` with RLS on and no policies, so every
 read and write goes through one function.
 
 **1,480 runnable checks**, each with a negative control.

@@ -661,3 +661,13 @@ file or opening the actual page.
 | TODO | **A `runAction` step's refusal is shown, a `sendWebhook` failure still is not.** The webhook path records a run-log entry and nothing else — so a visitor whose submission never reached Zapier sees a button that worked. Same argument as the row write and the action: the person who can try again is the one who should be told. |
 | NOTED | **`fieldsReadByStep` falls back to every block with rules** when a step names no fields. It fails safe, which is why nothing has ever looked wrong — but it means an unfinished field anywhere on the page can block a step that never reads it. `given` and `mappings` are covered; `matchFormula` and expression conditions still are not. |
 | NOTED | **`toSql` lower-cases every identifier.** A table called `Orders` and one called `orders` compile to the same name, and a column named with a space becomes an underscore. Fine today because a builder types the name they see, and a trap the first time two tables differ only by case. |
+
+---
+
+## Found in a browser on 24 Aug, not fixed
+
+| | what |
+| :--- | :--- |
+| TODO | **A fresh identity cannot make its first page cleanly.** `createNewPage` calls `savePageData` for the hardcoded default page `00000000-0000-0000-0000-000000000001` before switching, and a browser whose anonymous identity does not own that page gets *"Only the person who owns this page can save changes to it"* in the console. The page IS created, so nothing visibly breaks -- which is why it has survived. |
+| TODO | **"Error loading page from Supabase on init: Object"** logs the error object rather than its message, so the console says nothing useful about the one failure a builder is most likely to hit. Every other failure path in this codebase was given a sentence; this one was missed. |
+| NOTED | **Vite served a stale transform of an edited file** for several minutes across a hard reload and a fresh tab, and the symptom was a crash in code that was correct on disk. `touch` on the file cleared it. This is the mount, and WORKLOG already records two other ways it has lied. Check what the server is actually serving before believing a browser result. |

@@ -379,7 +379,8 @@ function PublishedDatabaseBlock({ block }: { block: ExtractedBlock }) {
     loadRows();
   }, [block.id, outputMode, columns.length, store]);
 
-  usePollWhileVisible(() => loadRowsRef.current());
+  // The visitor's half of the same thing: told when it can be, asked otherwise.
+  usePollWhileVisible(() => loadRowsRef.current(), undefined, block.id);
 
   // A published Database is display-only. update_database_row and
   // delete_database_row are owner-only, so a visitor pressing edit or delete

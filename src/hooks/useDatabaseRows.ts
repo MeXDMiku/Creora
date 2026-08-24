@@ -58,9 +58,13 @@ export function useDatabaseRows(trackedBlockId: string | undefined | null, poll 
     void load();
   }, [key, trackedIsHere, load]);
 
+  /**
+   * `key` is the tracked block, so a List hears about the table it is showing
+   * rather than about itself -- which is the block that actually changes.
+   */
   usePollWhileVisible(() => {
     if (poll) void load();
-  }, 4000);
+  }, 4000, poll ? key : undefined);
 
   return {
     rows: trackedIsHere ? trackedRows : fetched,

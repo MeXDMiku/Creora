@@ -1,4 +1,5 @@
 import { usePollWhileVisible } from '../hooks/usePollWhileVisible';
+import { describeLive } from '../lib/liveChanges';
 import { isoToDateInput, dateInputToIso } from '../lib/rows';
 import { Node } from '@tiptap/core';
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
@@ -106,8 +107,9 @@ const DatabaseBlockComponent = (props: NodeViewProps) => {
     loadRows();
   }, [blockId, outputMode, columns.length]);
 
-  // Rows can arrive from anyone using the published page, so keep looking.
-  usePollWhileVisible(() => loadRowsRef.current());
+  // Rows can arrive from anyone using the published page, so keep looking --
+  // and, once migration 0010 is run, be told the moment they do.
+  const { connected: isLive, live } = usePollWhileVisible(() => loadRowsRef.current(), undefined, blockId);
 
   /**
    * Say that a write did not land, on the block itself.
@@ -429,8 +431,28 @@ const DatabaseBlockComponent = (props: NodeViewProps) => {
           <span style={{ fontSize: '10px', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
             Database Table
           </span>
-          <span style={{ fontSize: '9px', padding: '2px 6px', borderRadius: '4px', background: '#f1f5f9', color: '#64748b', fontWeight: 600 }}>
-            {outputMode === 'row_count' ? `Count: ${rows.length}` : `Output: ${outputMode}`}
+          <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            {/*
+              WHICH OF THE TWO THIS TABLE IS DOING. A builder cannot see a
+              websocket; they can see whether the page is being told or asking,
+              and that difference is the entire feature. Without migration 0010
+              this never lights, which is the honest answer rather than a
+              hopeful one. The whole sentence is on hover.
+            */}
+            <span
+              title={describeLive(live.current, Date.now())}
+              style={{
+                fontSize: '9px', fontWeight: 600, letterSpacing: '0.4px',
+                padding: '2px 6px', borderRadius: '4px',
+                background: isLive ? '#ecfdf5' : '#f1f5f9',
+                color: isLive ? '#047857' : '#94a3b8',
+              }}
+            >
+              {isLive ? 'LIVE' : 'ON A TIMER'}
+            </span>
+            <span style={{ fontSize: '9px', padding: '2px 6px', borderRadius: '4px', background: '#f1f5f9', color: '#64748b', fontWeight: 600 }}>
+              {outputMode === 'row_count' ? `Count: ${rows.length}` : `Output: ${outputMode}`}
+            </span>
           </span>
         </div>
 
