@@ -495,6 +495,120 @@ const CONTROLS = [
     with: `        const wants = [] // control`,
     expect: ['SAYS WHEN AN ANSWER DEPENDS ON WHO IS LOOKING'],
   },
+  // ---------------------------------------------------------------- actions
+  // Primitive B. The interesting ones are the two that must AGREE — a preview
+  // that disagrees with the SQL is a confident lie.
+  {
+    name: 'actions: the price stops coming from the table',
+    file: 'src/lib/actions.ts',
+    find: `          scope[step.name || ''] = step.column ? (rows[0] || {})[step.column] : rows.length;`,
+    with: `          scope[step.name || ''] = (given || {})[step.name || ''] ?? null; // control: from the page`,
+    expect: ['THE PRICE CAME FROM THE TABLE'],
+  },
+  {
+    name: 'actions: a refusal writes the rows anyway',
+    file: 'src/lib/actions.ts',
+    find: `              changes: [],
+            };
+          }
+          break;`,
+    with: `              changes,
+            };
+          }
+          break;`,
+    expect: ['NOTHING AT ALL WAS WRITTEN'],
+  },
+  {
+    name: 'actions: a refusal stops saying which step',
+    file: 'src/lib/actions.ts',
+    find: `              refusedAt: i,`,
+    with: `              refusedAt: 0, // control: no place`,
+    expect: ['NAMES WHICH STEP'],
+  },
+  {
+    name: 'actions: the preview changes the page rows in place',
+    file: 'src/lib/actions.ts',
+    find: `    store[name] = (table?.rows || []).map(r => ({ ...r }));`,
+    with: `    store[name] = table?.rows || []; // control: not a copy`,
+    // Paired: the shallow copy of the LIST only matters once the copy of each
+    // ROW is gone too, so both are broken together.
+    also: {
+      file: 'src/lib/actions.ts',
+      find: `            const next = { ...r };`,
+      with: `            const next = r; // control: mutate in place`,
+    },
+    expect: ['THE REAL TABLES WERE NEVER TOUCHED'],
+  },
+  {
+    name: 'actions: a broken formula counts as false instead of failing',
+    file: 'src/lib/actions.ts',
+    find: `      if (error) throw new Error(\`\${at}: \${error}\`);`,
+    with: `      if (error) return null; // control: fail open`,
+    expect: ['FAILS THE ACTION RATHER THAN COUNTING AS FALSE'],
+  },
+  {
+    name: 'actions: the function stops running as the owner',
+    file: 'src/lib/actions.ts',
+    find: `    'security definer',`,
+    with: `    '-- control: not definer',`,
+    expect: ['RUNS AS THE OWNER'],
+  },
+  {
+    name: 'actions: search_path is left open',
+    file: 'src/lib/actions.ts',
+    find: `    'set search_path = public',`,
+    with: `    '-- control: no search_path',`,
+    expect: ['fixed search_path'],
+  },
+  {
+    name: 'actions: anybody may call it, signed in or not',
+    file: 'src/lib/actions.ts',
+    find: `    \`revoke all on function \${name}(\${signature}) from public;\`,`,
+    with: `    '-- control: no revoke',`,
+    expect: ['nobody may call it who is not signed in'],
+  },
+  {
+    name: 'actions: a remembered name compiles to a column instead of a variable',
+    file: 'src/lib/actions.ts',
+    find: `    if (remembered.has(name)) return \`v_\${ident(name)}\`;`,
+    with: `    if (false) return ''; // control: no variables`,
+    expect: ['THREE KINDS OF NAME NEVER COLLIDE', 'a remembered one is a variable'],
+  },
+  {
+    name: 'actions: a given value compiles to a column instead of a parameter',
+    file: 'src/lib/actions.ts',
+    find: `    if (params.has(name)) return \`p_\${ident(name)}\`;`,
+    with: `    if (false) return ''; // control: no parameters`,
+    expect: ['a given value is a parameter, not a column'],
+  },
+  {
+    name: 'actions: a text value compiles to an identifier again',
+    file: 'src/lib/actions.ts',
+    find: `  sql = sql.replace(/"((?:[^"\\\\]|\\\\.)*)"/g, (_m, inner) => quote(inner));`,
+    with: `  // control: no string masking`,
+    expect: ['a text value stays TEXT'],
+  },
+  {
+    name: 'actions: a remembered name stops being trusted, so the warning cries wolf',
+    file: 'src/lib/actions.ts',
+    find: `    if (step.kind === 'remember' && step.name) remembered.add(step.name);`,
+    with: `    // control: nothing remembered is trusted`,
+    expect: ['A GOOD ONE IS WARNED ABOUT NOTHING'],
+  },
+  {
+    name: 'actions: a page-supplied price stops being warned about',
+    file: 'src/lib/actions.ts',
+    find: `        if (origin.fromPage.length && !origin.anyTrusted) {`,
+    with: `        if (false) {`,
+    expect: ['A PRICE THE PAGE SENT IS WARNED ABOUT'],
+  },
+  {
+    name: 'actions: a delete with no where stops being warned about',
+    file: 'src/lib/actions.ts',
+    find: `      out.push(\`\${at}: this removes EVERY row in \${step.table}. Say which ones.\`);`,
+    with: `      // control: silent`,
+    expect: ['A DELETE WITH NO WHERE IS WARNED ABOUT'],
+  },
 ];
 
 /**

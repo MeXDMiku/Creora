@@ -287,6 +287,12 @@ Ranked by *sites unblocked per unit of work*, from the evidence above.
 | **5** | **E · When-this-changes** | 28, 29, 30 | Turns polling into pushing; the board goes from nearly-right to right. |
 | **6** | **F · Schedules** | 35 | Wanted everywhere, blocking nothing. |
 
+> **2026-08-23 — the line below is wrong, and `docs/PRIMITIVE_B_ACTIONS.md`
+> is why.** "Server" here meant *a place to run code somebody pays for*. B needs
+> trusted code, not a runtime, and a `security definer` Postgres function on the
+> free tier is exactly that — the same place C's policies already live. **B is
+> built and compiles to one.** F is the only one still without a free answer.
+
 **Two of the six need a server that Creora does not have** (B and F), and one is
 a migration that exists and has never been run (C). That is the honest shape of
 "connecting the backend to the frontend": it is not mostly missing blocks. It is

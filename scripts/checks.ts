@@ -55,6 +55,7 @@ import { interpretSave, shouldKeepAutosaving, PageStamps } from '../src/lib/save
 import { describeRowWriteError, withoutRow } from '../src/lib/rowWrite';
 import { ruleAllows, ruleToSql, rulesToMigration, ruleWarnings } from '../src/lib/rules';
 import { runQuery, applyKeep, previewQuery, describeQuery } from '../src/lib/query';
+import { runAction, toFunction, toSql, warningsFor, originOf, describeAction, SERVER_WORDS } from '../src/lib/actions';
 import { resolveQueries, queryDependsOn, queriesMentioning, describeNamedQuery, columnsOf, pageNamesIn, parseKeep, keepAsLine } from '../src/lib/queries';
 import { chartBars, MIN_BAR_HEIGHT } from '../src/lib/chartBars';
 import { timerStep, timerResetValue } from '../src/lib/useTimer';
@@ -135,6 +136,15 @@ function ran<T>(f: () => T): T | string {
   } catch (e: any) {
     return `threw: ${e?.message ?? String(e)}`;
   }
+}
+
+/**
+ * The other half of ran(): a thrown VALUE is a string, and `.map` on a string
+ * kills the suite the same way the original throw would have. This turns one
+ * into a list with the reason in it, so the check fails and says why.
+ */
+function list(v: any): any[] {
+  return Array.isArray(v) ? v : [`NOT A LIST: ${String(v)}`];
 }
 
 /**
@@ -7643,6 +7653,192 @@ group('a named question, answered over tables');
     describeQuery({ from: '' }), 'Pick a table to ask about.');
 }
 
+group('a sequence of writes that happens where the data is');
+{
+  /**
+   * PRIMITIVE B, and the only place a page can be WRONG ON PURPOSE.
+   *
+   * Today a button runs its steps in the browser: the page decides the price,
+   * the page decides who the author is, the page decides whether there is
+   * enough stock. Every one of those is a sentence a visitor can edit before it
+   * is sent, and the oldest bug in commerce is trusting a price the page sent.
+   *
+   * THE ARRANGEMENT THAT FINDS THE DISAGREEMENTS: two things that share no code
+   * are held to the same answers on the same action —
+   *
+   *   runAction    what the panel PREVIEWS, in TypeScript
+   *   toFunction   what actually RUNS, in SQL
+   *
+   * A preview that says "this would refuse" while the function lets it through
+   * is a confident lie, which is worse than no preview.
+   */
+  const T: any = {
+    Products: {
+      rows: [
+        { id: 'p1', Name: 'Mug', Pence: 1800, Stock: 4 },
+        { id: 'p2', Name: 'Bowl', Pence: 4200, Stock: 2 },
+      ],
+      columns: ['Name', 'Pence', 'Stock'],
+    },
+    Orders: { rows: [], columns: ['Customer', 'Total', 'At'] },
+    Basket: { rows: [{ id: 'b1', Customer: 'c1', ProductId: 'p2', Qty: 1 }], columns: ['Customer', 'ProductId', 'Qty'] },
+  };
+
+  // The action the shop in the lab wanted and could not have.
+  const CHECKOUT: any = {
+    id: 'a1',
+    name: 'Check out',
+    takes: ['Qty', 'ProductId'],
+    steps: [
+      { kind: 'remember', name: 'Left', table: 'Products', where: '{{id}} == {{ProductId}}', column: 'Stock' },
+      { kind: 'remember', name: 'Price', table: 'Products', where: '{{id}} == {{ProductId}}', column: 'Pence' },
+      { kind: 'refuse when', when: '{{Qty}} > {{Left}}', message: 'There are not that many left.' },
+      { kind: 'add row to', table: 'Orders', remember: 'OrderId',
+        set: { Customer: 'Me', Total: '{{Price}} * {{Qty}}', At: 'Now' } },
+      { kind: 'change rows in', table: 'Products', where: '{{id}} == {{ProductId}}', set: { Stock: '{{Stock}} - {{Qty}}' } },
+      { kind: 'remove rows from', table: 'Basket', where: '{{Customer}} == Me' },
+    ],
+  };
+
+  // --- what the preview says ----------------------------------------------
+  const FROZEN = JSON.stringify(T);
+  const ok: any = ran(() => runAction(CHECKOUT, T, { Me: 'c1', Qty: 1, ProductId: 'p2' }));
+  check('AN ACTION THAT CAN HAPPEN, HAPPENS', ok.ok, true);
+  check('the order was written', ok.tables?.Orders?.length, 1);
+  check('AND THE PRICE CAME FROM THE TABLE, NOT FROM THE PAGE', ok.tables?.Orders?.[0]?.Total, 4200);
+  check('who did it came from the server, not from a box', ok.tables?.Orders?.[0]?.Customer, 'c1');
+  check('the stock went down', ok.tables?.Products?.find((p: any) => p.id === 'p2')?.Stock, 1);
+  check('and the basket was emptied', ok.tables?.Basket?.length, 0);
+  check('every step is reported, so a builder can see WHERE it got to',
+    list(ok.changes).map((c: any) => c.kind), ['remember', 'remember', 'add', 'change', 'remove']);
+
+  // --- and when it cannot ---------------------------------------------------
+  const no: any = ran(() => runAction(CHECKOUT, T, { Me: 'c1', Qty: 5, ProductId: 'p2' }));
+  check('AN ACTION THAT CANNOT HAPPEN, REFUSES', no.ok, false);
+  check('in the builder own words, which is the only kind a visitor can act on',
+    no.message, 'There are not that many left.');
+  check('AND NAMES WHICH STEP — "problem executing workflow" with no place in it is the complaint every one of these tools earns',
+    no.refusedAt, 2);
+  check('NOTHING AT ALL WAS WRITTEN: not the order, not the stock, not the basket',
+    list(no.changes).length, 0);
+  /**
+   * FOUND BY A CONTROL COMING BACK GREEN. This used to be
+   * `T.Orders.rows.length === 0`, which stays true however much the preview
+   * mutates, because every write here happens to REPLACE an array rather than
+   * push into one. It was testing an accident. The whole input is now compared,
+   * so changing a row object in place — the thing the copies actually guard
+   * against — is caught.
+   */
+  check('AND THE REAL TABLES WERE NEVER TOUCHED, not the rows and not the row objects',
+    JSON.stringify(T), FROZEN);
+
+  // --- the same action, as SQL ---------------------------------------------
+  const sql = String(ran(() => toFunction(CHECKOUT)));
+  const has = (needle: string) => sql.includes(needle);
+  check('IT IS ONE FUNCTION, which is what makes it one transaction',
+    has('create or replace function creora_check_out'), true);
+  check('AND IT RUNS AS THE OWNER, which is what makes it trusted', has('security definer'), true);
+  check('with a fixed search_path, since a security definer function without one hands over the schema',
+    has('set search_path = public'), true);
+  check('a refusal is an exception, so POSTGRES does the rolling back rather than us',
+    has("raise exception 'There are not that many left.'"), true);
+  check('the refusal compares the page number against the REMEMBERED one', has('if p_qty > v_left then'), true);
+  check('THE TOTAL IS WORKED OUT FROM THE REMEMBERED PRICE', has('v_price * p_qty'), true);
+  check('and who did it is the session', has('auth.uid()'), true);
+  check('the new row id is kept for later steps', has('returning id into v_orderid'), true);
+  check('nobody may call it who is not signed in',
+    has('revoke all on function') && has('to authenticated'), true);
+  check('AND IT SAYS OUT LOUD THAT IT IS NOT RUNNING YET', has('is NOT running'), true);
+
+  // --- the two must agree ---------------------------------------------------
+  check('the preview read the price from Products, and so does the function',
+    has('select pence into v_price from products'), true);
+  check('THE PREVIEW ANSWERED 4200 BECAUSE PRICE CAME FROM A TABLE, AND THE SQL MULTIPLIES THE SAME TWO THINGS',
+    [ok.tables?.Orders?.[0]?.Total === 4200, has('v_price * p_qty')], [true, true]);
+  check('AND NEITHER OF THEM EVER MULTIPLIES BY SOMETHING THE PAGE SENT', has('p_price'), false);
+
+  // --- where a value came from ---------------------------------------------
+  const read = new Set(['Products']);
+  check('A COLUMN OF A TABLE THE ACTION READ IS TRUSTED', ran(() => originOf('{{Pence}} * 2', read, T).trusted), true);
+  check('and so are the words only the server can know', ran(() => originOf('Me', read, T).trusted), true);
+  check('A NAME THAT IS NEITHER CAME FROM THE PAGE', ran(() => originOf('{{Total}}', read, T).fromPage), ['Total']);
+  check('and it says WHICH one, not only that there is one',
+    ran(() => originOf('{{Total}} + {{Pence}}', read, T).fromPage), ['Total']);
+  check('an action that read nothing trusts nothing from the page',
+    ran(() => originOf('{{Pence}}', new Set<string>(), T).trusted), false);
+  check('A REMEMBERED NAME IS TRUSTED, since it was read inside the transaction',
+    ran(() => originOf('{{Price}} * 2', new Set<string>(), T, new Set(['Price'])).trusted), true);
+  check('the four server words are the four that cannot be faked',
+    SERVER_WORDS, ['Me', 'MyEmail', 'MyRole', 'Now']);
+
+  // --- what the panel must warn about --------------------------------------
+  const TRUSTING: any = { id: 'a2', name: 'Bad checkout', takes: ['Total'], steps: [
+    { kind: 'refuse when', when: 'false', message: 'never' },
+    { kind: 'add row to', table: 'Orders', set: { Total: '{{Total}}' } },
+  ] };
+  const w = list(ran(() => warningsFor(TRUSTING, T)));
+  check('A PRICE THE PAGE SENT IS WARNED ABOUT — the oldest bug in commerce',
+    w.some((x: any) => String(x).includes('Total is whatever the page said')), true);
+  check('and it says what to do instead, rather than only that it is wrong',
+    w.some((x: any) => String(x).includes('Read it from a table in an earlier step')), true);
+  check('A DELETE WITH NO WHERE IS WARNED ABOUT, because it removes everything and looks like it worked',
+    list(ran(() => warningsFor({ id: 'a3', name: 'Wipe', steps: [{ kind: 'remove rows from', table: 'Orders' }] } as any, T)))
+      .some((x: any) => String(x).includes('removes EVERY row in Orders')), true);
+  check('and a change with no WHERE too',
+    list(ran(() => warningsFor({ id: 'a4', name: 'All', steps: [{ kind: 'change rows in', table: 'Orders', set: { At: 'Now' } }] } as any, T)))
+      .some((x: any) => String(x).includes('changes EVERY row in Orders')), true);
+  check('an action that can never refuse is worth a second look',
+    list(ran(() => warningsFor({ id: 'a5', name: 'Just write', steps: [{ kind: 'add row to', table: 'Orders', set: { Customer: 'Me' } }] } as any, T)))
+      .some((x: any) => String(x).includes('Nothing in this action can refuse')), true);
+  check('AND A GOOD ONE IS WARNED ABOUT NOTHING, so the warnings mean something',
+    list(ran(() => warningsFor(CHECKOUT, T))), []);
+
+  // --- the translation, one piece at a time --------------------------------
+  check('a text value stays TEXT rather than becoming a column name',
+    ran(() => toSql('{{Role}} == "agent"')), "role = 'agent'");
+  check('an apostrophe in a value cannot end the string early',
+    ran(() => toSql('{{Name}} == "O\'Hara"')), "name = 'O''Hara'");
+  check('who is looking is the session', ran(() => toSql('{{Owner}} == Me')), 'owner = auth.uid()');
+  check('their role comes from the token, not a table a visitor can write',
+    ran(() => toSql('MyRole == "agent"')), "(auth.jwt() ->> 'role') = 'agent'");
+  check('not-equals is Postgres spelling', ran(() => toSql('{{A}} != {{B}}')), 'a <> b');
+  check('an empty condition is true rather than a syntax error', ran(() => toSql('')), 'true');
+  check('a given value is a parameter, not a column',
+    ran(() => toSql('{{Qty}} > 0', { params: new Set(['Qty']) })), 'p_qty > 0');
+  check('and a remembered one is a variable',
+    ran(() => toSql('{{Left}} > 0', { remembered: new Set(['Left']) })), 'v_left > 0');
+  check('THE THREE KINDS OF NAME NEVER COLLIDE, which is what the prefixes are for',
+    ran(() => toSql('{{Qty}} > {{Left}} and {{Stock}} > 0',
+      { params: new Set(['Qty']), remembered: new Set(['Left']) })),
+    'p_qty > v_left and stock > 0');
+
+  // --- reading it back ------------------------------------------------------
+  check('an action reads back as a sentence',
+    ran(() => describeAction(CHECKOUT)), 'Check out: 6 steps, given Qty, ProductId');
+  check('one that takes nothing says so',
+    ran(() => describeAction({ id: 'x', name: 'Ping', steps: [{ kind: 'refuse when' }] } as any)),
+    'Ping: 1 step, given nothing');
+
+  // --- and it never takes the page down ------------------------------------
+  check('an unknown step is refused by name rather than thrown',
+    String(ran(() => (runAction({ id: 'z', name: 'Odd', steps: [{ kind: 'teleport' }] } as any, T) as any).message))
+      .includes('no idea what "teleport" means'), true);
+  check('A FORMULA THAT CANNOT BE WORKED OUT FAILS THE ACTION RATHER THAN COUNTING AS FALSE',
+    (ran(() => runAction({ id: 'y', name: 'Odd', steps: [
+      { kind: 'refuse when', when: 'Nonsense > 1', message: 'no' },
+      { kind: 'add row to', table: 'Orders', set: { Customer: 'Me' } },
+    ] } as any, T)) as any).ok, false);
+  check('and it says which step could not be worked out',
+    String((ran(() => runAction({ id: 'y', name: 'Odd', steps: [
+      { kind: 'refuse when', when: 'Nonsense > 1', message: 'no' },
+    ] } as any, T)) as any).message).startsWith('Step 1:'), true);
+  check('an action with no steps at all is fine and does nothing',
+    (ran(() => runAction({ id: 'e', name: 'Empty', steps: [] } as any, T)) as any).ok, true);
+  check('and so is one that is not there', (ran(() => runAction(null as any, T)) as any).ok, true);
+  check('compiling nothing produces something that still says what it is',
+    String(ran(() => toFunction(null as any))).includes('creora_action'), true);
+}
+
 group('a question keeps its answer, and the page reads it like a table');
 {
   /**
@@ -8713,7 +8909,7 @@ group('a slot can contain a slot');
  * Raise it in the same commit that adds the checks, the way the drift budget
  * above is raised: a number changed where it can be seen in a diff.
  */
-const EXPECTED_CHECKS = 2004;
+const EXPECTED_CHECKS = 2059;
 reachedTheEnd = true;
 if (passed + failed !== EXPECTED_CHECKS) {
   failed++;
