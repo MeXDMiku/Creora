@@ -55,7 +55,7 @@ import { interpretSave, shouldKeepAutosaving, PageStamps } from '../src/lib/save
 import { describeRowWriteError, withoutRow } from '../src/lib/rowWrite';
 import { ruleAllows, ruleToSql, rulesToMigration, ruleWarnings } from '../src/lib/rules';
 import { runQuery, applyKeep, previewQuery, describeQuery } from '../src/lib/query';
-import { runAction, toFunction, toSql, warningsFor, originOf, describeAction, SERVER_WORDS, parseSet, setAsLines, STEP_WORDS, functionNameFor, argsFor, describeActionError, REFUSAL_CODE } from '../src/lib/actions';
+import { runAction, toFunction, toSql, warningsFor, originOf, describeAction, SERVER_WORDS, parseSet, setAsLines, STEP_WORDS, functionNameFor, argsFor, describeActionError, REFUSAL_CODE, checkedRows } from '../src/lib/actions';
 import { supabase as fakeSupabase } from '../src/lib/supabase';
 import { actionsAtom } from '../src/state/atoms';
 import { resolveQueries, queryDependsOn, queriesMentioning, describeNamedQuery, columnsOf, pageNamesIn, parseKeep, keepAsLine } from '../src/lib/queries';
@@ -8251,6 +8251,148 @@ group('the box a builder fills in');
     panel.includes('pageNamesIn('), true);
 }
 
+group('the row a visitor names');
+{
+  /**
+   * OWASP API1:2023, Broken Object Level Authorization -- ranked first of the
+   * ten because it is the easiest to exploit and the most widespread. An
+   * action is `security definer`, so it runs as the OWNER and every policy
+   * from primitive C is skipped by design. The thing that makes an action
+   * useful is the thing that makes a missing check dangerous.
+   *
+   * Found by writing "delete my post" the obvious way while translating seven
+   * real sites into the engine. `scripts/seven-sites.ts`.
+   */
+  const T2 = (rows: any[], columns: string[]) => ({ rows, columns });
+  const tables: any = {
+    Posts: T2([{ id: 'p1', OwnerId: 'u1' }], ['OwnerId']),
+    Products: T2([{ id: 'x1', Stock: 5 }], ['Stock']),
+    Quotes: T2([{ id: 'q1', State: 'submitted' }], ['State']),
+    Audit: T2([], ['QuoteId', 'Who', 'At']),
+  };
+  const bola = (a: any) => warningsFor(a, tables).filter(w => w.includes('whichever row the visitor names')).length;
+
+  const naked = { id: '1', name: 'Delete post', takes: ['PostId'], steps: [
+    { kind: 'remove rows from', table: 'Posts', where: '{{id}} == {{PostId}}' },
+  ]} as any;
+  check('DELETING BY AN ID THE VISITOR SENT IS WARNED ABOUT', bola(naked), 1);
+
+  /**
+   * THE ONE THAT MATTERS. The warning that existed before this was "nothing
+   * here can refuse", and a refusal that checks nothing satisfied it while the
+   * hole stayed exactly as wide. A proxy can be met without fixing the thing.
+   */
+  const decorative = { id: '2', name: 'Delete post', takes: ['PostId'], steps: [
+    { kind: 'refuse when', when: '{{PostId}} == ""', message: 'Pick a post.' },
+    { kind: 'remove rows from', table: 'Posts', where: '{{id}} == {{PostId}}' },
+  ]} as any;
+  check('AND A REFUSAL THAT CHECKS NOTHING DOES NOT SILENCE IT', bola(decorative), 1);
+  check('though the old warning it used to satisfy is gone, as it was',
+    warningsFor(decorative, tables).some(w => w.includes('Nothing in this action can refuse')), false);
+
+  const owned = { id: '3', name: 'Delete my post', takes: ['PostId'], steps: [
+    { kind: 'remember', name: 'Owner', table: 'Posts', column: 'OwnerId', where: '{{id}} == {{PostId}}' },
+    { kind: 'refuse when', when: '{{Owner}} != Me', message: 'That is not yours.' },
+    { kind: 'remove rows from', table: 'Posts', where: '{{id}} == {{PostId}}' },
+  ]} as any;
+  check('reading the row and refusing on it is enough', bola(owned), 0);
+
+  const selfGuard = { id: '4', name: 'Delete my post', takes: ['PostId'], steps: [
+    { kind: 'refuse when', when: '{{PostId}} == ""', message: 'Pick one.' },
+    { kind: 'remove rows from', table: 'Posts', where: '{{id}} == {{PostId}} and {{OwnerId}} == Me' },
+  ]} as any;
+  check('and so is saying it in the rows themselves', bola(selfGuard), 0);
+
+  /**
+   * THE CASE THAT PROVED THE FIRST VERSION OF THIS RULE WRONG.
+   *
+   * It asked whether the row BELONGED to the caller. Checkout decrements the
+   * stock of whatever product the visitor named, and that is correct -- a
+   * product is not theirs and never will be. Not every row a visitor names has
+   * an owner. The rule is the weaker, checkable one: was the row LOOKED AT.
+   */
+  const checkout = { id: '5', name: 'Check out', takes: ['Qty', 'ProductId'], steps: [
+    { kind: 'remember', name: 'Left', table: 'Products', column: 'Stock', where: '{{id}} == {{ProductId}}' },
+    { kind: 'refuse when', when: '{{Qty}} > {{Left}}', message: 'Not enough left.' },
+    { kind: 'change rows in', table: 'Products', where: '{{id}} == {{ProductId}}', set: { Stock: '{{Stock}} - {{Qty}}' } },
+  ]} as any;
+  check('A PRODUCT IS NOT YOURS AND THAT IS CORRECT, so checkout is not warned about', bola(checkout), 0);
+
+  const wrongTable = { id: '6', name: 'Odd', takes: ['PostId'], steps: [
+    { kind: 'remember', name: 'Left', table: 'Products', column: 'Stock', where: '{{id}} == "x1"' },
+    { kind: 'refuse when', when: '{{Left}} < 1', message: 'Out of stock.' },
+    { kind: 'remove rows from', table: 'Posts', where: '{{id}} == {{PostId}}' },
+  ]} as any;
+  check('but a check on a DIFFERENT table does not count as looking at this one', bola(wrongTable), 1);
+  check('and checkedRows names the table that was actually looked at',
+    Array.from(checkedRows(checkout)), ['Products']);
+
+  /**
+   * AND THE WOLF-CRY THAT CAME WITH THE FIRST VERSION. An audit row must
+   * record WHICH quote was approved, and that id can only have come from the
+   * page. Warning about it is how a builder learns to click past warnings --
+   * the same failure the {{Price}} * {{Qty}} warning already had once.
+   */
+  const approve = { id: '7', name: 'Approve quote', takes: ['QuoteId'], steps: [
+    { kind: 'remember', name: 'Was', table: 'Quotes', column: 'State', where: '{{id}} == {{QuoteId}}' },
+    { kind: 'refuse when', when: '{{Was}} != "submitted"', message: 'Only a submitted quote.' },
+    { kind: 'change rows in', table: 'Quotes', where: '{{id}} == {{QuoteId}}', set: { State: '"approved"' } },
+    { kind: 'add row to', table: 'Audit', set: { QuoteId: '{{QuoteId}}', Who: 'Me', At: 'Now' } },
+  ]} as any;
+  check('AN AUDIT ROW RECORDING WHICH ROW WAS ACTED ON IS NOT WARNED ABOUT',
+    warningsFor(approve, tables), []);
+}
+
+group('a question can ask about another table');
+{
+  /**
+   * `runQuery` called evaluateExpression with two arguments, so `countOf`
+   * inside a question came back with "Tables cannot be read from here --
+   * countOf and sumOf work in a formula or a condition, not in page markup",
+   * said inside a QUESTION, naming a third place entirely. The identical wrong
+   * message is recorded in BUILT_TWO_TO_FIND_OUT.md about conditions; this was
+   * the same sentence being wrong in a new box.
+   *
+   * An omission rather than a decision: nothing said why a question should be
+   * weaker than the repeater filter beside it, and the cost argument does not
+   * separate them -- a filter calling countOf is already rows-times-rows and
+   * is allowed, guarded by MAX_QUESTION_DEPTH.
+   *
+   * Found by trying to write Gmail's unread-count-per-label.
+   */
+  const T3 = (rows: any[], columns: string[]) => ({ rows, columns });
+  const tables: any = {
+    Messages: T3([{ id: 'm1', Unread: true }, { id: 'm2', Unread: false }, { id: 'm3', Unread: true }], ['Unread']),
+    Labels: T3([
+      { id: 'x1', MessageId: 'm1', LabelId: 'work' },
+      { id: 'x2', MessageId: 'm2', LabelId: 'work' },
+      { id: 'x3', MessageId: 'm3', LabelId: 'work' },
+      { id: 'x4', MessageId: 'm3', LabelId: 'bills' },
+    ], ['MessageId', 'LabelId']),
+  };
+  const unread = ran(() => runQuery({
+    from: 'Labels',
+    where: 'countOf("Messages", \'{{Row id}} == MessageId and {{Unread}} == true\') > 0',
+    groupBy: '{{LabelId}}',
+    keep: { unread: 'count' },
+  }, tables, {})) as any;
+
+  check('A QUESTION`S FILTER CAN ASK ABOUT ANOTHER TABLE', Array.isArray(unread), true);
+  check('and the answer is right: two unread in work', unread?.[0]?.unread, 2);
+  check('and one in bills', unread?.[1]?.unread, 1);
+  // ran(), because when the tables are missing `unread` is the refusal STRING
+  // and .map on it throws -- which takes the suite down instead of going red.
+  // The control found that on its first run, which is the whole point of it.
+  check('WHICH IS UNREAD-COUNT-PER-LABEL, and was unsayable before',
+    ran(() => (unread as any[]).map((r: any) => `${r.group}=${r.unread}`)), ['work=2', 'bills=1']);
+
+  const kept = ran(() => runQuery({
+    from: 'Labels', groupBy: '{{LabelId}}',
+    keep: { unread: 'sum of if(countOf("Messages", \'{{Row id}} == MessageId and {{Unread}} == true\') > 0, 1, 0)' },
+  }, tables, {})) as any;
+  check('and so can what it works out per group', kept?.[0]?.unread, 2);
+}
+
 group('a button can run an action, and be refused by it');
 {
   /**
@@ -9315,7 +9457,7 @@ group('a slot can contain a slot');
  * Raise it in the same commit that adds the checks, the way the drift budget
  * above is raised: a number changed where it can be seen in a diff.
  */
-const EXPECTED_CHECKS = 2129;
+const EXPECTED_CHECKS = 2143;
 reachedTheEnd = true;
 if (passed + failed !== EXPECTED_CHECKS) {
   failed++;

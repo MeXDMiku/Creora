@@ -192,6 +192,76 @@ export function describeAction(action: CreoraAction | null | undefined): string 
  * Same job as ruleWarnings: printed beside the boxes, and the difference between
  * a builder who knows what they built and one who finds out from a stranger.
  */
+/** Does the text name one of the four values only the server can know? */
+const namesAServerWord = (text: unknown) =>
+  SERVER_WORDS.some(w => new RegExp(`\\b${w}\\b`).test(String(text ?? '')));
+
+/** Every {{Name}} in the text. */
+const slotsIn = (text: unknown) =>
+  [...String(text ?? '').matchAll(SLOT)].map(m => m[1].trim());
+
+/**
+ * WAS THE ROW LOOKED AT BEFORE IT WAS WRITTEN?
+ *
+ * This is OWASP API1:2023, Broken Object Level Authorization -- ranked first
+ * because it is the easiest to exploit and the most widespread. Their
+ * prevention rule is one sentence:
+ *
+ *   "Use the authorization mechanism to check if the logged-in user has access
+ *    to perform the requested action on the record IN EVERY FUNCTION THAT USES
+ *    AN INPUT FROM THE CLIENT TO ACCESS A RECORD IN THE DATABASE."
+ *
+ * An action is exactly such a function, and worse placed than most: it is
+ * `security definer`, so it runs as the OWNER and every row policy from
+ * primitive C is skipped BY DESIGN. The thing that makes an action useful is
+ * the thing that makes a missing check dangerous.
+ *
+ * WHAT THIS DOES NOT CLAIM. The first version of this asked whether the row
+ * BELONGED to the caller, and it was wrong -- the existing checks caught it in
+ * one run. Checkout decrements the stock of whatever product the visitor
+ * named, and that is correct: a product is not theirs and never will be. Not
+ * every row a visitor names has an owner.
+ *
+ * What separates checkout from "delete post" is not ownership. It is that
+ * checkout READ that row and REFUSED on what it found:
+ *
+ *   remember Left  = Products.Stock  where {{id}} == {{ProductId}}
+ *   refuse when {{Qty}} > {{Left}}                        <- looked at it
+ *   change rows in Products where {{id}} == {{ProductId}}
+ *
+ *   remove rows from Posts where {{id}} == {{PostId}}     <- never looked
+ *
+ * So the question is the weaker, checkable one: was anything read from this
+ * row, and did anything refuse on what came back? Creora cannot know which
+ * check is the right one -- who owns it, whether it is still open, whether
+ * there is enough left. It can know that there wasn't one.
+ *
+ * The old warning, "nothing here can refuse", was a proxy for this, and a
+ * proxy can be satisfied without fixing anything:
+ *
+ *   refuse when {{PostId}} == ""                <- silenced it
+ *   remove rows from Posts where {{id}} == {{PostId}}
+ *
+ * ...deleted anybody's row with no warnings at all. Found by writing "delete
+ * my post" the obvious way while translating seven real sites.
+ */
+export function checkedRows(action: CreoraAction | null | undefined): Set<string> {
+  /** remembered name -> the table it was read out of */
+  const from = new Map<string, string>();
+  /** tables whose remembered value something has refused on */
+  const checked = new Set<string>();
+  for (const step of action?.steps || []) {
+    if (step.kind === 'refuse when') {
+      for (const name of slotsIn(step.when)) {
+        const table = from.get(name);
+        if (table) checked.add(table);
+      }
+    }
+    if (step.kind === 'remember' && step.name && step.table) from.set(String(step.name), String(step.table));
+  }
+  return checked;
+}
+
 export function warningsFor(
   action: CreoraAction | null | undefined,
   tables: TableScope | undefined,
@@ -209,11 +279,43 @@ export function warningsFor(
    */
   const remembered = new Set<string>();
 
+  const takes = new Set(action?.takes || []);
+  const looked = checkedRows(action);
+  /**
+   * A given value used as a KEY -- it appeared in an earlier step's `where`, so
+   * the action has already looked that row up. In a GUARDED action, recording
+   * which row was acted on is not the same as letting the page decide a price,
+   * and warning about it is how a builder learns to click past warnings. The
+   * first version fired on `QuoteId` in an audit row, which is the one column
+   * an audit row must have.
+   */
+  const usedAsKey = new Set<string>();
+
   for (const [i, step] of (action?.steps || []).entries()) {
     const at = `Step ${i + 1}`;
     if (step.table && (step.kind === 'remember' || step.kind === 'change rows in' || step.kind === 'remove rows from')) {
       read.add(step.table);
     }
+
+    /**
+     * THE ROW A VISITOR NAMES. See guardsTheCaller above.
+     *
+     * Only on the steps that WRITE. `remember … where {{id}} == {{ProductId}}`
+     * is how every action starts and reading a product is not a leak.
+     */
+    if (step.kind === 'change rows in' || step.kind === 'remove rows from') {
+      const named = slotsIn(step.where).filter(n => takes.has(n));
+      const table = String(step.table ?? '');
+      if (named.length && !namesAServerWord(step.where) && !looked.has(table)) {
+        const verb = step.kind === 'remove rows from' ? 'removes' : 'changes';
+        out.push(
+          `${at}: this ${verb} whichever row the visitor names, and nothing here has looked at that row first. `
+          + `${named.join(', ')} came from the page. Read something out of the row in an earlier step and `
+          + `refuse on it — who owns it, whether it is still open, whether there is enough left.`,
+        );
+      }
+    }
+    for (const n of slotsIn(step.where)) if (takes.has(n)) usedAsKey.add(n);
     if (step.kind === 'add row to' || step.kind === 'change rows in') {
       for (const [column, formula] of Object.entries(step.set || {})) {
         const origin = originOf(formula, read, tables, remembered);
@@ -223,7 +325,8 @@ export function warningsFor(
          * trusted: a visitor may choose how many they want, and the money
          * still comes from the table. `{{Total}}` on its own is the bug.
          */
-        if (origin.fromPage.length && !origin.anyTrusted) {
+        const onlyCheckedKeys = origin.fromPage.every(n => looked.size > 0 && usedAsKey.has(n));
+        if (origin.fromPage.length && !origin.anyTrusted && !onlyCheckedKeys) {
           out.push(
             `${at}: ${column} is whatever the page said (${origin.fromPage.join(', ')}). `
             + 'If that is a price, a total, or who did it, a visitor can change it. '

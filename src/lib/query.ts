@@ -70,12 +70,40 @@ const KEEP_HELP =
   'Try: count, sum of {{Column}}, average of {{Column}}, smallest of {{Column}}, ' +
   'largest of {{Column}}, first {{Column}}, list of {{Column}}.';
 
-/** One expression against one row, in the real language. */
-function value(expr: string | undefined | null, row: Record<string, any>, page?: Record<string, any>): any {
+/**
+ * One expression against one row, in the real language.
+ *
+ * THE TABLES ARE PASSED IN, AND WERE NOT UNTIL 24 AUG.
+ *
+ * `evaluateExpression` was called with two arguments, so `countOf` inside a
+ * query's `where` came back with
+ *
+ *   "Tables cannot be read from here -- countOf and sumOf work in a formula or
+ *    a condition, not in page markup"
+ *
+ * said inside a QUESTION, naming a third place entirely. The identical wrong
+ * message was recorded in BUILT_TWO_TO_FIND_OUT.md when a condition could not
+ * reach another table; this is the same sentence being wrong in a new box.
+ *
+ * It was an omission rather than a decision -- nothing anywhere said why a
+ * question should be weaker than the repeater filter sitting next to it, and
+ * the cost argument does not separate them: a filter calling countOf is
+ * already rows-times-rows, and is allowed, guarded by MAX_QUESTION_DEPTH.
+ * The same guard covers this.
+ *
+ * Found by trying to write Gmail's unread-count-per-label, which is
+ * "labels where a message is unread" and is refused without this.
+ */
+function value(
+  expr: string | undefined | null,
+  row: Record<string, any>,
+  page?: Record<string, any>,
+  tables?: TableScope,
+): any {
   const text = String(expr ?? '').trim();
   if (!text) return null;
   const bound = bindSlots(text, name => (name === 'Row id' ? row?.id : row?.[name]), { ...(page || {}), ...row });
-  return evaluateExpression(bound.expression, bound.scope);
+  return evaluateExpression(bound.expression, bound.scope, tables);
 }
 
 const num = (v: any): number => {
@@ -92,6 +120,7 @@ export function applyKeep(
   phrase: string,
   rows: Record<string, any>[],
   page?: Record<string, any>,
+  tables?: TableScope,
 ): any {
   const text = String(phrase ?? '').trim();
   if (text === 'count') return rows.length;
@@ -99,17 +128,17 @@ export function applyKeep(
   const word = KEEP_PHRASES.find(w => w !== 'count' && text.startsWith(w + ' '));
   if (!word) throw new Error(`"${text}" is not something to keep. ${KEEP_HELP}`);
   const expr = text.slice(word.length + 1);
-  const each = () => rows.map(r => value(expr, r, page));
+  const each = () => rows.map(r => value(expr, r, page, tables));
 
   switch (word) {
-    case 'sum of': return rows.reduce((t, r) => t + num(value(expr, r, page)), 0);
+    case 'sum of': return rows.reduce((t, r) => t + num(value(expr, r, page, tables)), 0);
     case 'average of':
       return rows.length
-        ? Math.round((rows.reduce((t, r) => t + num(value(expr, r, page)), 0) / rows.length) * 100) / 100
+        ? Math.round((rows.reduce((t, r) => t + num(value(expr, r, page, tables)), 0) / rows.length) * 100) / 100
         : 0;
     case 'smallest of': return each().reduce((m, v) => (m === null || v < m ? v : m), null as any);
     case 'largest of': return each().reduce((m, v) => (m === null || v > m ? v : m), null as any);
-    case 'first': return rows.length ? value(expr, rows[0], page) : null;
+    case 'first': return rows.length ? value(expr, rows[0], page, tables) : null;
     case 'list of': return each().join(', ');
     default: throw new Error(`"${text}" is not something to keep. ${KEEP_HELP}`);
   }
@@ -154,13 +183,13 @@ export function runQuery(
       );
     }
     let kept = rowsOf(table);
-    if (String(src.where ?? '').trim()) kept = kept.filter(r => truthy(value(src.where, r, page)));
+    if (String(src.where ?? '').trim()) kept = kept.filter(r => truthy(value(src.where, r, page, tables)));
     rows = rows.concat(
       src.as
         ? kept.map(r => {
             const shaped: Record<string, any> = {};
             for (const [key, expr] of Object.entries(src.as as Record<string, string>)) {
-              shaped[key] = value(expr, r, page);
+              shaped[key] = value(expr, r, page, tables);
             }
             return shaped;
           })
@@ -180,7 +209,7 @@ export function runQuery(
   if (String(def.oneRowPer ?? '').trim()) {
     const groups = new Map<string, Record<string, any>[]>();
     for (const r of rows) {
-      const key = JSON.stringify(value(def.oneRowPer, r, page));
+      const key = JSON.stringify(value(def.oneRowPer, r, page, tables));
       if (!groups.has(key)) groups.set(key, []);
       (groups.get(key) as Record<string, any>[]).push(r);
     }
@@ -195,8 +224,8 @@ export function runQuery(
       }
       const expr = choose.replace(/^(largest|smallest) of /, '');
       return group.reduce((best, r) => {
-        const a = value(expr, r, page);
-        const b = value(expr, best, page);
+        const a = value(expr, r, page, tables);
+        const b = value(expr, best, page, tables);
         return (biggest ? a > b : a < b) ? r : best;
       });
     });
@@ -210,7 +239,7 @@ export function runQuery(
   if (String(def.groupBy ?? '').trim()) {
     const buckets = new Map<string, { key: any; rows: Record<string, any>[] }>();
     for (const r of rows) {
-      const key = value(def.groupBy, r, page);
+      const key = value(def.groupBy, r, page, tables);
       const flat = JSON.stringify(key);
       if (!buckets.has(flat)) buckets.set(flat, { key, rows: [] });
       (buckets.get(flat) as any).rows.push(r);
@@ -218,7 +247,7 @@ export function runQuery(
     rows = [...buckets.values()].map(({ key, rows: inGroup }, i) => {
       const out: Record<string, any> = { id: `g${i}`, group: key };
       const keep = def.keep && Object.keys(def.keep).length ? def.keep : { count: 'count' };
-      for (const [name, phrase] of Object.entries(keep)) out[name] = applyKeep(phrase, inGroup, page);
+      for (const [name, phrase] of Object.entries(keep)) out[name] = applyKeep(phrase, inGroup, page, tables);
       return out;
     });
   } else if (def.keep && Object.keys(def.keep).length) {
@@ -228,14 +257,14 @@ export function runQuery(
      * grouping left out.
      */
     const out: Record<string, any> = { id: 'total' };
-    for (const [name, phrase] of Object.entries(def.keep)) out[name] = applyKeep(phrase, rows, page);
+    for (const [name, phrase] of Object.entries(def.keep)) out[name] = applyKeep(phrase, rows, page, tables);
     rows = [out];
   }
 
   if (String(def.orderBy ?? '').trim()) {
     const dir = def.direction === 'desc' ? -1 : 1;
     rows = rows
-      .map((row, i) => ({ row, i, key: value(def.orderBy, row, page) }))
+      .map((row, i) => ({ row, i, key: value(def.orderBy, row, page, tables) }))
       .sort((a, b) => {
         const n = (a.key > b.key ? 1 : a.key < b.key ? -1 : 0) * dir;
         // Ties keep the order they arrived in, or a list reshuffles itself

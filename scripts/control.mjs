@@ -661,6 +661,63 @@ const CONTROLS = [
     expect: ['AN UNFINISHED FIELD THE ACTION DOES NOT READ DOES NOT BLOCK IT'],
   },
   {
+    name: 'bola: nothing notices a row the visitor named',
+    file: 'src/lib/actions.ts',
+    find: `      if (named.length && !namesAServerWord(step.where) && !looked.has(table)) {`,
+    with: `      if (false && named.length) {`,
+    expect: ['DELETING BY AN ID THE VISITOR SENT', 'AND A REFUSAL THAT CHECKS NOTHING DOES NOT SILENCE IT'],
+  },
+  {
+    name: 'bola: a refusal on anything at all counts as looking at the row',
+    file: 'src/lib/actions.ts',
+    find: `      for (const name of slotsIn(step.when)) {
+        const table = from.get(name);
+        if (table) checked.add(table);
+      }`,
+    with: `      for (const step2 of action?.steps || []) if (step2.table) checked.add(String(step2.table));`,
+    expect: ['AND A REFUSAL THAT CHECKS NOTHING DOES NOT SILENCE IT'],
+  },
+  {
+    name: 'bola: a check on any table counts for every table',
+    file: 'src/lib/actions.ts',
+    find: `      if (named.length && !namesAServerWord(step.where) && !looked.has(table)) {`,
+    with: `      if (named.length && !namesAServerWord(step.where) && looked.size === 0) {`,
+    expect: ['a check on a DIFFERENT table does not count'],
+  },
+  {
+    name: 'bola: saying it in the rows themselves stops counting',
+    file: 'src/lib/actions.ts',
+    find: `      if (named.length && !namesAServerWord(step.where) && !looked.has(table)) {`,
+    with: `      if (named.length && !looked.has(table)) {`,
+    expect: ['and so is saying it in the rows themselves'],
+  },
+  {
+    name: 'bola: the warning cries wolf on an audit row again',
+    file: 'src/lib/actions.ts',
+    find: `        const onlyCheckedKeys = origin.fromPage.every(n => looked.size > 0 && usedAsKey.has(n));`,
+    with: `        const onlyCheckedKeys = false;`,
+    expect: ['AN AUDIT ROW RECORDING WHICH ROW WAS ACTED ON'],
+  },
+  {
+    name: 'question: a question stops being able to ask about another table',
+    file: 'src/lib/query.ts',
+    find: `  return evaluateExpression(bound.expression, bound.scope, tables);`,
+    with: `  return evaluateExpression(bound.expression, bound.scope);`,
+    expect: ['A QUESTION`S FILTER CAN ASK ABOUT ANOTHER TABLE', 'WHICH IS UNREAD-COUNT-PER-LABEL'],
+  },
+  {
+    name: 'question: what it works out per group loses the tables again',
+    file: 'src/lib/query.ts',
+    find: `  tables?: TableScope,
+): any {
+  const text = String(phrase ?? '').trim();`,
+    with: `  _unused?: TableScope,
+): any {
+  const tables = undefined as any;
+  const text = String(phrase ?? '').trim();`,
+    expect: ['and so can what it works out per group'],
+  },
+  {
     name: 'actions: the price stops coming from the table',
     file: 'src/lib/actions.ts',
     find: `          scope[step.name || ''] = step.column ? (rows[0] || {})[step.column] : rows.length;`,
