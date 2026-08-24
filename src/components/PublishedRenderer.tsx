@@ -25,6 +25,7 @@ import { refreshVisitor } from '../lib/visitor';
 import { executeWorkflow, recalculateAllFormulas } from '../lib/bindingEngine';
 import { normalizeImageUrl, IMAGE_MIME_TYPES } from '../lib/images';
 import { uploadImage } from '../lib/imageUpload';
+import { FailureNote } from './FailureNote';
 import {
   blockPositionAtom,
   blockRuntimeAtom,
@@ -416,22 +417,7 @@ function PublishedDatabaseBlock({ block }: { block: ExtractedBlock }) {
           refused, and they are the only one who can try again. A row limit
           reached in silence looks exactly like a form that worked.
         */}
-        {runtimeState?.error && (
-          <div
-            style={{
-              fontSize: '11px',
-              color: '#b91c1c',
-              background: '#fef2f2',
-              border: '1px solid #fecaca',
-              borderRadius: '6px',
-              padding: '6px 8px',
-              lineHeight: 1.4,
-              marginBottom: '8px',
-            }}
-          >
-            {runtimeState.error}
-          </div>
-        )}
+        <FailureNote message={runtimeState?.error} />
 
         <div style={{ overflowX: 'auto', maxHeight: '160px', overflowY: 'auto', marginBottom: '8px' }}>
           {columns.length === 0 ? (
@@ -619,6 +605,14 @@ function RenderedBlock({ block }: { block: ExtractedBlock }) {
             ? runtimeState.busyText
             : block.attrs.label || 'Button'}
         </button>
+        {/*
+          A REFUSAL HAS TO BE SOMEWHERE THE PERSON WHO WAS REFUSED IS LOOKING.
+          A Database was the only block that rendered `error`, which was right
+          while every failure was a failed row write. An action refuses on
+          purpose -- "there are not that many left" is the feature working --
+          and the visitor is looking at the button they just pressed.
+        */}
+        <FailureNote message={runtimeState?.error} />
       </div>
     );
   }

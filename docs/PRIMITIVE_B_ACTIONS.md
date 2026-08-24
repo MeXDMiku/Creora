@@ -179,12 +179,42 @@ because inside a step about a row that is plainly what the name means.
 
 ---
 
-## Still missing
+## The panel and the call — 24 Aug
 
-The **panel**, and the **call**. `runAction` previews and `toFunction` compiles,
-and there is no screen to write one on and no button that runs one. Same gap the
-Query had between `query.ts` and `QuestionsPanel.tsx`, and it took a day to
-close.
+Both closed.
+
+**`src/components/ActionsPanel.tsx`** is the screen. What decided its shape: the
+primitive exists because a page decides the price, so the difference between a
+trusted value and a page value is shown **on the box where it is typed**, not
+reported afterwards --
+
+    Total = {{Price}} * {{Qty}}     from the table
+    Total = {{Total}}               from the page
+
+`warningsFor` still says the sentence; the marker is what makes the sentence
+land on the right line. The preview runs `runAction` against the page's real
+tables on every keystroke, which is safe because it writes to a copy.
+
+**`runAction`** is the step. Twenty of the twenty-one workflow actions happen in
+the browser; this is the only one that happens at the store.
+
+    functionNameFor(action)   creora_check_out   said once, so the migration
+                                                 and the caller cannot disagree
+    argsFor(action, given)    { p_qty: '3' }     only what the action DECLARED,
+                                                 and a missing one goes as null
+
+A missing value goes as `null` rather than not going: Postgres matches a
+function by its argument list, so a short one is a *different function*, and the
+error a visitor would meet is "could not find the function" — the message for a
+migration that was never run. Two problems must not produce one sentence.
+
+**A refusal is the action working.** `raise exception ... using errcode
+'P0001'`, set explicitly rather than leant on. That code, and only that code,
+means show the builder's sentence to the visitor exactly as typed.
+
+**And it lands somewhere they are looking.** A Button renders a failure now, in
+both renderers, which it did not need to while every failure was a failed row
+write.
 
 ## What this changes about the order
 
@@ -193,7 +223,7 @@ close.
 | **D** · three outputs | shipped |
 | **C** · Rules | shipped; migration written, **never run** |
 | **A** · Queries | shipped, panel shipped |
-| **B** · Actions | engine + compiler shipped; **no panel, no call yet** |
+| **B** · Actions | shipped: engine, compiler, panel and the call |
 | **E** · when-this-changes | Supabase realtime, free tier, not built |
 | **F** · every day at… | the only one with no free answer yet |
 

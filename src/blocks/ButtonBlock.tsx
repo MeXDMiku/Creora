@@ -7,6 +7,7 @@ import { blockRuntimeAtom, activeWireAtom, snapTargetAtom, triggerSaveAtom, cont
 import { useMemo, useRef, useState } from 'react';
 import { useBlockDrag } from '../hooks/useBlockDrag';
 import { blockToCSS } from '../lib/renderBlockStyles';
+import { FailureNote } from '../components/FailureNote'
 
 const ButtonBlockComponent = (props: NodeViewProps) => {
   const { node } = props;
@@ -144,6 +145,14 @@ const ButtonBlockComponent = (props: NodeViewProps) => {
             default imposing itself. */}
         {isBusy && runtimeState?.busyText ? runtimeState.busyText : label}
       </div>
+        {/*
+          A REFUSAL HAS TO BE SOMEWHERE THE PERSON WHO WAS REFUSED IS LOOKING.
+          A Database was the only block that rendered `error`, which was right
+          while every failure was a failed row write. An action refuses on
+          purpose -- "there are not that many left" is the feature working --
+          and the visitor is looking at the button they just pressed.
+        */}
+      <FailureNote message={runtimeState?.error} onPointerDown={(e) => e.stopPropagation()} />
       {/* Left (input) port — always in DOM for measurement, visibility controlled */}
       <div
         contentEditable={false}

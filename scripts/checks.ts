@@ -46,7 +46,7 @@ import { remapBlockIds, shouldRemapOnImport, remapFormulaExpression } from '../s
 import { summarisePageData, describeWhatWillBeLost, describeDeleteError } from '../src/lib/pageDelete';
 import { toCsv, csvCell, csvFileName } from '../src/lib/csv';
 import { evaluateExpression, FORMULA_FUNCTION_NAMES, explainUnreadableFormula, facetsOf, addFacets } from '../src/lib/formula';
-import { stepConditionResult, formulaScope, recalculateAllFormulas, runPageLoadWorkflows, fetchListBlockRows, shouldFetchListRows, tableScope, rawTableScope, resolvePageQueries } from '../src/lib/bindingEngine';
+import { guardDefaultFor, stepConditionResult, formulaScope, recalculateAllFormulas, runPageLoadWorkflows, fetchListBlockRows, shouldFetchListRows, tableScope, rawTableScope, resolvePageQueries } from '../src/lib/bindingEngine';
 import { safeUrl, isSafeUrlValue, schemeOf, stripIgnorable } from '../src/lib/urls';
 import { fillSlots, leadingSlotName, findSlots as findSlotsForCheck } from '../src/lib/sanitizeHtml';
 import { slotValuesFrom } from '../src/lib/useSlotValues';
@@ -55,7 +55,9 @@ import { interpretSave, shouldKeepAutosaving, PageStamps } from '../src/lib/save
 import { describeRowWriteError, withoutRow } from '../src/lib/rowWrite';
 import { ruleAllows, ruleToSql, rulesToMigration, ruleWarnings } from '../src/lib/rules';
 import { runQuery, applyKeep, previewQuery, describeQuery } from '../src/lib/query';
-import { runAction, toFunction, toSql, warningsFor, originOf, describeAction, SERVER_WORDS } from '../src/lib/actions';
+import { runAction, toFunction, toSql, warningsFor, originOf, describeAction, SERVER_WORDS, parseSet, setAsLines, STEP_WORDS, functionNameFor, argsFor, describeActionError, REFUSAL_CODE } from '../src/lib/actions';
+import { supabase as fakeSupabase } from '../src/lib/supabase';
+import { actionsAtom } from '../src/state/atoms';
 import { resolveQueries, queryDependsOn, queriesMentioning, describeNamedQuery, columnsOf, pageNamesIn, parseKeep, keepAsLine } from '../src/lib/queries';
 import { chartBars, MIN_BAR_HEIGHT } from '../src/lib/chartBars';
 import { timerStep, timerResetValue } from '../src/lib/useTimer';
@@ -2556,6 +2558,21 @@ group('an imported copy does not share the original`s data');
       },
     ],
     formulas: [{ id: 'f1', targetBlockId: OLD_NUM, targetProperty: 'value', formula: `${OLD_DB} + 1`, pageId: 'page-one' }],
+    // An action carries the same two disguises one layer deeper: a step's
+    // `table` may be an id, and `when` / `where` / every value in `set` are row
+    // formulas where a block id is a legal name.
+    actions: [
+      {
+        id: 'a1',
+        name: 'Check out',
+        takes: ['Qty'],
+        steps: [
+          { kind: 'remember', name: 'Left', table: OLD_DB, column: 'Stock', where: `{{id}} == ${OLD_INPUT}` },
+          { kind: 'refuse when', when: `{{Qty}} > ${OLD_NUM}`, message: 'Not enough left.' },
+          { kind: 'add row to', table: OLD_DB, set: { Total: `${OLD_NUM} * {{Qty}}` }, remember: 'OrderId' },
+        ],
+      },
+    ],
     // A query addresses a table by whatever rawTableScope calls it, and that is
     // the block's NAME *and* its raw id -- `tables[blockId] = table`. Its
     // expressions are answered with formulaScope as the page scope, where a
@@ -2618,6 +2635,45 @@ group('an imported copy does not share the original`s data');
   check('a query keeps its own name, which names nothing', q.name, 'Totals');
   check('and its slots, which name columns not blocks', q.def.groupBy, '{{Name}}');
   check('and what it works out per group', q.def.keep.taken, 'sum of {{Amount}}');
+
+  const act = (copy.actions as any)[0];
+  check('an action`s table follows, for the same reason a query`s does', act.steps[0].table, at(OLD_DB));
+  check('and the ids inside a step`s where', act.steps[0].where, `{{id}} == ${at(OLD_INPUT)}`);
+  check('and inside what it refuses on', act.steps[1].when, `{{Qty}} > ${at(OLD_NUM)}`);
+  check('and inside a value it sets', act.steps[2].set.Total, `${at(OLD_NUM)} * {{Qty}}`);
+  /**
+   * THE OTHER DIRECTION: the remapper must be precise, not enthusiastic.
+   *
+   * `name`, `column`, `message` and `remember` are the action's OWN vocabulary,
+   * and rewriting one renames the thing instead of repointing it. Asserted in a
+   * SEPARATE fixture whose vocabulary values are literally old block ids --
+   * because in the fixture above they are ordinary words, so the claim passed
+   * whether the code honoured it or not. A control rewriting all four turned
+   * nothing red, which is how that was found: four decorative checks, caught by
+   * the one thing that catches them.
+   *
+   * Separate rather than folded in, because these ids SURVIVE on purpose and
+   * the completeness sweep above is entitled to say that no old id survives.
+   */
+  const vocab = remapBlockIds({
+    runtimeStates: { [OLD_DB]: { value: 0 } },
+    actions: [{
+      id: 'a2', name: 'Odd', takes: [],
+      steps: [
+        { kind: 'remember', name: OLD_DB, table: OLD_DB, column: OLD_DB, where: `{{x}} == ${OLD_DB}` },
+        { kind: 'refuse when', when: 'true', message: `ask about ${OLD_DB}` },
+        { kind: 'add row to', table: OLD_DB, set: {}, remember: OLD_DB },
+      ],
+    }],
+  });
+  const odd = (vocab.page.actions as any)[0].steps;
+  const fresh = vocab.idMap[OLD_DB];
+  check('the table a step writes to DOES follow', odd[0].table, fresh);
+  check('and an id inside its where does too', odd[0].where, `{{x}} == ${fresh}`);
+  check('but a remembered name is not a block, so it is left alone', odd[0].name, OLD_DB);
+  check('nor is the column it reads', odd[0].column, OLD_DB);
+  check('nor is what it says when it refuses', odd[1].message, `ask about ${OLD_DB}`);
+  check('nor is the name it keeps the new row under', odd[2].remember, OLD_DB);
 
   // A fixed value that merely looks like an id is a VALUE. Rewriting it would
   // corrupt the row a form writes, which is worse than the bug being fixed.
@@ -5986,9 +6042,34 @@ group('a row that was not saved does not stay on the page');
    * Both renderers, because the visitor is the one whose submission was
    * refused and the only one who can try again.
    */
-  check('THE EDITOR SHOWS WHAT DID NOT SAVE', /runtimeState\?\.error && \(/.test(blockSrc), true);
-  check('AND SO DOES THE PUBLISHED PAGE',
-    /runtimeState\?\.error && \(/.test(readFileSync('src/components/PublishedRenderer.tsx', 'utf8')), true);
+  const publishedSrc = readFileSync('src/components/PublishedRenderer.tsx', 'utf8');
+  const buttonSrc = readFileSync('src/blocks/ButtonBlock.tsx', 'utf8');
+  const noteSrc = readFileSync('src/components/FailureNote.tsx', 'utf8');
+  const shows = (src: string) => /<FailureNote[\s\S]{0,200}?message=\{runtimeState\?\.error\}/.test(src);
+
+  check('THE EDITOR SHOWS WHAT DID NOT SAVE', shows(blockSrc), true);
+  check('AND SO DOES THE PUBLISHED PAGE', shows(publishedSrc), true);
+  /**
+   * AND SO DOES THE BUTTON, in both. An action refuses on PURPOSE -- "there are
+   * not that many left" is the feature working -- and the person who was
+   * refused is looking at the button they pressed, not at a table elsewhere on
+   * the page. A Database being the only block that could say anything was right
+   * only while every failure was a failed row write.
+   */
+  check('and so does the button that was pressed', shows(buttonSrc), true);
+  check('on a published page too, which is where a stranger meets it',
+    (publishedSrc.match(/<FailureNote/g) || []).length, 2);
+  /**
+   * The line itself, once. Four near-identical divs is how the editor and the
+   * published renderer drifted apart the first time, and the duplication guard
+   * went red on the fourth. This asserts the shared one actually renders what
+   * it is handed -- a component every caller trusts and that draws nothing
+   * would pass every check above.
+   */
+  check('and the one shared line renders the message it is given',
+    noteSrc.includes('{message}'), true);
+  check('and draws nothing at all when there is none, rather than an empty red box',
+    noteSrc.includes('if (!message) return null'), true);
   check('and a write that works clears a stale message',
     (blockSrc.match(/if \(ok\?\.error\) store\.set\(atomInstance, \{ \.\.\.ok, error: null \}\)/g) || []).length, 2);
   check('so a workflow writing a date stores what a table cell would',
@@ -6314,8 +6395,15 @@ group('the editor and the published page are not drifting apart again');
    *
    * IT MAY SHRINK. IT MAY NOT GROW without somebody deciding it should — and
    * changing this number is that decision, made where it can be seen in a diff.
+   *
+   * 24 Aug: 131 -> 123. A Button had to be able to show a refusal, in both
+   * renderers, because an action refuses on purpose. Written as two more copies
+   * of the red line it went to 142 and this went red on the same call, which is
+   * the guard doing exactly its job. Pulling all four sites onto one
+   * `FailureNote` left it BELOW where it started, so the budget follows it down
+   * rather than back to where it was.
    */
-  const BUDGET = 131;
+  const BUDGET = 123;
 
   const runs = duplicatedRuns();
   const total = duplicatedLineCount();
@@ -8163,6 +8251,295 @@ group('the box a builder fills in');
     panel.includes('pageNamesIn('), true);
 }
 
+group('a button can run an action, and be refused by it');
+{
+  /**
+   * THE CALL. `actions.ts` could compile a function and nothing called one, so
+   * every check about actions until now was about a STRING.
+   *
+   * Driven through `executeWorkflow` rather than by calling the case directly,
+   * because the last time a step was added, 784 checks passed while it was
+   * being silently dropped by the gate -- an expression condition has no
+   * fieldId, so the gate decided it was not a condition at all and ran the step
+   * unguarded. A discount for orders over 500 went out on a 400 one. Every
+   * check written for it called the condition function directly and none came
+   * through the gate. This comes through the gate.
+   */
+  const CHECKOUT = {
+    id: 'act1', name: 'Check out', takes: ['Qty', 'ProductId'],
+    steps: [
+      { kind: 'remember', name: 'Left', table: 'Products', column: 'Stock', where: '{{id}} == {{ProductId}}' },
+      { kind: 'refuse when', when: '{{Qty}} > {{Left}}', message: 'There are not that many left.' },
+    ],
+  } as any;
+
+  check('THE NAME IS SAID IN ONE PLACE, so the migration and the caller cannot disagree',
+    functionNameFor(CHECKOUT), 'creora_check_out');
+  check('and it is the name the migration writes', toFunction(CHECKOUT).includes('function creora_check_out('), true);
+  check('the given values go over under their p_ names',
+    argsFor(CHECKOUT, { Qty: '3', ProductId: 'p1' }), { p_qty: '3', p_productid: 'p1' });
+  /**
+   * A MISSING VALUE GOES AS NULL RATHER THAN NOT GOING. Postgres matches a
+   * function by its argument list, so a short one is not "the same call with a
+   * gap" -- it is a different function, and the error a visitor would meet is
+   * "could not find the function", which is the message for a migration that
+   * was never run. Two different problems must not produce one sentence.
+   */
+  check('and one nobody filled in goes as nothing, not as a shorter call',
+    argsFor(CHECKOUT, { Qty: '3' }), { p_qty: '3', p_productid: null });
+  check('AND ONLY WHAT THE ACTION DECLARED, so a stale step cannot smuggle one in',
+    Object.keys(argsFor(CHECKOUT, { Qty: '1', ProductId: 'p', Price: '0' })), ['p_qty', 'p_productid']);
+
+  /**
+   * A REFUSAL IS THE ACTION WORKING; A DATABASE ERROR IS NOT.
+   *
+   * The builder wrote "There are not that many left." for the visitor, so the
+   * visitor gets it exactly as typed. Everything else Postgres says was written
+   * for a developer: useless to the person reading it and a description of the
+   * schema to everybody else.
+   */
+  const refused = describeActionError({ code: REFUSAL_CODE, message: 'There are not that many left.' });
+  check('A REFUSAL IS SHOWN AS THE BUILDER WROTE IT', refused.message, 'There are not that many left.');
+  check('and it is marked as a refusal, not a failure', refused.refused, true);
+  const broke = describeActionError({ code: '42P01', message: 'relation "orders" does not exist' });
+  check('A DATABASE ERROR DOES NOT REACH THE VISITOR', broke.message.includes('orders'), false);
+  check('and it is not called a refusal, because nobody decided it', broke.refused, false);
+  /**
+   * A MISSING TABLE IS NOT A MISSING FUNCTION. Postgres says "does not exist"
+   * about relations, columns, types and schemas as well, so matching that
+   * phrase told a builder to re-run a migration that had already been run.
+   */
+  const noTable = describeActionError({ code: '42P01', message: 'relation "orders" does not exist' });
+  check('A MISSING TABLE IS NOT DIAGNOSED AS A MISSING MIGRATION',
+    noTable.message.includes('not been set up'), false);
+  check('and it is still not shown to the visitor as schema', noTable.message.includes('orders'), false);
+
+  const missing = describeActionError({ code: '42883', message: 'could not find the function' });
+  check('MIGRATION NEVER RUN IS ITS OWN SENTENCE, since it is the certain failure',
+    missing.message.includes('not been set up on the server yet'), true);
+  check('and it says nothing happened, rather than leaving it open',
+    missing.message.includes('nothing happened'), true);
+  check('PostgREST answers a missing function differently, and that counts too',
+    describeActionError({ code: 'PGRST202', message: 'Could not find the function public.creora_check_out' })
+      .message.includes('not been set up on the server yet'), true);
+  check('a refusal with no words still says something',
+    describeActionError({ code: REFUSAL_CODE, message: '   ' }).message, 'That cannot be done.');
+
+  /**
+   * THE ERRCODE IS SET, NOT LEANT ON. P0001 is what a bare `raise exception`
+   * gives you, so this contract would hold by accident -- and the next person
+   * to add `using errcode` for another reason would turn every refusal into
+   * "something went wrong" with nothing going red.
+   */
+  check('the generated refusal carries the code the caller looks for',
+    toFunction(CHECKOUT).includes(`using errcode = '${REFUSAL_CODE}'`), true);
+
+  // --- and now the whole thing, through the gate -------------------------
+  const store = createStore();
+  const btn = 'buttonBlock__callaaaaaa';
+  const qty = 'inputBlock__callqtyaaa';
+  const table = 'databaseBlock__callaaaa';
+  store.set(allBlockIdsAtom, [btn, qty, table]);
+  store.set(blockRuntimeAtom(btn), { ...defaultRuntimeForNodeType('buttonBlock'), blockName: 'Buy' });
+  store.set(blockRuntimeAtom(qty), { ...defaultRuntimeForNodeType('inputBlock'), value: '3' });
+  store.set(blockRuntimeAtom(table), { ...defaultRuntimeForNodeType('databaseBlock'), columns: [{ name: 'Stock', type: 'number' }], rows: [] });
+  store.set(actionsAtom, [CHECKOUT]);
+  store.set(workflowsAtom, [{
+    id: 'wfCall', sourceId: btn, sourceEvent: 'onClick',
+    steps: [{
+      targetId: table, action: 'runAction', actionId: 'act1', requireValid: false,
+      given: { Qty: { source: 'block', value: qty }, ProductId: { source: 'fixed', value: 'p1' } },
+    }],
+  }] as any);
+
+  const fake = fakeSupabase as any;
+  fake.__reset();
+  executeWorkflow(btn, 'onClick', store);
+  await new Promise(r => setTimeout(r, 0));
+
+  check('PRESSING THE BUTTON ASKS THE SERVER, which nothing before this did',
+    fake.__lastCall()?.fn, 'creora_check_out');
+  check('and hands it what the visitor typed, read at the moment it was pressed',
+    fake.__lastCall()?.args, { p_qty: '3', p_productid: 'p1' });
+  check('the button is not left saying it is busy', store.get(blockRuntimeAtom(btn)).loading, false);
+  check('and nothing was refused, so nothing is said', store.get(blockRuntimeAtom(table)).error, null);
+
+  fake.__failNext({ code: REFUSAL_CODE, message: 'There are not that many left.' });
+  executeWorkflow(btn, 'onClick', store);
+  await new Promise(r => setTimeout(r, 0));
+  check('A REFUSAL LANDS WHERE THE WIRE POINTS, in the builder`s own words',
+    store.get(blockRuntimeAtom(table)).error, 'There are not that many left.');
+  check('and the button stops saying it is busy even when it was refused',
+    store.get(blockRuntimeAtom(btn)).loading, false);
+
+  executeWorkflow(btn, 'onClick', store);
+  await new Promise(r => setTimeout(r, 0));
+  check('AND A RUN THAT WORKS CLEARS IT, so a stale refusal does not haunt the page',
+    store.get(blockRuntimeAtom(table)).error, null);
+
+  fake.__failNext({ code: '42P01', message: 'relation "orders" does not exist' });
+  executeWorkflow(btn, 'onClick', store);
+  await new Promise(r => setTimeout(r, 0));
+  check('and a database error reaches the page as a sentence, not as schema',
+    String(store.get(blockRuntimeAtom(table)).error).includes('orders'), false);
+
+  store.set(workflowsAtom, [{
+    id: 'wfGone', sourceId: btn, sourceEvent: 'onClick',
+    steps: [{ targetId: table, action: 'runAction', actionId: 'deleted', requireValid: false, given: {} }],
+  }] as any);
+  fake.__reset();
+  executeWorkflow(btn, 'onClick', store);
+  await new Promise(r => setTimeout(r, 0));
+  check('A STEP POINTING AT AN ACTION THAT IS GONE ASKS THE SERVER NOTHING',
+    fake.__calls.length, 0);
+  check('and says so in the run log rather than doing nothing quietly',
+    String(store.get(workflowRunsAtom)[0]?.steps?.[0]?.reason || '').includes('does not exist any more'), true);
+  /**
+   * AND IT DOES NOT ALSO SAY IT RAN.
+   *
+   * The tail of the step loop pushed a `ran` line for every step, including the
+   * ones that had just pushed their own `skipped` line and broken out. So one
+   * press produced both, and a builder who read `ran` stopped looking. Found
+   * here; it was already true of goToPage and openUrl.
+   */
+  check('AND DOES NOT ALSO CLAIM IT RAN, which is what a builder stops reading at',
+    (store.get(workflowRunsAtom)[0]?.steps || []).map((st: any) => st.status), ['skipped']);
+
+  /**
+   * AND THE DEFAULT, THROUGH THE ENGINE, ON A STEP THAT DID NOT SAY.
+   *
+   * The two checks below say what `guardDefaultFor` answers. This says the
+   * engine ASKS it -- the distinction that mattered when a discount guarded by
+   * "only over 500" went out on a 400 order while 784 checks passed, because
+   * every one of them called the condition function directly and none came
+   * through the gate.
+   */
+  const guarded = createStore();
+  const gBtn = 'buttonBlock__guardaaaaa';
+  const gQty = 'inputBlock__guardqtyaa';
+  const gTable = 'databaseBlock__guardaa';
+  // A field with rules that this action does NOT read. Without it the check
+  // below cannot fail: fieldsReadByStep falls back to every block with rules
+  // when it finds none, and with only one such block the fallback and the right
+  // answer are the same list. A control proved exactly that.
+  const gOther = 'inputBlock__guardotheraa';
+  guarded.set(allBlockIdsAtom, [gBtn, gQty, gTable, gOther]);
+  guarded.set(blockRuntimeAtom(gOther), {
+    ...defaultRuntimeForNodeType('inputBlock'), value: '', rules: [{ type: 'required' }],
+  });
+  guarded.set(blockRuntimeAtom(gBtn), { ...defaultRuntimeForNodeType('buttonBlock') });
+  guarded.set(blockRuntimeAtom(gQty), {
+    ...defaultRuntimeForNodeType('inputBlock'), value: '', rules: [{ type: 'required' }],
+  });
+  guarded.set(blockRuntimeAtom(gTable), { ...defaultRuntimeForNodeType('databaseBlock'), columns: [], rows: [] });
+  guarded.set(actionsAtom, [CHECKOUT]);
+  guarded.set(workflowsAtom, [{
+    id: 'wfGuard', sourceId: gBtn, sourceEvent: 'onClick',
+    // No requireValid at all -- the whole point is what the engine decides.
+    steps: [{ targetId: gTable, action: 'runAction', actionId: 'act1', given: { Qty: { source: 'block', value: gQty } } }],
+  }] as any);
+  fake.__reset();
+  executeWorkflow(gBtn, 'onClick', guarded);
+  await new Promise(r => setTimeout(r, 0));
+  check('AN EMPTY REQUIRED FIELD STOPS THE ACTION BEING RUN AT ALL',
+    fake.__calls.length, 0);
+  check('and the field says what is wrong, rather than the press doing nothing',
+    guarded.get(blockRuntimeAtom(gQty)).validationError, 'This field is required');
+
+  guarded.set(blockRuntimeAtom(gQty), { ...guarded.get(blockRuntimeAtom(gQty)), value: '2' });
+  executeWorkflow(gBtn, 'onClick', guarded);
+  await new Promise(r => setTimeout(r, 0));
+  /**
+   * AND `gOther` IS STILL EMPTY AND STILL REQUIRED.
+   *
+   * The guard has to check the fields THIS step reads and no others, or an
+   * unfinished field elsewhere on the page silently refuses to check out --
+   * with nothing to see, since the press does nothing and says nothing.
+   */
+  check('and filling it in lets the action through', fake.__lastCall()?.fn, 'creora_check_out');
+  check('AN UNFINISHED FIELD THE ACTION DOES NOT READ DOES NOT BLOCK IT',
+    fake.__calls.length, 1);
+
+  /**
+   * ONE COPY OF THE DEFAULT. App.tsx drew the checkbox from its own list and
+   * the engine decided from another, and they were one edit away from
+   * disagreeing -- found by adding runAction to one of them and noticing the
+   * other would still have said false: the box would have shown ON and the
+   * step would have run anyway.
+   */
+  check('the validity guard is on by default for anything that writes a row',
+    ['addRow', 'updateRow', 'runAction'].map(guardDefaultFor), [true, true, true]);
+  check('and off for anything that does not', ['set', 'toggle', 'goToPage'].map(guardDefaultFor), [false, false, false]);
+  check('AND THE EDITOR ASKS THE ENGINE RATHER THAN KEEPING ITS OWN LIST',
+    readFileSync('src/App.tsx', 'utf8').includes('guardDefaultFor') 
+      && !/function guardDefaultFor/.test(readFileSync('src/App.tsx', 'utf8')), true);
+}
+
+group('an action is page state, so it travels with the page');
+{
+  /**
+   * SEVEN PLACES, NOT SIX. A query reached the export, the import, both saves,
+   * the subscription, the clear and both loads -- and missed the REMAP, which
+   * is how an imported copy came to carry its questions across still pointing
+   * at the original's blocks. This is the same list, asserted rather than
+   * remembered, because the omission is invisible in a diff.
+   */
+  const app = readFileSync('src/App.tsx', 'utf8');
+  const missing = [
+    ['written into the .creora file', 'const actions = store.get(actionsAtom)'],
+    ['read back out of it', 'store.set(actionsAtom, importedPage.actions || [])'],
+    ['saved to the server', 'store.set(actionsAtom, blocksData.actions || [])'],
+    ['saved again when it changes', 'store.sub(actionsAtom'],
+    ['and cleared when the page is switched', 'store.set(actionsAtom, [])'],
+  ].filter(([, needle]) => !app.includes(needle)).map(([what]) => what);
+  check('AN ACTION TRAVELS EVERYWHERE A QUESTION DOES', missing, []);
+  check('and the remapper knows the field exists, which is the one a query missed',
+    readFileSync('src/lib/remapBlockIds.ts', 'utf8').includes('page.actions'), true);
+}
+
+group('the screen an action is written on');
+{
+  /**
+   * Same two things as the Questions panel: the parsing, and whether there is a
+   * WAY IN. A primitive that compiles perfectly and cannot be reached is the
+   * same as a missing primitive, and nothing else in this file would notice.
+   */
+  check('SET IS WRITTEN ONE PER LINE, because a column and a formula is two boxes per value',
+    parseSet('Total = {{Price}} * {{Qty}}\nAt = Now'),
+    { Total: '{{Price}} * {{Qty}}', At: 'Now' });
+  check('spacing does not matter', parseSet('a=1\nb  =  2'), { a: '1', b: '2' });
+  check('A LINE WITH NO EQUALS IS HALF-TYPED, not a column named the whole line',
+    parseSet('Total'), {});
+  check('and an equals inside the value survives, since == is an ordinary thing to set',
+    parseSet('same = {{A}} == {{B}}'), { same: '{{A}} == {{B}}' });
+  check('an empty box is nothing set, not a broken one', parseSet(''), {});
+  check('a blank line does not invent a nameless column', parseSet('a = 1\n\nb = 2'), { a: '1', b: '2' });
+  check('and it writes back out the way it was typed in',
+    setAsLines(parseSet('Total = {{Price}} * {{Qty}}\nAt = Now')), 'Total = {{Price}} * {{Qty}}\nAt = Now');
+
+  const panel = readFileSync('src/components/ActionsPanel.tsx', 'utf8');
+  const app = readFileSync('src/App.tsx', 'utf8');
+  check('THE ACTIONS PANEL IS REACHABLE — a primitive with no way in is a missing primitive',
+    app.includes('{showActions && <ActionsPanel')
+      && app.includes('setShowActions((v: boolean) => !v)'), true);
+  check('and it previews what the action would do, on the real tables',
+    panel.includes('runAction(') && panel.includes('rawTableScope('), true);
+  check('and it reads back as a sentence', panel.includes('describeAction('), true);
+  check('it says out loud which values a visitor could change, WHERE THEY ARE TYPED',
+    panel.includes('originOf('), true);
+  check('and it still prints the warnings, which are the same claim said once',
+    panel.includes('warningsFor('), true);
+  check('THE MIGRATION SAYS IT IS NOT RUNNING YET, which is the one gap in this product',
+    panel.includes('toFunction(') && panel.toLowerCase().includes('not running'), true);
+  /**
+   * Every step word has boxes. A word in the dropdown whose fields nobody wrote
+   * is a step that can be chosen and never filled in -- which looks like the
+   * step being broken rather than the panel being unfinished.
+   */
+  check('EVERY STEP WORD HAS BOXES TO FILL IN',
+    STEP_WORDS.filter(w => !new RegExp(`'${w}':`).test(panel)), []);
+}
+
 group('who may do what, said once, enforced at the store');
 {
   /**
@@ -8938,7 +9315,7 @@ group('a slot can contain a slot');
  * Raise it in the same commit that adds the checks, the way the drift budget
  * above is raised: a number changed where it can be seen in a diff.
  */
-const EXPECTED_CHECKS = 2065;
+const EXPECTED_CHECKS = 2129;
 reachedTheEnd = true;
 if (passed + failed !== EXPECTED_CHECKS) {
   failed++;

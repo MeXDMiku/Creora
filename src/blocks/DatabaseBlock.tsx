@@ -11,6 +11,7 @@ import { blockRuntimeAtom, activeWireAtom, snapTargetAtom, triggerSaveAtom, cont
 import { useMemo, useRef, useState, useEffect, useCallback } from 'react';
 import { useBlockDrag } from '../hooks/useBlockDrag';
 import { supabase } from '../lib/supabase';
+import { FailureNote } from '../components/FailureNote'
 
 const DatabaseBlockComponent = (props: NodeViewProps) => {
   const { node } = props;
@@ -565,35 +566,11 @@ const DatabaseBlockComponent = (props: NodeViewProps) => {
           silent, so the message has to be somewhere a builder looks: on the
           block, not in a console.
         */}
-        {runtimeState?.error && (
-          <div
-            onPointerDown={(e) => e.stopPropagation()}
-            style={{
-              fontSize: '11px',
-              color: '#b91c1c',
-              background: '#fef2f2',
-              border: '1px solid #fecaca',
-              borderRadius: '6px',
-              padding: '6px 8px',
-              lineHeight: 1.4,
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: '6px',
-            }}
-          >
-            <span style={{ flex: 1 }}>{runtimeState.error}</span>
-            <button
-              onClick={() => store.set(atomInstance, { ...store.get(atomInstance), error: null })}
-              style={{
-                border: 'none', background: 'transparent', color: '#b91c1c',
-                cursor: 'pointer', fontSize: '12px', lineHeight: 1, padding: 0,
-              }}
-              title="Dismiss"
-            >
-              &#10005;
-            </button>
-          </div>
-        )}
+        <FailureNote
+          message={runtimeState?.error}
+          onPointerDown={(e) => e.stopPropagation()}
+          onDismiss={() => store.set(atomInstance, { ...store.get(atomInstance), error: null })}
+        />
 
         {/* Add Row Button */}
         {columns.length > 0 && (

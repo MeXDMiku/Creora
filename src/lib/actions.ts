@@ -142,6 +142,41 @@ export function originOf(
   return { names, fromPage, anyTrusted, trusted: fromPage.length === 0 };
 }
 
+// ------------------------------------------------------------ what a builder types
+
+/**
+ * `Total = {{Price}} * {{Qty}}`, one per line, and back again.
+ *
+ * IN lib RATHER THAN IN THE PANEL because a .tsx cannot be imported by the
+ * checks -- JSX is not strippable types -- so parsing that lives beside the
+ * boxes is parsing nothing can run. Same reason parseKeep sits in queries.ts
+ * rather than in QuestionsPanel.
+ */
+export function setAsLines(set: Record<string, string> | undefined): string {
+  return Object.entries(set || {}).map(([k, v]) => `${k} = ${v}`).join('\n');
+}
+
+/**
+ * A LINE WITH NO EQUALS IS HALF-TYPED, NOT A COLUMN NAMED THE WHOLE LINE.
+ *
+ * The same decision parseKeep made, for the same reason: this runs on every
+ * keystroke, so every line is briefly half-typed. Guessing at one means a
+ * column called `Tot` exists for as long as it takes to type `al`.
+ *
+ * The FIRST equals splits it, so a value may contain one -- `{{A}} == {{B}}`
+ * is an ordinary thing to set a column to.
+ */
+export function parseSet(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const line of String(text ?? '').split('\n')) {
+    const at = line.indexOf('=');
+    if (at === -1) continue;
+    const column = line.slice(0, at).trim();
+    if (column) out[column] = line.slice(at + 1).trim();
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------- reading it
 
 /** The action as one sentence, for somebody checking their own work. */
@@ -404,8 +439,83 @@ export function toSql(
  * and an action nobody has to be signed in for is not an action, it is an
  * endpoint.
  */
+/**
+ * WHAT THE FUNCTION IS CALLED, SAID IN ONE PLACE.
+ *
+ * The compiler writes this name into the migration and the caller has to say
+ * exactly the same word to `rpc`. Two spellings of one name is the shape of
+ * bug this project has paid for repeatedly -- editor and published renderer,
+ * the two row-matchers -- so there is one spelling and both read it.
+ */
+export function functionNameFor(action: CreoraAction | null | undefined): string {
+  return `creora_${ident(action?.name || 'action')}`;
+}
+
+/** What `rpc` must be handed: the given values under their p_ names. */
+export function argsFor(
+  action: CreoraAction | null | undefined,
+  given: Record<string, any> | undefined,
+): Record<string, any> {
+  const out: Record<string, any> = {};
+  for (const take of action?.takes || []) out[`p_${ident(take)}`] = (given || {})[take] ?? null;
+  return out;
+}
+
+/**
+ * A REFUSAL IS THE ACTION WORKING. A DATABASE ERROR IS NOT.
+ *
+ * `refuse when` compiles to `raise exception 'sentence' using errcode = 'P0001'`,
+ * and that sentence was written by the builder FOR the visitor -- so it is shown
+ * exactly as typed. Anything else coming back from Postgres was written by
+ * Postgres, for a developer, and showing it to a visitor is both useless to them
+ * and a description of the schema to everybody else.
+ *
+ * The errcode is set explicitly rather than leant on. P0001 IS what a bare
+ * `raise exception` gives you, and a contract that holds by default is a
+ * contract nobody wrote down: the next person to add `using errcode` for some
+ * other reason would silently turn every refusal into "something went wrong".
+ */
+export const REFUSAL_CODE = 'P0001';
+
+export function describeActionError(error: unknown): { message: string; refused: boolean } {
+  let message = '';
+  let code = '';
+  if (typeof error === 'string') message = error;
+  else if (error && typeof error === 'object') {
+    const e = error as { message?: unknown; code?: unknown };
+    message = String(e.message ?? '');
+    code = String(e.code ?? '');
+  }
+  if (code === REFUSAL_CODE) return { message: message.trim() || 'That cannot be done.', refused: true };
+  /**
+   * Migration not run is the ONE failure worth naming separately, because it is
+   * the one that is certain to happen and the one a builder can fix in a minute.
+   * Postgres answers a missing function with 42883; PostgREST, which is what a
+   * browser actually talks to, answers PGRST202.
+   *
+   * IT USED TO ALSO MATCH `does not exist`, AND THAT WAS WRONG. Postgres says
+   * "does not exist" about a missing relation, column, type and schema too, so
+   * `relation "orders" does not exist` -- a table the action writes to that was
+   * never created -- came back as "this action has not been set up on the
+   * server yet". A builder would go and re-run the action's migration, which
+   * was already run and is not the problem. A confident wrong diagnosis costs
+   * more than no diagnosis.
+   *
+   * Found by a negative control coming back green: the control made the
+   * fallback leak raw Postgres text to the visitor and nothing went red,
+   * because the fixture never reached the fallback.
+   */
+  if (code === '42883' || code === 'PGRST202' || /could not find the function/i.test(message)) {
+    return {
+      message: 'This action has not been set up on the server yet, so nothing happened.',
+      refused: false,
+    };
+  }
+  return { message: 'That could not be done just now. Try again in a moment.', refused: false };
+}
+
 export function toFunction(action: CreoraAction | null | undefined): string {
-  const name = `creora_${ident(action?.name || 'action')}`;
+  const name = functionNameFor(action);
   const params = new Set(action?.takes || []);
   const args = [...params].map(p => `p_${ident(p)} text`).join(', ');
   const signature = [...params].map(() => 'text').join(', ');
@@ -419,7 +529,7 @@ export function toFunction(action: CreoraAction | null | undefined): string {
     switch (step.kind) {
       case 'refuse when':
         lines.push(`  if ${toSql(step.when, opts())} then`);
-        lines.push(`    raise exception ${quote(step.message || 'That cannot be done.')};`);
+        lines.push(`    raise exception ${quote(step.message || 'That cannot be done.')} using errcode = ${quote(REFUSAL_CODE)};`);
         lines.push('  end if;');
         break;
       case 'remember':

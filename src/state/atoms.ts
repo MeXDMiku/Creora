@@ -2,6 +2,7 @@ import { addFacets } from '../lib/formula';
 import { atom } from 'jotai';
 import { atomFamily } from 'jotai/utils';
 import type { NamedQuery } from '../lib/queries';
+import type { CreoraAction } from '../lib/actions';
 import type { Workflow, FormulaBinding, PageSummary, BlockRuntimeState } from '../types/creora';
 import { nodeTypeFromBlockId, defaultValueForNodeType, defaultRuntimeForNodeType, shortBlockId, isBlockNodeType, BLOCK_DISPLAY_NAMES, type BlockNodeType } from '../lib/blockRegistry';
 import type { BlockPlacement } from '../lib/layout';
@@ -309,6 +310,16 @@ export const formulasAtom = atom<FormulaBinding[]>([]);
  * LOG 2026-08-23  Added with primitive A's runtime wiring.
  */
 export const queriesAtom = atom<NamedQuery[]>([]);
+
+/**
+ * The page's actions -- named sequences of writes that happen at the store.
+ *
+ * Page state like any other, and therefore saved, subscribed, cleared, loaded,
+ * exported, imported and REMAPPED like any other. Queries reached six of those
+ * seven and missed the remap, so an imported copy carried its questions across
+ * still pointing at the original's blocks. Seven, not six.
+ */
+export const actionsAtom = atom<CreoraAction[]>([]);
 /** Publish state of the page currently open in the editor. Set on load from get_page. */
 export const currentPageIsPublishedAtom = atom<boolean>(false);
 export const currentPageIdAtom = atom<string>('00000000-0000-0000-0000-000000000001');

@@ -56,6 +56,7 @@ export interface ImportedPageShape {
   workflows?: any[];
   formulas?: any[];
   queries?: any[];
+  actions?: any[];
   blocks?: any[];
 }
 
@@ -166,6 +167,20 @@ function remapStep(step: any, idMap: Record<string, string>): any {
     }
     next.mappings = mappings;
   }
+  // `given` is `mappings` under another name -- the values a runAction step
+  // hands to a compiled function -- so it follows the same rule: a block id
+  // only when `source` says so.
+  if (step.given && typeof step.given === 'object') {
+    const given: Record<string, any> = {};
+    for (const [name, m] of Object.entries<any>(step.given)) {
+      given[name] =
+        m && typeof m === 'object' && m.source === 'block'
+          ? { ...m, value: remapString(m.value, idMap) }
+          : m;
+    }
+    next.given = given;
+  }
+
   if (step.matchValue && typeof step.matchValue === 'object' && step.matchValue.source === 'block') {
     next.matchValue = { ...step.matchValue, value: remapString(step.matchValue.value, idMap) };
   }
@@ -217,6 +232,40 @@ function remapQuery(q: any, idMap: Record<string, string>): any {
   if (def.keep !== undefined) next.keep = exprMap(def.keep);
 
   return { ...q, def: next };
+}
+
+/**
+ * An action's references. The same two disguises as a query's, one layer deeper.
+ *
+ * `table` NAMES a table, and rawTableScope registers every table under its raw
+ * id as well as its display name, so a table name is allowed to be an id.
+ * `when`, `where` and every value in `set` are row formulas answered with the
+ * page scope, where a block id is a legal name for that block's value.
+ *
+ * `name`, `message`, `column` and `remember` are the ACTION's own vocabulary --
+ * what it calls a remembered value, what it says when it refuses, which column
+ * it reads. None of them names a block, and rewriting one would rename the
+ * thing rather than repoint it.
+ */
+function remapAction(a: any, idMap: Record<string, string>): any {
+  if (!a || typeof a !== 'object') return a;
+  const expr = (v: unknown) =>
+    typeof v === 'string' ? remapFormulaExpression(v, idMap) : v;
+  return {
+    ...a,
+    steps: (a.steps ?? []).map((step: any) => {
+      if (!step || typeof step !== 'object') return step;
+      const next: any = { ...step, table: remapString(step.table, idMap) };
+      if (step.when !== undefined) next.when = expr(step.when);
+      if (step.where !== undefined) next.where = expr(step.where);
+      if (step.set && typeof step.set === 'object') {
+        const set: Record<string, any> = {};
+        for (const [column, formula] of Object.entries<any>(step.set)) set[column] = expr(formula);
+        next.set = set;
+      }
+      return next;
+    }),
+  };
 }
 
 /** Every block in the page gets a new id, and every reference to it follows. */
@@ -296,6 +345,7 @@ export function remapBlockIds(page: ImportedPageShape): RemapResult {
           : f,
       ),
       queries: (page.queries ?? []).map((q: any) => remapQuery(q, idMap)),
+      actions: (page.actions ?? []).map((a: any) => remapAction(a, idMap)),
       blocks: (page.blocks ?? []).map((b: any) =>
         b && typeof b === 'object' ? { ...b, id: remapString(b.id, idMap) } : b,
       ),

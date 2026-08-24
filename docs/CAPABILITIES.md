@@ -30,10 +30,14 @@ Button · Number display · Toggle · Input · Text label · Formula · Timer ·
 History chart · Database · List · Shape · Live data · My design · Visitor ·
 Image · For each row · **Page value**
 
-**20 workflow actions**
+**21 workflow actions**
 increment · decrement · set · setText · toggle · reset · setVisible · setHidden ·
 addRow · updateRow · deleteRow · exportCsv · sendWebhook · validate · setLoading ·
-clearLoading · setDisabled · setEnabled · **goToPage** · **openUrl**
+clearLoading · setDisabled · setEnabled · goToPage · openUrl · **runAction**
+
+Twenty of those twenty-one happen in the BROWSER. `runAction` is the only one
+that happens at the store, which is the only place a value a visitor cannot
+change can come from.
 
 **10 condition operators** in five opposed pairs, plus `isValid` / `isInvalid`
 which ask a field's own rules — and, since 16 Aug, **a condition may be a whole

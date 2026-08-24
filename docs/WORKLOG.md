@@ -718,3 +718,99 @@ could ever have found**.
 Pure functions are the exception: `visibleRows`, `rowMatchesFormula` and
 `referencedIds` need no store, so running them in the page is honest and was how
 the row-formula filter was confirmed live.
+
+---
+
+## 24 August — the call, and four things the controls found
+
+Primitive B could compile a Postgres function and nothing called one, so every
+check about actions until today was a check about a **string**. This closes it:
+a `runAction` step, a panel to write an action on, and a refusal a visitor can
+actually read.
+
+**Verify found the tree was not what the last session left it as.** `npm run
+check` was green at 2,059 and `tsc` was **not clean** — three errors sitting in
+committed code, because the session that wrote the Query panel ended before it
+ran one. The first of them was not a type error in disguise:
+
+```
+src/App.tsx(2151)  'queries' does not exist in type 'Page & {...}'
+```
+
+The export writes `queries` into the `.creora` file, the importer reads them
+back, and the `Page` type did not know the field existed — the read side had
+been quietened with `(importedPage as any).queries`. That is the same shape as
+the 16 Aug bug where six block types were written into a backup as plain text:
+**a field the file knows about and the type does not.**
+
+Pulling that thread found the live one. `remapBlockIds` walks the document,
+positions, runtime states, connections, workflows, formulas and blocks — and
+not queries. `rawTableScope` registers every table under its display name **and
+its raw block id**, and a query's expressions are answered with `formulaScope`
+as the page scope, so a query carries block ids in two disguises and neither
+travelled. Demonstrated rather than argued: a query went into the remap fixture
+and the completeness sweep went red on the first run.
+
+### What the negative controls found this time
+
+**Four decorative checks.** "a remembered name is not a block, so it is left
+alone" and three siblings passed whether the code honoured them or not, because
+the fixture's vocabulary values were ordinary words with nothing rewritable in
+them. A control that rewrote all four turned **nothing** red. They now live in
+their own fixture whose `name`, `column`, `message` and `remember` are literally
+old block ids — the same trick the `mappings.Note` check already used, kept
+separate so the completeness sweep is still entitled to say no old id survived.
+
+**A real bug in the diagnosis.** `describeActionError` matched `/does not
+exist/i` to spot a migration that had never been run. Postgres says that about
+relations, columns, types and schemas too, so `relation "orders" does not exist`
+came back as *"this action has not been set up on the server yet"* — sending a
+builder to re-run a migration that was already run. Found by a control on a
+different line coming back green: the fixture never reached the fallback the
+control had broken.
+
+**A lie in the run log.** The tail of the step loop pushed a `ran` line for
+every step, including ones that had just pushed their own `skipped` line and
+broken out. One press produced both, and a builder who reads `ran` stops
+looking. Already true of `goToPage` and `openUrl`; found by adding the call.
+
+**Two copies of one list, one edit from disagreeing.** `guardDefaultFor` was
+written in App.tsx and again inline in `bindingEngine`. Adding `runAction` to
+the App's copy would have shown the checkbox ON while the engine ran the step
+unguarded. One copy now, in the engine, and the editor asks it.
+
+### Two decisions worth keeping
+
+**A refusal is the action working; a database error is not.** `refuse when`
+compiles with `using errcode = 'P0001'` — set explicitly rather than leant on,
+because P0001 is what a bare `raise exception` gives you and a contract that
+holds by accident is a contract nobody wrote down. That code, and only that
+code, means *show the builder's sentence to the visitor exactly as typed*.
+Everything else Postgres says was written for a developer: useless to the person
+reading it and a description of the schema to everybody else.
+
+**A refusal has to be somewhere the person who was refused is looking.** A
+Database was the only block that rendered `error`, which was right while every
+failure was a failed row write. An action refuses on purpose, and the visitor is
+looking at the button they pressed. Written as two more copies of the red line
+it went to 142 duplicated lines and the drift guard went red on the same call —
+the guard doing exactly its job. All four sites now share one `FailureNote`,
+which left duplication at **123**, below the 131 it started at, so the budget
+followed it down rather than back.
+
+### And the stub can lie now
+
+The note beside the add-row checks said this path "cannot be driven headless —
+there is no seam to hand it a failing client." There is a seam: the loader
+already swaps `lib/supabase.ts` for `scripts/stubs/supabase.ts`. It now records
+what was asked of the server and can be told to fail **once**, so the call is
+checked by pressing the button and reading what happened rather than by counting
+call sites in the source. One-shot on purpose: a stub left failing leaks into
+the next check, and the failure appears to come from the code.
+
+### Not proved
+
+**The browser half.** The extension was not connected, so nothing here has been
+clicked. The panel's markup, the step popup's new boxes, and the refusal
+rendering under a real button are all unproven in a running page. Everything
+below the markup is driven through `executeWorkflow` in node.

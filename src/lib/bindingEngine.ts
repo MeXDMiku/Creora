@@ -1,7 +1,7 @@
 import { getDefaultStore } from 'jotai';
 import type { TriggerEvent, StepCondition } from '../types/creora';
 import { resolveQueries } from './queries';
-import { blockRuntimeAtom, workflowsAtom, formulasAtom, queriesAtom, allBlockIdsAtom, getBlockDefaultValue , recordRun, blockValuesByName, slotNameOf, type RunStep, switchPageFnAtom } from '../state/atoms';
+import { blockRuntimeAtom, workflowsAtom, formulasAtom, queriesAtom, actionsAtom, allBlockIdsAtom, getBlockDefaultValue , recordRun, blockValuesByName, slotNameOf, type RunStep, switchPageFnAtom } from '../state/atoms';
 import { sendWebhook } from './webhook';
 import { computeDatabaseOutput } from './databaseOutput';
 import { validateValue } from './validation';
@@ -14,6 +14,7 @@ import { toCsv, csvFileName, downloadCsv } from './csv';
 import { evaluateCondition } from './conditions';
 import { addFacets, evaluateExpression, truthy, type FormulaValue, explainUnreadableFormula, type TableScope } from './formula';
 import { describeRowWriteError, withoutRow } from './rowWrite';
+import { functionNameFor, argsFor, describeActionError } from './actions';
 export { evaluateCondition };
 import { renderTemplate } from './format';
 import { supabase } from './supabase';
@@ -84,12 +85,29 @@ function blocksWithRules(store: ReturnType<typeof getDefaultStore>): string[] {
  * ticking "only if valid" on such a step means.
  */
 function fieldsReadByStep(
-  step: { mappings?: Record<string, { source: string; value: string }>; matchValue?: { source: string; value: string } },
+  step: {
+    mappings?: Record<string, { source: string; value: string }>;
+    given?: Record<string, { source: string; value: string }>;
+    matchValue?: { source: string; value: string };
+  },
   store: ReturnType<typeof getDefaultStore>
 ): string[] {
   const ids: string[] = [];
   if (step.mappings) {
     for (const m of Object.values(step.mappings)) {
+      if (m && m.source === 'block' && m.value) ids.push(m.value);
+    }
+  }
+  /**
+   * A runAction step reads its fields through `given`, not `mappings`.
+   *
+   * Without this the list came back empty and the fallback below guarded every
+   * block on the page that has rules -- which fails SAFE, so nothing would have
+   * looked wrong, and a form with an unrelated invalid field somewhere else
+   * would have silently refused to check out.
+   */
+  if (step.given) {
+    for (const m of Object.values(step.given)) {
       if (m && m.source === 'block' && m.value) ids.push(m.value);
     }
   }
@@ -269,6 +287,24 @@ function applyQueries(store: ReturnType<typeof getDefaultStore>, tables: TableSc
  * is the safe direction: a broken condition guarding a row write should stop
  * the write, not wave it through.
  */
+/**
+ * IS THE "ONLY IF THE FIELDS ARE VALID" GUARD ON BY DEFAULT FOR THIS ACTION?
+ *
+ * WRITTEN TWICE UNTIL 24 AUG, once here and once in App.tsx, and the two were
+ * the same list -- which is the shape of every drift bug in this repo's history
+ * (a chart drawn to different arithmetic, a cell formatted on one side and raw
+ * on the other). It was found by adding `runAction` to the App's copy and
+ * noticing the engine's would still have said false: the checkbox would have
+ * shown ON and the engine would have run the step anyway.
+ *
+ * ON for anything that WRITES A ROW. `runAction` belongs here for that reason
+ * and one more: it hands what a visitor typed to a function that will write it
+ * across several tables and cannot be asked to undo it afterwards.
+ */
+export function guardDefaultFor(action: string): boolean {
+  return action === 'addRow' || action === 'updateRow' || action === 'runAction';
+}
+
 export function stepConditionResult(
   condition: StepCondition,
   store: ReturnType<typeof getDefaultStore>
@@ -515,8 +551,7 @@ export function executeWorkflow(
        * wrong: pressing submit should reveal the whole form's complaints at
        * once, not make someone fix them one press at a time.
        */
-      const guardOn =
-        step.requireValid ?? (step.action === 'addRow' || step.action === 'updateRow');
+      const guardOn = step.requireValid ?? guardDefaultFor(step.action);
       if (guardOn) {
         const fields = fieldsReadByStep(step, store);
         const problems: string[] = [];
@@ -538,6 +573,20 @@ export function executeWorkflow(
           continue;
         }
       }
+
+      /**
+       * WHERE THE LOG STOOD BEFORE THIS STEP RAN.
+       *
+       * A case that decides it cannot do anything pushes its own `skipped` line
+       * and breaks -- and the tail below then pushed a `ran` line for the same
+       * step anyway. So the log said, of one press, both "skipped, nothing here
+       * knows how to change page" AND "ran". A builder reading `ran` stops
+       * looking, which is the whole cost.
+       *
+       * Found while adding the call: a step pointing at an action that had been
+       * deleted reported `ran`. It was already true of goToPage and openUrl.
+       */
+      const loggedBefore = runSteps.length;
 
       // Execute the step's action
       const currentValue = currentTargetState.value;
@@ -1121,6 +1170,79 @@ export function executeWorkflow(
           }
           break;
         }
+        /**
+         * THE CALL. Everything else in this switch happens in the browser.
+         *
+         * The values handed over are only the ones the action DECLARED it
+         * takes -- `argsFor` walks `takes`, not the step -- so a step left over
+         * from an older shape of the action cannot smuggle an extra argument
+         * in, and a missing one arrives as null rather than as a shorter
+         * argument list Postgres would refuse to match at all.
+         */
+        case 'runAction': {
+          const action = (store.get(actionsAtom) || []).find((a: any) => a.id === step.actionId);
+          if (!action) {
+            runSteps.push({
+              targetId: step.targetId,
+              action: 'runAction',
+              status: 'skipped',
+              reason: 'that action does not exist any more, so nothing was run',
+            });
+            break;
+          }
+          /**
+           * The outcome arrives after this run is already in the log, so it
+           * cannot go in `runSteps` -- it gets its own entry, the way a failed
+           * webhook does. Only failures: a success needs no line, and the step
+           * below already says the step ran.
+           */
+          const report = (reason: string) => recordRun(store, {
+            sourceId, event, workflowId: workflow.id, matched: 1,
+            steps: [{ targetId: step.targetId, action: 'runAction', status: 'skipped', reason }],
+          });
+          const given: Record<string, any> = {};
+          for (const [name, m] of Object.entries<any>(step.given || {})) {
+            given[name] = m?.source === 'block'
+              ? store.get(blockRuntimeAtom(String(m.value)))?.value
+              : m?.value;
+          }
+          /**
+           * The message lands on the TARGET, which is the block the wire points
+           * at, because a Database is the only thing on a page that renders one
+           * -- and now a Button does too, since the button is what a visitor
+           * pressed and what they are looking at when it is refused.
+           */
+          const sayOn = step.targetId || sourceId;
+          const busyId = sourceId;
+          const setBusy = (busy: boolean) => {
+            const fresh = store.get(blockRuntimeAtom(busyId));
+            if (fresh) store.set(blockRuntimeAtom(busyId), { ...fresh, loading: busy });
+          };
+          const settle = (failure: { message: string; refused: boolean } | null) => {
+            setBusy(false);
+            const now = store.get(blockRuntimeAtom(sayOn));
+            if (now) store.set(blockRuntimeAtom(sayOn), { ...now, error: failure ? failure.message : null });
+            if (failure) report(failure.refused ? `refused: ${failure.message}` : failure.message);
+          };
+          setBusy(true);
+          try {
+            supabase
+              .rpc(functionNameFor(action), argsFor(action, given))
+              .then(({ error }: any) => {
+                settle(error ? describeActionError(error) : null);
+                /**
+                 * An action writes rows this page may be showing, and it wrote
+                 * them somewhere the page cannot see. Without this the table is
+                 * stale until something else happens to refresh it, which is
+                 * the "it did not work" report that means "it worked".
+                 */
+                if (!error) recalculateAllFormulas(store);
+              });
+          } catch (err) {
+            settle(describeActionError(err));
+          }
+          break;
+        }
         case 'exportCsv': {
           /**
            * "I want the data in my website to go into Excel, in the order I
@@ -1261,13 +1383,15 @@ export function executeWorkflow(
         }
       }
 
-      runSteps.push({
-        targetId: step.targetId,
-        action: step.action,
-        status: 'ran',
-        before: valueBefore,
-        after: store.get(targetAtom)?.value,
-      });
+      if (runSteps.length === loggedBefore) {
+        runSteps.push({
+          targetId: step.targetId,
+          action: step.action,
+          status: 'ran',
+          before: valueBefore,
+          after: store.get(targetAtom)?.value,
+        });
+      }
     }
 
     recordRun(store, {

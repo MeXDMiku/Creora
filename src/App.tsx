@@ -4,7 +4,7 @@ import StarterKit from '@tiptap/starter-kit'
 import { useSetAtom, useAtom, useAtomValue, useStore } from 'jotai'
 import { PageStamps, interpretSave, shouldKeepAutosaving } from './lib/savePage'
 import { measurePage, verdictForPage } from './lib/pageSize'
-import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, queriesAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, slotNameOf, slotNameForNodeType, getCanvasBlocks, shapeRoleDataType, currentPageIdAtom, currentPageIsPublishedAtom, pagesListAtom, switchPageFnAtom, isPreviewModeAtom, canvasModeAtom, editingBreakpointAtom, canvasZoomAtom } from './state/atoms'
+import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, queriesAtom, actionsAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, slotNameOf, slotNameForNodeType, getCanvasBlocks, shapeRoleDataType, currentPageIdAtom, currentPageIsPublishedAtom, pagesListAtom, switchPageFnAtom, isPreviewModeAtom, canvasModeAtom, editingBreakpointAtom, canvasZoomAtom } from './state/atoms'
 import { summarisePageData, describeWhatWillBeLost, downloadPageData, deletePage } from './lib/pageDelete'
 import { newBlockId, defaultRuntimeForNodeType, defaultAttrsForNodeType, BLOCK_FOOTPRINT, nodeTypeFromBlockId, shortBlockId, isBlockNodeType, withoutVisitorState, portableTypeFromNodeType, nodeTypeFromPortableType, type BlockNodeType } from './lib/blockRegistry'
 import { ButtonBlock } from './blocks/ButtonBlock'
@@ -31,13 +31,14 @@ import { wireSentence } from './lib/wireWords'
 import { PlacementControls } from './components/PlacementControls'
 import { HealthPanel } from './components/HealthPanel'
 import { QuestionsPanel } from './components/QuestionsPanel'
+import { ActionsPanel } from './components/ActionsPanel'
 import { WireOverlay } from './components/WireOverlay'
 import { supabase } from './lib/supabase'
 import { ensureSession } from './lib/session'
 import type { PageRow } from './types/creora'
 import { AccountBadge } from './components/AccountBadge'
 import { PublishButton } from './components/PublishButton'
-import { recalculateAllFormulas } from './lib/bindingEngine'
+import { recalculateAllFormulas, guardDefaultFor } from './lib/bindingEngine'
 import { runPageLoadWorkflows } from './lib/bindingEngine'
 import { ANIMATION_PRESETS, animationClass } from './lib/animations'
 import { workflowRunsAtom, type WorkflowRun } from './state/atoms'
@@ -322,9 +323,9 @@ const zoomBtnStyle: React.CSSProperties = {
   fontWeight: 600,
 }
 
-function guardDefaultFor(action: string): boolean {
-  return action === 'addRow' || action === 'updateRow'
-}
+// Was written out here as its own list, and the engine kept the same list, and
+// the two were one edit away from disagreeing -- which is how this repo's
+// oldest bugs all look. See guardDefaultFor in bindingEngine.
 
 function ConnectionPopup({ editor }: { editor: any }) {
   // The page list lives on an atom, so the popup reads it rather than having it
@@ -486,6 +487,12 @@ function ConnectionPopup({ editor }: { editor: any }) {
    */
   const [which, setWhich] = useState<'first' | 'last' | 'all'>('first')
   const [matchFormula, setMatchFormula] = useState('')
+  // runAction: which one, and what the visitor hands it. `given` has the same
+  // shape as `mappings` so a builder meets one idea rather than two.
+  const [actionId, setActionId] = useState('')
+  const [given, setGiven] = useState<Record<string, { source: 'fixed' | 'block'; value: string }>>({})
+  const pageActions = useAtomValue(actionsAtom)
+  const chosenAction = pageActions.find(a => a.id === actionId) || null
 
   useEffect(() => {
     if (isDatabaseBlock && databaseColumns.length > 0) {
@@ -694,7 +701,10 @@ function ConnectionPopup({ editor }: { editor: any }) {
       if (action === 'addRow' || action === 'updateRow') {
         stepStep.mappings = mappings
       }
-      if (action === 'sendWebhook') {
+      if (action === 'runAction') {
+        stepStep.actionId = actionId
+        stepStep.given = given
+      } else if (action === 'sendWebhook') {
         stepStep.webhookUrl = webhookUrl
       } else if (action === 'exportCsv') {
         // no mappings, no match column — it just takes the table as it stands
@@ -708,7 +718,10 @@ function ConnectionPopup({ editor }: { editor: any }) {
         }
       }
     } else {
-      if (action === 'sendWebhook') {
+      if (action === 'runAction') {
+        stepStep.actionId = actionId
+        stepStep.given = given
+      } else if (action === 'sendWebhook') {
         stepStep.webhookUrl = webhookUrl
       } else if (action === 'reset') {
         stepStep.action = 'reset'
@@ -892,6 +905,9 @@ function ConnectionPopup({ editor }: { editor: any }) {
               <option value="deleteRow">Remove a row</option>
               <option value="exportCsv">Download as CSV (opens in Excel)</option>
               <option value="sendWebhook">Send to another app</option>
+              <optgroup label="At the store">
+                <option value="runAction">Run an action at the store</option>
+              </optgroup>
               <optgroup label="Going somewhere">
                 <option value="goToPage">Go to another page</option>
                 <option value="openUrl">Open a web address</option>
@@ -913,6 +929,9 @@ function ConnectionPopup({ editor }: { editor: any }) {
                 <option value="setLoading">Show it as busy</option>
                 <option value="clearLoading">Stop showing it as busy</option>
               </optgroup>
+              <optgroup label="At the store">
+                <option value="runAction">Run an action at the store</option>
+              </optgroup>
               <optgroup label="Going somewhere">
                 <option value="goToPage">Go to another page</option>
                 <option value="openUrl">Open a web address</option>
@@ -921,6 +940,84 @@ function ConnectionPopup({ editor }: { editor: any }) {
           )}
         </select>
       </label>
+
+      {action === 'runAction' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontWeight: 500, color: '#475569', fontSize: '13px' }}>
+            Which action
+            <select value={actionId} onChange={(e) => { setActionId(e.target.value); setGiven({}) }} style={selectStyle}>
+              <option value="">Choose an action&hellip;</option>
+              {pageActions.map(a => (<option key={a.id} value={a.id}>{a.name}</option>))}
+            </select>
+          </label>
+
+          {pageActions.length === 0 && (
+            <div style={{ fontSize: '11px', color: '#b45309', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px', padding: '8px 10px', lineHeight: 1.45 }}>
+              There are no actions on this page yet. Write one first &mdash; the
+              <b> Actions</b> button at the top.
+            </div>
+          )}
+
+          {/*
+            WHAT IT TAKES IS THE ACTION'S LIST, NOT A FREE-TEXT BOX. An action
+            declares what a visitor may hand it, and everything else it reads
+            for itself. Offering more boxes than that would be offering to send
+            values the function will not accept.
+          */}
+          {(chosenAction?.takes || []).map(take => {
+            const m = given[take] || { source: 'block' as const, value: '' }
+            return (
+              <label key={take} style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontWeight: 500, color: '#475569', fontSize: '13px' }}>
+                {take}
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <select
+                    value={m.source}
+                    onChange={(e) => setGiven(g => ({ ...g, [take]: { ...m, source: e.target.value as 'fixed' | 'block' } }))}
+                    style={{ ...selectStyle, width: 'auto' }}
+                  >
+                    <option value="block">From block</option>
+                    <option value="fixed">Fixed value</option>
+                  </select>
+                  {m.source === 'block' ? (
+                    <select
+                      value={m.value}
+                      onChange={(e) => setGiven(g => ({ ...g, [take]: { ...m, value: e.target.value } }))}
+                      style={selectStyle}
+                    >
+                      <option value="">Choose a block&hellip;</option>
+                      {canvasBlocks.map((b: any) => (<option key={b.id} value={b.id}>{b.name}</option>))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      value={m.value}
+                      onChange={(e) => setGiven(g => ({ ...g, [take]: { ...m, value: e.target.value } }))}
+                      style={inputStyle}
+                    />
+                  )}
+                </div>
+              </label>
+            )
+          })}
+
+          {chosenAction && (chosenAction.takes || []).length === 0 && (
+            <div style={{ fontSize: '11px', color: '#6b7280', lineHeight: 1.45 }}>
+              This action takes nothing from the page. Everything it uses, it reads
+              for itself &mdash; which is the point of it.
+            </div>
+          )}
+
+          <div style={{ fontSize: '11px', color: '#6b7280', lineHeight: 1.45, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '8px 10px' }}>
+            This one step happens <b>at the store</b>, not in the browser: it reads
+            what it needs from the tables, and if it refuses halfway, nothing it
+            did stays. If it refuses, the reason appears on the block this wire
+            points at.
+            <span style={{ display: 'block', marginTop: '4px', color: '#b45309' }}>
+              It only does anything once you have run its migration in Supabase.
+            </span>
+          </div>
+        </div>
+      )}
 
       {action === 'goToPage' && (
         <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontWeight: 500, color: '#475569', fontSize: '13px' }}>
@@ -1867,6 +1964,7 @@ function App() {
   const [editingBreakpoint, setEditingBreakpoint] = useAtom(editingBreakpointAtom)
   const [showHealth, setShowHealth] = useState(false)
   const [showQuestions, setShowQuestions] = useState(false)
+  const [showActions, setShowActions] = useState(false)
   const [zoom, setZoom] = useAtom(canvasZoomAtom)
 
   const activePageIdRef = useRef(PAGE_ID)
@@ -2131,6 +2229,7 @@ function App() {
     const workflows = store.get(workflowsAtom)
     const formulas = store.get(formulasAtom)
     const queries = store.get(queriesAtom)
+    const actions = store.get(actionsAtom)
     const connections = store.get(connectionsAtom)
 
     const activeName = pagesList.find(p => p.id === activePageIdRef.current)?.name || 'Page 1'
@@ -2149,6 +2248,7 @@ function App() {
       workflows,
       formulas,
       queries,
+      actions,
       databases: [],
       documentContent: editor.getJSON(),
       positions: positionsRecord,
@@ -2244,6 +2344,7 @@ function App() {
         store.set(workflowsAtom, [])
         store.set(formulasAtom, [])
         store.set(queriesAtom, [])
+        store.set(actionsAtom, [])
         store.set(allBlockIdsAtom, [])
         editor?.commands.clearContent()
 
@@ -2326,6 +2427,7 @@ function App() {
         store.set(workflowsAtom, importedPage.workflows || [])
         store.set(formulasAtom, importedPage.formulas || [])
         store.set(queriesAtom, importedPage.queries || [])
+        store.set(actionsAtom, importedPage.actions || [])
 
         if (editor) {
           editor.commands.setContent(docContent)
@@ -2772,6 +2874,7 @@ function App() {
         const connections = store.get(connectionsAtom)
         const formulas = store.get(formulasAtom)
         const queries = store.get(queriesAtom)
+        const actions = store.get(actionsAtom)
 
         /**
          * pageName is in here because save_page REPLACES the whole blocks blob.
@@ -2790,6 +2893,7 @@ function App() {
           connections,
           formulas,
           queries,
+          actions,
           // Only written when it is actually known. Writing undefined would
           // repeat the bug with extra steps.
           ...(currentName ? { pageName: currentName } : {}),
@@ -3171,9 +3275,13 @@ function App() {
     const unsubQueries = store.sub(queriesAtom, () => {
       saveToSupabase()
     })
+    const unsubActions = store.sub(actionsAtom, () => {
+      saveToSupabase()
+    })
     return () => {
       unsubWorkflows()
       unsubQueries()
+      unsubActions()
       unsubConnections()
       unsubFormulas()
     }
@@ -3228,6 +3336,7 @@ function App() {
       const connections = store.get(connectionsAtom)
       const formulas = store.get(formulasAtom)
       const queries = store.get(queriesAtom)
+      const actions = store.get(actionsAtom)
 
       const pageName = pagesList.find(p => p.id === pageId)?.name || 'Page 1'
 
@@ -3238,6 +3347,7 @@ function App() {
         connections,
         formulas,
         queries,
+        actions,
         pageName
       }
 
@@ -3307,6 +3417,7 @@ function App() {
     store.set(workflowsAtom, [])
     store.set(formulasAtom, [])
     store.set(queriesAtom, [])
+    store.set(actionsAtom, [])
     setSelectedBlockId(null)
 
     // 4. Update active page state and persist to localStorage
@@ -3356,6 +3467,7 @@ function App() {
         // Populate formulas
         store.set(formulasAtom, blocksData.formulas || [])
         store.set(queriesAtom, blocksData.queries || [])
+        store.set(actionsAtom, blocksData.actions || [])
 
         // Populate workflows
         store.set(workflowsAtom, workflowsData || [])
@@ -3602,6 +3714,7 @@ function App() {
           // Populate formulas
           store.set(formulasAtom, blocksData.formulas || [])
           store.set(queriesAtom, blocksData.queries || [])
+          store.set(actionsAtom, blocksData.actions || [])
 
           // Populate workflows
           store.set(workflowsAtom, workflowsData || [])
@@ -4006,6 +4119,24 @@ function App() {
           </button>
 
           <button
+            onClick={() => setShowActions((v: boolean) => !v)}
+            title="A named sequence of writes that happens at the store, all of it or none of it"
+            style={{
+              padding: '6px 12px',
+              marginLeft: '8px',
+              border: '1px solid #cbd5e1',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '13px',
+              fontWeight: 600,
+              background: showActions ? '#475569' : '#ffffff',
+              color: showActions ? '#ffffff' : '#475569',
+            }}
+          >
+            Actions
+          </button>
+
+          <button
             onClick={() => setShowHealth((v: boolean) => !v)}
             title="What this page is, and what on it cannot work"
             style={{
@@ -4401,6 +4532,7 @@ function App() {
       {showRuns && <RunsPanel onClose={() => setShowRuns(false)} />}
       {showHealth && <HealthPanel onClose={() => setShowHealth(false)} />}
       {showQuestions && <QuestionsPanel onClose={() => setShowQuestions(false)} />}
+      {showActions && <ActionsPanel onClose={() => setShowActions(false)} />}
     </div>
   )
 }

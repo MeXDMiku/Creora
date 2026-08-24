@@ -1,5 +1,6 @@
 import type { ValidationRule } from '../lib/validation';
 import type { NamedQuery } from '../lib/queries';
+import type { CreoraAction } from '../lib/actions';
 export type { ValidationRule };
 
 /**
@@ -81,6 +82,15 @@ export interface WorkflowStep {
     // it loads. Pressing submit is what makes every field touched at once.
     // Text out of other values: "Hello {{First}}", with filters.
     | 'setText'
+    /**
+     * RUN AN ACTION AT THE STORE.
+     *
+     * Every other action in this list happens in the BROWSER, which is what
+     * makes the page the thing that decides the price. This one calls a
+     * compiled Postgres function: the values it reads come from the tables
+     * inside the transaction, and a refusal rolls back everything before it.
+     */
+    | 'runAction'
     | 'validate'
     | 'setLoading' | 'clearLoading'
     | 'setDisabled' | 'setEnabled';
@@ -96,6 +106,15 @@ export interface WorkflowStep {
   /** 'all' = every condition must pass (AND). 'any' = one is enough (OR). Default 'all'. */
   match?: 'all' | 'any';
   mappings?: Record<string, { source: 'fixed' | 'block'; value: string }>;
+  /** runAction: which one. Named by id, so renaming an action does not break it. */
+  actionId?: string;
+  /**
+   * runAction: what the visitor hands it.
+   *
+   * Same shape as `mappings` on purpose -- a value from a block or a fixed one --
+   * so remapStep treats it the same way and a builder meets one idea, not two.
+   */
+  given?: Record<string, { source: 'fixed' | 'block'; value: string }>;
   matchColumn?: string;
   matchSource?: 'fixed' | 'block';
   /** Matches the shape used by `mappings` — the engine reads .source and .value. */
@@ -273,6 +292,8 @@ export interface Page {
    * 16 Aug bug where six block types were saved as plain text.
    */
   queries?: NamedQuery[];
+  /** Named sequences of writes. Travels with the page for the same reason. */
+  actions?: CreoraAction[];
 }
 
 export interface CreoraFile {
