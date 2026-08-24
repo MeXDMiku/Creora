@@ -195,6 +195,20 @@ disagree, the audit is right and the queue is stale.
                                       ONE of the six needs a server that does not
                                       exist, not two.
 
+    -- WHAT A WIRE CAN CARRY          24 Aug. Eight node systems read, the
+                                      reference hairball measured (24 params x
+                                      14 readers = 336 of its 340 edges), and
+                                      Creora's own canvas measured against
+                                      them: it draws 5 of the 14 things a real
+                                      page depends on, and that 2-in-3 hidden
+                                      fraction is STABLE at every size.
+                                      docs/WHAT_A_WIRE_CAN_CARRY.md has the
+                                      seven ranked consequences. The first two
+                                      -- hide wires until asked for, and light
+                                      up the invisible dependencies on select
+                                      -- are the cheapest real wins available
+                                      and belong in the Arrangement phase.
+
     1  Status dashboard (Layer 3)     The Operations layer: what exists, what is
                                       published, what is BROKEN and nobody has
                                       noticed. Fell out of this queue during a
