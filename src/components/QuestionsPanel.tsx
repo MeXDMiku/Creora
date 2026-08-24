@@ -1,6 +1,7 @@
 import { useAtom, useAtomValue, useStore } from 'jotai'
 import { useMemo, useState } from 'react'
-import { queriesAtom, allBlockIdsAtom, blockRuntimeAtom, type NamedQuery } from '../state/atoms'
+import { queriesAtom, allBlockIdsAtom } from '../state/atoms'
+import type { NamedQuery } from '../lib/queries'
 import { rawTableScope, resolvePageQueries, formulaScope } from '../lib/bindingEngine'
 import { previewQuery, KEEP_PHRASES } from '../lib/query'
 import { describeNamedQuery, queryNameProblem, pageNamesIn, parseKeep, keepAsLine } from '../lib/queries'

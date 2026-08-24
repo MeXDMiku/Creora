@@ -2556,6 +2556,24 @@ group('an imported copy does not share the original`s data');
       },
     ],
     formulas: [{ id: 'f1', targetBlockId: OLD_NUM, targetProperty: 'value', formula: `${OLD_DB} + 1`, pageId: 'page-one' }],
+    // A query addresses a table by whatever rawTableScope calls it, and that is
+    // the block's NAME *and* its raw id -- `tables[blockId] = table`. Its
+    // expressions are answered with formulaScope as the page scope, where a
+    // block id is a legal name. So a query carries block ids exactly the way a
+    // formula does, and has to travel the same way.
+    queries: [
+      {
+        id: 'q1',
+        name: 'Totals',
+        def: {
+          from: OLD_DB,
+          where: `{{Amount}} > ${OLD_INPUT}`,
+          groupBy: '{{Name}}',
+          keep: { taken: 'sum of {{Amount}}' },
+          orderBy: `${OLD_NUM}`,
+        },
+      },
+    ],
     blocks: [{ id: OLD_BTN, type: 'button' }],
   });
 
@@ -2589,6 +2607,17 @@ group('an imported copy does not share the original`s data');
   check('a formula`s target follows', (copy.formulas as any)[0].targetBlockId, at(OLD_NUM));
   check('and the ids inside the expression itself', (copy.formulas as any)[0].formula, `${at(OLD_DB)} + 1`);
   check('the portable blocks array follows', (copy.blocks as any)[0].id, at(OLD_BTN));
+
+  // A query is the fourth thing that carries ids, and it was the one the sweep
+  // below found. The sweep alone only says nothing OLD survived; these say the
+  // NEW value is the right one, which is the half a text search cannot see.
+  const q = (copy.queries as any)[0];
+  check('a query`s table follows, because a table can be addressed by id', q.def.from, at(OLD_DB));
+  check('and the ids inside its where', q.def.where, `{{Amount}} > ${at(OLD_INPUT)}`);
+  check('and inside what it orders by', q.def.orderBy, at(OLD_NUM));
+  check('a query keeps its own name, which names nothing', q.name, 'Totals');
+  check('and its slots, which name columns not blocks', q.def.groupBy, '{{Name}}');
+  check('and what it works out per group', q.def.keep.taken, 'sum of {{Amount}}');
 
   // A fixed value that merely looks like an id is a VALUE. Rewriting it would
   // corrupt the row a form writes, which is worse than the bug being fixed.
@@ -8909,7 +8938,7 @@ group('a slot can contain a slot');
  * Raise it in the same commit that adds the checks, the way the drift budget
  * above is raised: a number changed where it can be seen in a diff.
  */
-const EXPECTED_CHECKS = 2059;
+const EXPECTED_CHECKS = 2065;
 reachedTheEnd = true;
 if (passed + failed !== EXPECTED_CHECKS) {
   failed++;

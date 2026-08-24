@@ -1,4 +1,5 @@
 import type { ValidationRule } from '../lib/validation';
+import type { NamedQuery } from '../lib/queries';
 export type { ValidationRule };
 
 /**
@@ -265,6 +266,13 @@ export interface Page {
   blocks: Block[];
   workflows: Workflow[];
   formulas?: FormulaBinding[];
+  /**
+   * Named questions the page asks of its tables. Present here because the
+   * .creora file writes them and the importer reads them back -- a field the
+   * export knows about and this type does not is exactly the shape of the
+   * 16 Aug bug where six block types were saved as plain text.
+   */
+  queries?: NamedQuery[];
 }
 
 export interface CreoraFile {

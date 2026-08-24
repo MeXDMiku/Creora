@@ -499,6 +499,21 @@ const CONTROLS = [
   // Primitive B. The interesting ones are the two that must AGREE — a preview
   // that disagrees with the SQL is a confident lie.
   {
+    name: 'import: a query is carried across a copy without its ids rewritten',
+    file: 'src/lib/remapBlockIds.ts',
+    find: `      queries: (page.queries ?? []).map((q: any) => remapQuery(q, idMap)),`,
+    with: `      queries: page.queries,`,
+    expect: ['no old id survives', 'a query`s table follows', 'the ids inside its where'],
+  },
+  {
+    name: 'import: a query`s expressions are swapped whole instead of by id',
+    file: 'src/lib/remapBlockIds.ts',
+    find: `  const expr = (v: unknown) =>
+    typeof v === 'string' ? remapFormulaExpression(v, idMap) : v;`,
+    with: `  const expr = (v: unknown) => remapString(v, idMap);`,
+    expect: ['the ids inside its where'],
+  },
+  {
     name: 'actions: the price stops coming from the table',
     file: 'src/lib/actions.ts',
     find: `          scope[step.name || ''] = step.column ? (rows[0] || {})[step.column] : rows.length;`,

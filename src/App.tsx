@@ -2325,7 +2325,7 @@ function App() {
         store.set(connectionsAtom, connections)
         store.set(workflowsAtom, importedPage.workflows || [])
         store.set(formulasAtom, importedPage.formulas || [])
-        store.set(queriesAtom, (importedPage as any).queries || [])
+        store.set(queriesAtom, importedPage.queries || [])
 
         if (editor) {
           editor.commands.setContent(docContent)

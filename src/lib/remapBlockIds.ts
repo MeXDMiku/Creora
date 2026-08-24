@@ -55,6 +55,7 @@ export interface ImportedPageShape {
   connections?: any[];
   workflows?: any[];
   formulas?: any[];
+  queries?: any[];
   blocks?: any[];
 }
 
@@ -172,6 +173,52 @@ function remapStep(step: any, idMap: Record<string, string>): any {
   return next;
 }
 
+/**
+ * A query's references, which are block ids in two different disguises.
+ *
+ * `from` NAMES a table, and `rawTableScope` registers every table under its
+ * block's display name AND under its raw id -- `tables[blockId] = table` -- so
+ * a `from` is allowed to be an id and has to be swapped whole.
+ *
+ * Everything else here is an expression answered with `formulaScope` as the
+ * page scope, where a block id is a legal name for that block's value. So the
+ * ids inside the TEXT travel exactly the way a formula's do.
+ *
+ * `direction`, `skip` and `limit` are not names and are left alone. `name` is
+ * what the page calls the answer, not a reference to anything.
+ */
+function remapQuery(q: any, idMap: Record<string, string>): any {
+  if (!q || typeof q !== 'object') return q;
+  const def = q.def;
+  if (!def || typeof def !== 'object') return q;
+
+  const expr = (v: unknown) =>
+    typeof v === 'string' ? remapFormulaExpression(v, idMap) : v;
+  const exprMap = (record: Record<string, string> | undefined) => {
+    if (!record || typeof record !== 'object') return record;
+    const out: Record<string, any> = {};
+    for (const [key, value] of Object.entries(record)) out[key] = expr(value);
+    return out;
+  };
+
+  const next: any = { ...def };
+  next.from = Array.isArray(def.from)
+    ? def.from.map((src: any) =>
+        src && typeof src === 'object'
+          ? { ...src, table: remapString(src.table, idMap), where: expr(src.where), as: exprMap(src.as) }
+          : src,
+      )
+    : remapString(def.from, idMap);
+
+  for (const field of ['where', 'groupBy', 'oneRowPer', 'keepThe', 'orderBy']) {
+    if (def[field] !== undefined) next[field] = expr(def[field]);
+  }
+  if (def.as !== undefined) next.as = exprMap(def.as);
+  if (def.keep !== undefined) next.keep = exprMap(def.keep);
+
+  return { ...q, def: next };
+}
+
 /** Every block in the page gets a new id, and every reference to it follows. */
 export function remapBlockIds(page: ImportedPageShape): RemapResult {
   const idMap: Record<string, string> = {};
@@ -248,6 +295,7 @@ export function remapBlockIds(page: ImportedPageShape): RemapResult {
             }
           : f,
       ),
+      queries: (page.queries ?? []).map((q: any) => remapQuery(q, idMap)),
       blocks: (page.blocks ?? []).map((b: any) =>
         b && typeof b === 'object' ? { ...b, id: remapString(b.id, idMap) } : b,
       ),
