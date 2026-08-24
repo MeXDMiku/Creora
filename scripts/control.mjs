@@ -661,6 +661,20 @@ const CONTROLS = [
     expect: ['AN UNFINISHED FIELD THE ACTION DOES NOT READ DOES NOT BLOCK IT'],
   },
   {
+    name: 'unfinished: a half-typed step says undefined again',
+    file: 'src/lib/actions.ts',
+    find: `    if (writesRows && !String(step.table ?? '').trim()) {`,
+    with: `    if (false) {`,
+    expect: ['AN UNFINISHED STEP NEVER SAYS THE WORD', 'AND DOES NOT CLAIM AN UNFINISHED STEP WILL REMOVE EVERYTHING'],
+  },
+  {
+    name: 'unfinished: a finished step stops warning about every row',
+    file: 'src/lib/actions.ts',
+    find: `    } else if (writesRows && !String(step.where ?? '').trim()) {`,
+    with: `    } else if (false) {`,
+    expect: ['but a FINISHED step with no rows named still says so'],
+  },
+  {
     name: 'bola: nothing notices a row the visitor named',
     file: 'src/lib/actions.ts',
     find: `      if (named.length && !namesAServerWord(step.where) && !looked.has(table)) {`,

@@ -8272,6 +8272,26 @@ group('the row a visitor names');
   };
   const bola = (a: any) => warningsFor(a, tables).filter(w => w.includes('whichever row the visitor names')).length;
 
+  /**
+   * FOUND IN A BROWSER, ninety seconds after the panel was first opened.
+   * A step a builder had only just added -- table not chosen yet -- said
+   * "this removes EVERY row in undefined". Two things wrong: `undefined` is a
+   * developer's word in a builder's sentence, and warning that an UNFINISHED
+   * step removes everything fires on the ordinary act of adding a step.
+   */
+  const halfTyped = { id: '0', name: 'Half typed', takes: [], steps: [
+    { kind: 'remove rows from' },
+  ]} as any;
+  check('AN UNFINISHED STEP NEVER SAYS THE WORD "undefined"',
+    warningsFor(halfTyped, tables).some(w => w.includes('undefined')), false);
+  check('and it asks for the table rather than warning about every row',
+    warningsFor(halfTyped, tables).some(w => w.includes('pick which table')), true);
+  check('AND DOES NOT CLAIM AN UNFINISHED STEP WILL REMOVE EVERYTHING',
+    warningsFor(halfTyped, tables).some(w => w.includes('EVERY row')), false);
+  check('but a FINISHED step with no rows named still says so',
+    warningsFor({ id: '0b', name: 'x', takes: [], steps: [{ kind: 'remove rows from', table: 'Posts' }] } as any, tables)
+      .some(w => w.includes('EVERY row in Posts')), true);
+
   const naked = { id: '1', name: 'Delete post', takes: ['PostId'], steps: [
     { kind: 'remove rows from', table: 'Posts', where: '{{id}} == {{PostId}}' },
   ]} as any;
@@ -9457,7 +9477,7 @@ group('a slot can contain a slot');
  * Raise it in the same commit that adds the checks, the way the drift budget
  * above is raised: a number changed where it can be seen in a diff.
  */
-const EXPECTED_CHECKS = 2143;
+const EXPECTED_CHECKS = 2147;
 reachedTheEnd = true;
 if (passed + failed !== EXPECTED_CHECKS) {
   failed++;

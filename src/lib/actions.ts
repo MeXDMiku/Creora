@@ -337,11 +337,27 @@ export function warningsFor(
     }
     if (step.kind === 'remember' && step.name) remembered.add(step.name);
     if (step.kind === 'add row to' && step.remember) remembered.add(step.remember);
-    if (step.kind === 'remove rows from' && !String(step.where ?? '').trim()) {
-      out.push(`${at}: this removes EVERY row in ${step.table}. Say which ones.`);
-    }
-    if (step.kind === 'change rows in' && !String(step.where ?? '').trim()) {
-      out.push(`${at}: this changes EVERY row in ${step.table}. Say which ones.`);
+    /**
+     * A STEP WITH NO TABLE IS UNFINISHED, NOT DANGEROUS.
+     *
+     * These two used to interpolate `step.table` straight into the sentence, so
+     * a step a builder had only just added -- table not chosen yet -- said
+     *
+     *   "Step 1: this removes EVERY row in undefined. Say which ones."
+     *
+     * Found in ninety seconds of clicking, the first time the panel was ever
+     * opened in a browser. Two things wrong with it: `undefined` is a
+     * developer's word appearing in a builder's sentence, and warning that an
+     * unfinished step will remove everything is the wolf-cry again -- it fires
+     * on the ordinary act of adding a step, before anyone has said anything
+     * wrong.
+     */
+    const writesRows = step.kind === 'remove rows from' || step.kind === 'change rows in';
+    if (writesRows && !String(step.table ?? '').trim()) {
+      out.push(`${at}: pick which table this ${step.kind === 'remove rows from' ? 'removes' : 'changes'} rows in.`);
+    } else if (writesRows && !String(step.where ?? '').trim()) {
+      const verb = step.kind === 'remove rows from' ? 'removes' : 'changes';
+      out.push(`${at}: this ${verb} EVERY row in ${step.table}. Say which ones.`);
     }
   }
 
