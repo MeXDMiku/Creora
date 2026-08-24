@@ -28,6 +28,12 @@ Status key: `DONE` · `PART` partly done · `TODO` decided, not built ·
 | DONE | Deployed: `creora.aridamanpratapsingh4.workers.dev` |
 | DONE | Feedback page, live, holding rows submitted by people who are not the owner |
 | DONE | Daily GitHub Action ping so Supabase never auto-pauses again |
+| DONE | Primitive D — a block that fetches has three answers, not one (23 Aug) |
+| DONE | Primitive C — rules, compiled to a policy (23 Aug). **Migration never run** |
+| DONE | Primitive A — named questions over tables, with a panel (23–24 Aug) |
+| DONE | Primitive B — actions: engine, compiler, panel, and the call (24 Aug) |
+| DONE | A query and an action follow a remap, so an imported copy is a copy (24 Aug) |
+| DONE | One `FailureNote`, so a refusal is visible under the button that caused it |
 | DONE | *(12 Aug)* Published pages stop leaking editor chrome; count is real |
 | DONE | *(12 Aug)* Phone layout — published pages stack below 640px |
 | DONE | *(12 Aug)* Animation presets |
@@ -644,3 +650,14 @@ file or opening the actual page.
   Cheap shortcuts that need no history and could come first: Delete to remove
   the selected block, Escape to close the popup or the Health panel, Ctrl+S to
   force a save, arrow keys to nudge a block.
+
+
+---
+
+## Found on 24 Aug, not fixed
+
+| | what |
+| :--- | :--- |
+| TODO | **A `runAction` step's refusal is shown, a `sendWebhook` failure still is not.** The webhook path records a run-log entry and nothing else — so a visitor whose submission never reached Zapier sees a button that worked. Same argument as the row write and the action: the person who can try again is the one who should be told. |
+| NOTED | **`fieldsReadByStep` falls back to every block with rules** when a step names no fields. It fails safe, which is why nothing has ever looked wrong — but it means an unfinished field anywhere on the page can block a step that never reads it. `given` and `mappings` are covered; `matchFormula` and expression conditions still are not. |
+| NOTED | **`toSql` lower-cases every identifier.** A table called `Orders` and one called `orders` compile to the same name, and a column named with a space becomes an underscore. Fine today because a builder types the name they see, and a trap the first time two tables differ only by case. |

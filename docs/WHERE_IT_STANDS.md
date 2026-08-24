@@ -1,10 +1,16 @@
-# Where Creora stands — 19 August 2026
+# Where Creora stands — 24 August 2026
 
-**1,792 checks passing, `tsc` clean, working tree clean, 20 negative controls
-all behaving. Seven commits, unpushed.**
+**2,129 checks passing, `tsc` clean, working tree clean, 98 negative controls
+all behaving. Six commits, unpushed.**
+
+> **24 Aug, and worth reading before the rest.** `tsc` was NOT clean when this
+> session opened — three errors sitting in committed code, because the session
+> that shipped the Query panel ended before it ran one. `npm run check` was
+> green throughout. **A green suite is not a green tree**; step 1 of the cycle
+> is both, every time.
 
 ```
-npm run check      1,792 assertions, the real modules, no mocks
+npm run check      2,129 assertions, the real modules, no mocks
 npm run control    break the code on purpose, watch the right check go red
 ```
 
@@ -112,14 +118,53 @@ All fifteen are expressible now except the two that need the database.
 
 ---
 
+## The six primitives, 24 August
+
+`docs/CONNECTING_THE_TWO.md` derived these from 40 ways a page can talk to a
+store — Creora could say 13, half-say 9, and could not say 18. Four are in.
+
+| | | |
+| :--- | :--- | :--- |
+| **D** | three outputs, not one | shipped 23 Aug |
+| **C** | rules, compiled to a policy | shipped 23 Aug — **migration never run** |
+| **A** | named questions over tables | shipped 23–24 Aug, panel and all |
+| **B** | actions | shipped 24 Aug — engine, compiler, panel, **and the call** |
+| **E** | when this changes | not built. Supabase realtime, free tier |
+| **F** | every day at… | the only one with no free answer yet |
+
+The design doc put B third with the note *"needs a server, which is the real
+cost"*. That was wrong, and the correction is the useful part: a Postgres
+function on the free tier **is** somewhere to put trusted code. One of the six
+needs a server that does not exist, not two.
+
+**What B changes, in one line.** Every other workflow action happens in the
+browser, so the page decides the price. `runAction` calls a compiled function:
+it reads what it needs from the tables inside the transaction, a visitor can
+change what they typed and nothing else, and if it refuses halfway nothing it
+did stays.
+
 ## What is next
 
-1. **Ranks 3 and 5** — per-visitor rows and two-column uniqueness. Both are
-   migrations, both written, neither run. Nothing more can be done from here.
-2. **Build a second site the same way** — a shop, a class register, a
+1. **Run the migrations.** Still the largest gap between what the code can do
+   and what a visitor would meet — and Primitive C and every Action now sit
+   behind it too. An action that has not been migrated says so in plain words
+   rather than failing silently, but it does nothing.
+2. **Ranks 3 and 5** — per-visitor rows and two-column uniqueness. Both written,
+   neither run.
+3. **Primitive E** — Supabase realtime, free tier, and the last one that needs
+   no new money.
+4. **Build a second site the same way** — a shop, a class register, a
    repair-tracker. The method found seven real gaps in one afternoon that six
-   days of auditing had missed. It is cheap and it does not repeat itself.
-3. **Then the layout and the interface**, which is where you said this goes last.
+   days of auditing had missed.
+5. **Then the layout and the interface**, which is where you said this goes last.
+
+## Unproven, and it should be said plainly
+
+Nothing from 24 Aug has been **clicked**. The browser extension was not
+connected, so the Actions panel's markup, the step popup's new boxes and a
+refusal appearing under a real button have never been seen in a running page.
+Everything below the markup is driven through `executeWorkflow` in node, which
+is the strongest thing available without a browser and is not the same thing.
 
 ---
 

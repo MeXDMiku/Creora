@@ -174,6 +174,27 @@ disagree, the audit is right and the queue is stale.
                                       refreshes ITSELF. Nothing else on a page
                                       could react to the page opening.
 
+    -- THE SIX PRIMITIVES           From docs/CONNECTING_THE_TWO.md, which
+                                      derived them from 40 ways a page talks to
+                                      a store: Creora could say 13, half-say 9,
+                                      and could not say 18.
+                                        D  three outputs      shipped 23 Aug
+                                        C  rules              shipped 23 Aug,
+                                           migration written, NEVER RUN
+                                        A  queries            shipped 24 Aug,
+                                           panel and all
+                                        B  actions            shipped 24 Aug,
+                                           engine, compiler, panel, and the call
+                                        E  when this changes  not built
+                                        F  every day at...    no free answer yet
+
+                                      The design doc ranked B third with the note
+                                      "needs a server, which is the real cost".
+                                      That was wrong: a Postgres function on the
+                                      free tier IS somewhere to put trusted code.
+                                      ONE of the six needs a server that does not
+                                      exist, not two.
+
     1  Status dashboard (Layer 3)     The Operations layer: what exists, what is
                                       published, what is BROKEN and nobody has
                                       noticed. Fell out of this queue during a
