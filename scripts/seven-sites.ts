@@ -312,3 +312,40 @@ for (const v of order) {
   if (n) console.log(`  ${String(n).padStart(2)}  ${LABEL[v]}`);
 }
 console.log(`  ${String(results.length).padStart(2)}  questions asked`);
+
+// ===========================================================================
+// AND THEN ASK THE BACKEND WHETHER ANY OF THAT IS STILL TRUE.
+//
+// LOG: for several days this scorecard reported "8 written, needs a migration run"
+// while all ten migrations had already been applied. It was not wrong about the code -
+// MIGRATION is a HARDCODED verdict, decided when the line was written and never
+// re-examined. The one file whose whole job is to tell the truth about this product
+// was reciting a memory.
+//
+// That is the failure this project exists to find, discovered in our own repo. So the
+// tally above is now explicitly labelled as what it is - a claim about the CODE - and
+// the question of whether the backend agrees is asked separately, out loud, every run.
+import { askBackend, headline } from './applied.ts';
+
+const migrationVerdicts = results.filter(r => r.verdict === 'MIGRATION').length;
+if (migrationVerdicts > 0) {
+  console.log('\n============ AND IS ANY OF THAT STILL TRUE? ============');
+  console.log('  the tally above is about the CODE. this is about the BACKEND.\n');
+  const states = await askBackend();
+  const mark = { applied: 'APPLIED', absent: ' ABSENT', unknown: 'UNKNOWN' } as const;
+  for (const st of states) {
+    console.log(`  [${mark[st.standing]}]  ${st.id}  ${st.what}`);
+    if (st.standing !== 'applied') console.log(`              ${st.why}`);
+  }
+  console.log(`\n  ${headline(states)}`);
+
+  const unknown = states.filter(s => s.standing === 'unknown').length;
+  const absent  = states.filter(s => s.standing === 'absent').length;
+  if (absent === 0 && unknown === 0) {
+    console.log(`  So the ${migrationVerdicts} above marked "needs a migration run" are LIVE. The tally is stale.`);
+  } else if (unknown > 0) {
+    console.log('  Some could not be asked. That is not the same as them being broken, and it is');
+    console.log('  not the same as them being fine - it is its own answer, and it is this one.');
+  }
+  console.log('');
+}

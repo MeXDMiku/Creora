@@ -12,7 +12,11 @@
     "check": "node --experimental-strip-types --import ./scripts/register.mjs scripts/checks.ts",
     "control": "node scripts/control.mjs",
     "sites": "node --experimental-strip-types --import ./scripts/register.mjs scripts/seven-sites.ts",
-    "graph": "node --experimental-strip-types --import ./scripts/register.mjs scripts/graph-report.ts"
+    "graph": "node --experimental-strip-types --import ./scripts/register.mjs scripts/graph-report.ts",
+    "grid": "node --experimental-strip-types --import ./scripts/register.mjs scripts/grid-translate.ts",
+    "applied": "node --experimental-strip-types --import ./scripts/register.mjs scripts/applied.ts",
+    "stranger": "node --experimental-strip-types --import ./scripts/register.mjs scripts/stranger.ts",
+    "shipped": "node --experimental-strip-types --import ./scripts/register.mjs scripts/shipped.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.0",
