@@ -26,7 +26,8 @@
  * Pure on purpose: no store, no React, no network, so `npm run check` runs
  * every line of it.
  */
-import { evaluateExpression, truthy, bindSlots, type TableData, type TableScope } from './formula';
+import { truthy, type TableData, type TableScope } from './formula';
+import { rowFormulaValue } from './rows';
 
 export type QueryDirection = 'asc' | 'desc';
 
@@ -73,26 +74,26 @@ const KEEP_HELP =
 /**
  * One expression against one row, in the real language.
  *
- * THE TABLES ARE PASSED IN, AND WERE NOT UNTIL 24 AUG.
+ * IT CALLS rowFormulaValue, WHICH IS THE POINT.
  *
- * `evaluateExpression` was called with two arguments, so `countOf` inside a
- * query's `where` came back with
+ * This used to build its own scope -- `{ ...page, ...row }` -- and hand it to
+ * `evaluateExpression`. That scope is very nearly the one a repeater's filter
+ * gets, and "very nearly" is how two implementations of one idea drift. Two
+ * things were missing from it, found on two different days:
  *
- *   "Tables cannot be read from here -- countOf and sumOf work in a formula or
- *    a condition, not in page markup"
+ *   24 Aug, morning   the TABLES, so `countOf` was refused inside a question
+ *                     with a message naming page markup, a third place entirely
+ *   24 Aug, later     `RowId`, so `{{PostId}} == RowId` -- the single most
+ *                     common shape of a relation condition anywhere in Creora --
+ *                     came back "Referenced block RowId does not exist"
  *
- * said inside a QUESTION, naming a third place entirely. The identical wrong
- * message was recorded in BUILT_TWO_TO_FIND_OUT.md when a condition could not
- * reach another table; this is the same sentence being wrong in a new box.
+ * The second was found while translating a real social app: every cross-table
+ * question in it failed, and the first fix had not touched the cause. So the
+ * second fix is not another field. It is deleting the second implementation.
  *
- * It was an omission rather than a decision -- nothing anywhere said why a
- * question should be weaker than the repeater filter sitting next to it, and
- * the cost argument does not separate them: a filter calling countOf is
- * already rows-times-rows, and is allowed, guarded by MAX_QUESTION_DEPTH.
- * The same guard covers this.
- *
- * Found by trying to write Gmail's unread-count-per-label, which is
- * "labels where a message is unread" and is refused without this.
+ * rowFormulaValue is where the three-layer scope is decided and documented --
+ * page values, then the row's own columns, then RowId and RowNumber. A question
+ * now gets exactly that, and cannot fall behind it again.
  */
 function value(
   expr: string | undefined | null,
@@ -102,8 +103,9 @@ function value(
 ): any {
   const text = String(expr ?? '').trim();
   if (!text) return null;
-  const bound = bindSlots(text, name => (name === 'Row id' ? row?.id : row?.[name]), { ...(page || {}), ...row });
-  return evaluateExpression(bound.expression, bound.scope, tables);
+  const { value: v, error } = rowFormulaValue(row, text, { pageValues: page, tables });
+  if (error) throw new Error(error);
+  return v;
 }
 
 const num = (v: any): number => {

@@ -755,10 +755,21 @@ const CONTROLS = [
     expect: ['AN AUDIT ROW RECORDING WHICH ROW WAS ACTED ON'],
   },
   {
+    name: 'question: a question builds its own scope again, losing RowId',
+    file: 'src/lib/query.ts',
+    find: `  const { value: v, error } = rowFormulaValue(row, text, { pageValues: page, tables });`,
+    with: `  const { value: v, error } = rowFormulaValue({}, text, { pageValues: { ...page, ...row }, tables });`,
+    expect: ['A QUESTION KNOWS WHICH ROW IT IS STANDING IN', 'so a feed can be ordered by a count'],
+  },
+  {
+    // WENT STALE ONCE, and the tool said so rather than passing. value() used
+    // to call evaluateExpression directly; it calls rowFormulaValue now, so the
+    // line this used to break stopped existing. A control that hard-codes an
+    // internal detail needs the same care as a check that does.
     name: 'question: a question stops being able to ask about another table',
     file: 'src/lib/query.ts',
-    find: `  return evaluateExpression(bound.expression, bound.scope, tables);`,
-    with: `  return evaluateExpression(bound.expression, bound.scope);`,
+    find: `  const { value: v, error } = rowFormulaValue(row, text, { pageValues: page, tables });`,
+    with: `  const { value: v, error } = rowFormulaValue(row, text, { pageValues: page });`,
     expect: ['A QUESTION`S FILTER CAN ASK ABOUT ANOTHER TABLE', 'WHICH IS UNREAD-COUNT-PER-LABEL'],
   },
   {

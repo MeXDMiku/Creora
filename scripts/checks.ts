@@ -8576,6 +8576,41 @@ group('a question can ask about another table');
     keep: { unread: 'sum of if(countOf("Messages", \'{{Row id}} == MessageId and {{Unread}} == true\') > 0, 1, 0)' },
   }, tables, {})) as any;
   check('and so can what it works out per group', kept?.[0]?.unread, 2);
+
+  /**
+   * AND `RowId`, WHICH THE FIRST FIX DID NOT REACH.
+   *
+   * Threading the tables through made countOf legal inside a question. It still
+   * answered "Referenced block RowId does not exist" -- because query.ts built
+   * its OWN scope, `{ ...page, ...row }`, which is very nearly the one a
+   * repeater's filter gets, and "very nearly" is how two implementations of one
+   * idea drift apart.
+   *
+   * `{{PostId}} == RowId` is the single commonest shape of a relation condition
+   * anywhere in Creora, so nearly every cross-table question was refused. Found
+   * by translating a real social app, where every one of them failed at once.
+   *
+   * The repair was not a third field. It was DELETING the second
+   * implementation: value() calls rowFormulaValue now, so a question gets the
+   * three-layer scope that is decided and documented in one place.
+   */
+  const posts: any = {
+    Posts: T3([{ id: 'p1', ReplyToId: '' }, { id: 'p2', ReplyToId: '' }, { id: 'p3', ReplyToId: '' }], ['ReplyToId']),
+    Likes: T3([{ id: 'l1', PostId: 'p1' }, { id: 'l2', PostId: 'p1' }, { id: 'l3', PostId: 'p2' }], ['PostId']),
+  };
+  const ranked = ran(() => runQuery({
+    from: 'Posts',
+    orderBy: `countOf("Likes", '{{PostId}} == RowId')`,
+    direction: 'desc',
+  }, posts, {})) as any;
+  check('A QUESTION KNOWS WHICH ROW IT IS STANDING IN', Array.isArray(ranked), true);
+  check('so a feed can be ordered by a count of another table',
+    ran(() => (ranked as any[]).map((r: any) => r.id)), ['p1', 'p2', 'p3']);
+  check('and a question can FILTER on one too',
+    ran(() => runQuery({ from: 'Posts', where: `countOf("Likes", '{{PostId}} == RowId') > 1` }, posts, {})
+      .map((r: any) => r.id)), ['p1']);
+  check('AND IT IS THE SAME EVALUATOR A REPEATER USES, not a second one',
+    readFileSync('src/lib/query.ts', 'utf8').includes('rowFormulaValue(row, text'), true);
 }
 
 group('a button can run an action, and be refused by it');
@@ -9642,7 +9677,7 @@ group('a slot can contain a slot');
  * Raise it in the same commit that adds the checks, the way the drift budget
  * above is raised: a number changed where it can be seen in a diff.
  */
-const EXPECTED_CHECKS = 2183;
+const EXPECTED_CHECKS = 2187;
 reachedTheEnd = true;
 if (passed + failed !== EXPECTED_CHECKS) {
   failed++;
