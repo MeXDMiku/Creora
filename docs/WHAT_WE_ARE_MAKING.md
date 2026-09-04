@@ -36,8 +36,21 @@ with a home server*, it is *someone running a business on an app they cannot rea
 2. **Explain and fix.** The user brings a cheap API key. Nothing runs on our money.
 3. **State the rule so it keeps checking.** This is the node graph, and this is the
    subscription. Nobody has this.
-4. **Point the same engine at servers instead of databases.** Rules, tuning, restarts.
-   Only after step 3 has revenue — it needs per-vendor drivers and it can brick hardware.
+4. ~~**Point the same engine at servers instead of databases.**~~ **WITHDRAWN 4 Sep 2026**
+   after research — see `THE_SERVER_QUESTION.md`. Not deferred; withdrawn. VisualOps built
+   this exact product in 2013 and died. Vertiv failed at it with billions. Zabbix, Checkmk
+   and LibreNMS are free at our entire reachable volume. Do not revive it.
+
+**Two constraints, from the server research. Both are binding.**
+
+- **Condition -> action, not condition -> notify.** Every graphical tool stops at alerting;
+  Portainer ships GUI threshold rules and then only sends a webhook. Nobody has closed the
+  gap. We are already on the right side of it: a rule that is enforced and kept checked is
+  an action, not an alert.
+- **The graph must be a bidirectional view over text, never a replacement for it.** This is
+  Home Assistant's design, at 2 million homes, and the Deutsch limit is why — a visual
+  system caps out around fifty primitives on screen, which is smaller than one real
+  application. A graph that cannot be read as text cannot be diffed, merged or reviewed.
 
 **The real risk is not competition or cost. It is false positives.** Four were produced in
 a single session on 4 Sep. A security tool believed twice and wrong once is uninstalled.
