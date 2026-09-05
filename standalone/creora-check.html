@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Creora — the access check</title>
+<style>
+  /* ---- tokens: light is the base, dark overrides only colour roles ---- */
+  :root {
+    --bg: #f6f7f9;
+    --panel: #ffffff;
+    --ink: #14171a;
+    --ink-soft: #55606b;
+    --line: #e4e7eb;
+    --accent: #1f6feb;
+    --accent-ink: #ffffff;
+    --open: #b42318;      /* something is readable that may be private */
+    --open-bg: #fef3f2;
+    --held: #067647;      /* refused / behaving */
+    --held-bg: #ecfdf3;
+    --unknown: #8a6d00;   /* could not be judged */
+    --unknown-bg: #fffaeb;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1116; --panel: #171b21; --ink: #e6edf3; --ink-soft: #9aa5b1;
+      --line: #262c34; --accent: #4a90ff; --accent-ink: #06122b;
+      --open: #ff7b72; --open-bg: #2a1615; --held: #3fb950; --held-bg: #10251a;
+      --unknown: #e3b341; --unknown-bg: #2a2213;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans);
+         line-height: 1.5; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 32px 20px 96px; }
+  a { color: var(--accent); }
+
+  header .kicker { font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+                   color: var(--ink-soft); font-weight: 600; }
+  h1 { font-size: 30px; line-height: 1.15; margin: 10px 0 6px; letter-spacing: -.01em; }
+  .lede { font-size: 17px; color: var(--ink-soft); margin: 0 0 4px; max-width: 62ch; }
+  .claim { font-size: 15px; margin: 18px 0 0; padding: 14px 16px; border-left: 3px solid var(--accent);
+           background: var(--panel); border-radius: 0 8px 8px 0; }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+           padding: 20px; margin: 22px 0; }
+  .panel h2 { font-size: 13px; letter-spacing: .08em; text-transform: uppercase;
+              color: var(--ink-soft); margin: 0 0 14px; font-weight: 700; }
+
+  label { display: block; font-size: 13px; font-weight: 600; margin: 0 0 6px; }
+  .hint { font-weight: 400; color: var(--ink-soft); }
+  input[type=text], input[type=password] {
+    width: 100%; padding: 11px 12px; font-family: var(--mono); font-size: 14px;
+    border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); }
+  input:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+  .field { margin-bottom: 16px; }
+
+  .own { display: flex; gap: 10px; align-items: flex-start; padding: 14px; border: 1px solid var(--line);
+         border-radius: 8px; background: var(--bg); margin: 4px 0 18px; }
+  .own input { margin-top: 3px; width: 16px; height: 16px; flex: none; }
+  .own label { margin: 0; font-weight: 500; font-size: 13.5px; color: var(--ink); }
+
+  button.run { background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 8px;
+               padding: 12px 20px; font-size: 15px; font-weight: 600; cursor: pointer; }
+  button.run:disabled { opacity: .5; cursor: not-allowed; }
+  button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--line);
+                 border-radius: 7px; padding: 7px 12px; font-size: 13px; font-weight: 600; cursor: pointer; }
+
+  .status { font-family: var(--mono); font-size: 13px; color: var(--ink-soft); margin: 6px 0 0; }
+
+  /* ---- results ---- */
+  .row { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin: 10px 0;
+         background: var(--panel); }
+  .row .top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .tag { font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: .04em;
+         padding: 3px 8px; border-radius: 5px; white-space: nowrap; }
+  .tag.open { color: var(--open); background: var(--open-bg); }
+  .tag.held { color: var(--held); background: var(--held-bg); }
+  .tag.unknown { color: var(--unknown); background: var(--unknown-bg); }
+  .row .name { font-family: var(--mono); font-size: 14.5px; font-weight: 600; }
+  .row .detail { color: var(--ink-soft); font-size: 13.5px; margin: 8px 0 0; }
+  .cols { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); margin-top: 6px;
+          word-break: break-word; }
+
+  .intent { margin-top: 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+            padding-top: 12px; border-top: 1px dashed var(--line); }
+  .intent .q { font-size: 13px; font-weight: 600; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+  .seg button { border: 0; background: transparent; color: var(--ink-soft); font-size: 12.5px;
+                font-weight: 600; padding: 6px 12px; cursor: pointer; font-family: var(--sans); }
+  .seg button.on-ok { background: var(--held-bg); color: var(--held); }
+  .seg button.on-bad { background: var(--open-bg); color: var(--open); }
+
+  .diff { border: 1px solid var(--open); background: var(--open-bg); }
+  .diff .num { font-size: 30px; font-weight: 800; color: var(--open); }
+  .diff.clean { border-color: var(--held); background: var(--held-bg); }
+  .diff.clean .num { color: var(--held); }
+  .diff ul { margin: 10px 0 0; padding-left: 20px; }
+  .diff li { font-family: var(--mono); font-size: 13.5px; margin: 4px 0; }
+
+  .notchecked { font-size: 13.5px; color: var(--ink-soft); }
+  .notchecked li { margin: 5px 0; }
+  .foot { font-size: 12.5px; color: var(--ink-soft); margin-top: 28px; text-align: center; }
+  .err { color: var(--open); font-family: var(--mono); font-size: 13px; white-space: pre-wrap; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="kicker">Creora</div>
+    <h1>Say what your database is <em>supposed</em> to allow.<br>Find out what it actually does.</h1>
+    <p class="lede">Every tool on the market reads your rules and tells you what your rules say.
+      None of them can tell you a rule is <em>wrong</em>. This asks your live database what it
+      actually hands out, writes the answer in plain words, and lets you mark the lines that
+      were never meant to be there.</p>
+    <p class="claim">A wrong rule doesn't throw an error. It just returns the wrong rows — so it
+      ships, keeps working, and nobody finds out until someone who isn't you has the data.
+      This runs entirely in your browser. Nothing you type is sent anywhere except your own
+      backend.</p>
+  </header>
+
+  <!-- ---------- input ---------- -->
+  <section class="panel" id="inputPanel">
+    <h2>Point it at a project you own</h2>
+
+    <div class="field">
+      <label for="url">Project URL <span class="hint">— Supabase → Project Settings → Data API</span></label>
+      <input id="url" type="text" placeholder="https://xxxxxxxxxxxx.supabase.co" autocomplete="off" spellcheck="false" />
+    </div>
+
+    <div class="field">
+      <label for="key">Publishable / anon key <span class="hint">— the one your website already ships to every visitor; never the secret key</span></label>
+      <input id="key" type="text" placeholder="sb_publishable_… or eyJ…" autocomplete="off" spellcheck="false" />
+    </div>
+
+    <div class="own">
+      <input id="own" type="checkbox" />
+      <label for="own">This project is mine, or I have been asked in writing to test it. I understand
+        this makes real requests to it. <strong>Testing a project you do not control is not permitted here.</strong></label>
+    </div>
+
+    <button class="run" id="runBtn" disabled>Run the check</button>
+    <p class="status" id="status" hidden></p>
+  </section>
+
+  <!-- ---------- results ---------- -->
+  <section id="results" hidden>
+
+    <section class="panel diff" id="diffPanel" hidden>
+      <h2>What you said should not be reachable — and is</h2>
+      <div class="num" id="diffNum">0</div>
+      <p id="diffText" style="margin:6px 0 0;"></p>
+      <ul id="diffList"></ul>
+      <div style="margin-top:14px;">
+        <button class="ghost" id="exportBtn">Export this as a report</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>What a stranger can reach right now</h2>
+      <p class="status" id="reach"></p>
+      <div id="rows"></div>
+    </section>
+
+    <section class="panel">
+      <h2>What this did <em>not</em> check — every run, on purpose</h2>
+      <ul class="notchecked">
+        <li><strong>Writing and deleting.</strong> This only reads. A table that refuses reads can still
+          accept writes or deletes from a stranger — proving that safely needs a controlled test, not a public tool.</li>
+        <li><strong>One user reading another user's rows.</strong> The most common real leak. It needs two
+          real signed-in accounts to prove, which is the audit, not this.</li>
+        <li><strong>What a function actually does.</strong> A function being callable is not the same as
+          being unsafe — but each one is a door on the public internet, and this cannot see inside it.</li>
+        <li><strong>Whether an empty result is safe or just empty.</strong> From outside, "a policy hid it"
+          and "the table is empty" look identical.</li>
+        <li><strong>Anything about correctness</strong> — logic, races, your dependencies, your hosting.</li>
+      </ul>
+      <p class="notchecked" style="margin-top:12px;"><strong>A finding here is a fact. The absence of
+        one is not.</strong> A check that goes quiet when it finds nothing has taught you something false.</p>
+    </section>
+
+  </section>
+
+  <p class="foot" id="foot" hidden></p>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var $ = function (id) { return document.getElementById(id); };
+  var urlEl = $("url"), keyEl = $("key"), ownEl = $("own"), runBtn = $("runBtn");
+
+  function ready() {
+    var hasUrl = /^https?:\/\/.+/i.test(urlEl.value.trim());
+    var hasKey = keyEl.value.trim().length > 10;
+    runBtn.disabled = !(hasUrl && hasKey && ownEl.checked);
+  }
+  urlEl.addEventListener("input", ready);
+  keyEl.addEventListener("input", ready);
+  ownEl.addEventListener("change", ready);
+
+  // ---- the two key formats. Getting it wrong looks exactly like being locked out. ----
+  //   Legacy anon key is a JWT (eyJ…) and is sent BOTH as apikey AND Authorization: Bearer.
+  //   The new sb_publishable_ key is NOT a JWT — sending it as a Bearer token is rejected.
+  function headers(key) {
+    var isJwt = key.slice(0, 3) === "eyJ";
+    return isJwt ? { apikey: key, Authorization: "Bearer " + key } : { apikey: key };
+  }
+
+  function readable(body) {
+    if (body == null) return "(empty response)";
+    if (typeof body === "string") return body.slice(0, 300);
+    if (typeof body === "object") {
+      var m = body.message || body.msg || body.error_description || body.error;
+      var hint = body.hint ? " (hint: " + body.hint + ")" : "";
+      var code = body.code ? " [" + body.code + "]" : "";
+      if (m) return m + code + hint;
+      try { return JSON.stringify(body).slice(0, 300); } catch (e) { return String(body); }
+    }
+    return String(body).slice(0, 300);
+  }
+
+  var BASE, HDRS;
+
+  async function GET(path, extra) {
+    var h = {}; for (var k in HDRS) h[k] = HDRS[k];
+    if (extra) for (var k2 in extra) h[k2] = extra[k2];
+    try {
+      var r = await fetch(BASE + "/rest/v1/" + path, { headers: h });
+      var text = await r.text(), body = text;
+      try { body = JSON.parse(text); } catch (e) { /* not json */ }
+      return { ok: r.ok, status: r.status, body: body, range: r.headers.get("content-range") };
+    } catch (e) {
+      // A browser fetch that throws is almost always CORS or an unreachable host —
+      // an "I could not ask", which is different from "the answer was no".
+      return { ok: false, status: 0, body: (e && e.message) || String(e), threw: true };
+    }
+  }
+
+  function setStatus(msg) { var s = $("status"); s.hidden = false; s.textContent = msg; }
+
+  // ---- run ----
+  runBtn.addEventListener("click", async function () {
+    BASE = urlEl.value.trim().replace(/\/+$/, "");
+    var key = keyEl.value.trim();
+    HDRS = headers(key);
+    var isJwt = key.slice(0, 3) === "eyJ";
+
+    runBtn.disabled = true;
+    setStatus("Asking " + BASE + " what it exposes to a visitor…");
+
+    var spec = await GET("");
+    if (!spec.ok) {
+      setStatus("");
+      $("results").hidden = false;
+      $("diffPanel").hidden = true;
+      $("reach").innerHTML = "";
+      var msg = "Could not reach the backend — HTTP " + (spec.status || "no response") +
+        "\nIt said: " + readable(spec.body) +
+        "\nKey format detected: " + (isJwt ? "legacy JWT anon key" : "new sb_publishable key");
+      if (spec.status === 401)
+        msg += "\n\nA 401 here is almost never your policies — it is the key being wrong or expired." +
+               "\nCheck Supabase → Project Settings → API Keys.";
+      if (spec.threw)
+        msg += "\n\nThe request threw before any answer came back. Usually that means the URL is wrong," +
+               "\nor this project's Data API blocks requests from this page's origin. Nothing was learned.";
+      $("rows").innerHTML = '<p class="err">' + esc(msg) + "</p>";
+      $("reach").textContent = "That is not a pass and it is not a fail. Nothing was learned.";
+      runBtn.disabled = false;
+      return;
+    }
+
+    var paths = Object.keys((spec.body && spec.body.paths) || {});
+    var tables = paths.filter(function (p) { return p !== "/" && p.indexOf("/rpc/") !== 0; })
+                      .map(function (p) { return p.slice(1); });
+    var rpcs = paths.filter(function (p) { return p.indexOf("/rpc/") === 0; })
+                    .map(function (p) { return p.slice(5); });
+
+    $("reach").textContent = "The backend exposes " + tables.length + " table(s) and " +
+      rpcs.length + " function(s) to anonymous callers.";
+
+    var rowsEl = $("rows"); rowsEl.innerHTML = "";
+    window.__findings = [];
+
+    for (var i = 0; i < tables.length; i++) {
+      var t = tables[i];
+      setStatus("Reading " + t + " as a stranger… (" + (i + 1) + "/" + tables.length + ")");
+      var r = await GET(encodeURIComponent(t) + "?select=*&limit=1", { Prefer: "count=exact" });
+      var count = null;
+      if (r.range && r.range.indexOf("/") >= 0) {
+        var tail = r.range.split("/")[1];
+        if (tail && tail !== "*") count = parseInt(tail, 10);
+      }
+      if (r.ok && Array.isArray(r.body) && r.body.length > 0) {
+        var cols = Object.keys(r.body[0]);
+        renderRow("open", t,
+          (count != null ? count.toLocaleString() + " row(s)" : "rows") +
+          " came back with no login at all.",
+          cols, true);
+      } else if (r.ok && Array.isArray(r.body)) {
+        renderRow("held", t, "Nothing came back — a policy is withholding it, or the table is empty. " +
+          "From out here those look identical.", null, false);
+      } else {
+        renderRow("held", t, "Refused (" + r.status + "). " + readable(r.body), null, false);
+      }
+    }
+
+    if (rpcs.length) {
+      renderRow("unknown", rpcs.length + " function(s) callable by anonymous visitors",
+        rpcs.join(", ") + ". Being callable is not the same as being unsafe — but each is a door on the public internet.",
+        null, false);
+    }
+
+    setStatus("");
+    $("results").hidden = false;
+    recomputeDiff();
+    $("foot").hidden = false;
+    $("foot").textContent = "Checked " + tables.length + " table(s) at " + BASE +
+      " · read-only · nothing left your browser.";
+    runBtn.disabled = false;
+    $("results").scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+
+  function esc(s) { return String(s).replace(/[&<>]/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]; }); }
+
+  // ---- render one table row, with the intent control that is the whole point ----
+  function renderRow(sev, name, detail, cols, askable) {
+    var f = { sev: sev, name: name, intent: null };
+    window.__findings.push(f);
+
+    var row = document.createElement("div"); row.className = "row";
+    var tagText = { open: "READABLE", held: "CLOSED", unknown: "UNKNOWN" }[sev];
+    var top = '<div class="top"><span class="tag ' + sev + '">' + tagText + '</span>' +
+              '<span class="name">' + esc(name) + '</span></div>';
+    var body = '<p class="detail">' + esc(detail) + "</p>";
+    if (cols && cols.length)
+      body += '<div class="cols">columns visible: ' + esc(cols.slice(0, 12).join(", ")) +
+              (cols.length > 12 ? " and " + (cols.length - 12) + " more" : "") + "</div>";
+    row.innerHTML = top + body;
+
+    if (askable) {
+      var box = document.createElement("div"); box.className = "intent";
+      box.innerHTML = '<span class="q">Is a stranger reading this intended?</span>';
+      var seg = document.createElement("span"); seg.className = "seg";
+      var yes = document.createElement("button"); yes.textContent = "Intended";
+      var no = document.createElement("button"); no.textContent = "No — should be private";
+      yes.onclick = function () { f.intent = "ok"; yes.className = "on-ok"; no.className = ""; recomputeDiff(); };
+      no.onclick = function () { f.intent = "bad"; no.className = "on-bad"; yes.className = ""; recomputeDiff(); };
+      seg.appendChild(yes); seg.appendChild(no);
+      box.appendChild(seg); row.appendChild(box);
+    }
+    $("rows").appendChild(row);
+  }
+
+  // ---- the diff: the thing no other tool produces ----
+  function recomputeDiff() {
+    var bad = window.__findings.filter(function (f) { return f.intent === "bad"; });
+    var readable = window.__findings.filter(function (f) { return f.sev === "open"; });
+    var undecided = readable.filter(function (f) { return f.intent === null; });
+
+    var panel = $("diffPanel");
+    panel.hidden = false;
+    if (bad.length) {
+      panel.className = "panel diff";
+      $("diffNum").textContent = bad.length;
+      $("diffText").textContent = bad.length === 1
+        ? "One thing you marked private is readable by anyone holding your public key."
+        : bad.length + " things you marked private are readable by anyone holding your public key.";
+      $("diffList").innerHTML = bad.map(function (f) { return "<li>" + esc(f.name) + "</li>"; }).join("");
+    } else if (readable.length && undecided.length === readable.length) {
+      panel.className = "panel diff clean";
+      $("diffNum").textContent = readable.length;
+      $("diffText").textContent = "table(s) are readable by a stranger. Mark each one above as intended " +
+        "or not — the ones you mark private are the leaks, and only you can say which those are.";
+      $("diffList").innerHTML = "";
+    } else if (bad.length === 0 && readable.length) {
+      panel.className = "panel diff clean";
+      $("diffNum").textContent = "0";
+      $("diffText").textContent = "You marked every readable table as intended. Nothing here is a leak by " +
+        "your own definition — which is a stronger statement than any scanner's green tick, because you made it.";
+      $("diffList").innerHTML = "";
+    } else {
+      panel.className = "panel diff clean";
+      $("diffNum").textContent = "0";
+      $("diffText").textContent = "Nothing came back to a stranger on the reads this checked.";
+      $("diffList").innerHTML = "";
+    }
+  }
+
+  // ---- export the diff as a plain report ----
+  $("exportBtn").addEventListener("click", function () {
+    var lines = [];
+    lines.push("CREORA ACCESS CHECK");
+    lines.push("project: " + BASE);
+    lines.push("when: " + new Date().toISOString());
+    lines.push("");
+    var bad = window.__findings.filter(function (f) { return f.intent === "bad"; });
+    var ok = window.__findings.filter(function (f) { return f.intent === "ok"; });
+    var open = window.__findings.filter(function (f) { return f.sev === "open"; });
+    lines.push("READABLE BY A STRANGER, MARKED NOT INTENDED (" + bad.length + "):");
+    bad.forEach(function (f) { lines.push("  - " + f.name); });
+    if (!bad.length) lines.push("  (none marked)");
+    lines.push("");
+    lines.push("READABLE BY A STRANGER, MARKED INTENDED (" + ok.length + "):");
+    ok.forEach(function (f) { lines.push("  - " + f.name); });
+    if (!ok.length) lines.push("  (none marked)");
+    lines.push("");
+    lines.push("TOTAL READABLE BY A STRANGER: " + open.length);
+    lines.push("");
+    lines.push("NOT CHECKED: writes, deletes, cross-user access, function internals,");
+    lines.push("empty-vs-hidden, and all correctness. A finding is a fact; absence is not.");
+    var blob = new Blob([lines.join("\n")], { type: "text/plain" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "creora-access-check.txt";
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+  });
+
+})();
+</script>
+</body>
+</html>
