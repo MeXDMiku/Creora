@@ -29,3 +29,7 @@ creora_full_codebase.md
 
 # Scratch area for files pending manual deletion
 _to_delete/
+
+# Written by scripts/control.mjs while a control is applied; removed when the
+# tree is put back. If it is here, a run was killed -- the next run restores it.
+.control-restore.json

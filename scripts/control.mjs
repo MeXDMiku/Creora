@@ -22,7 +22,7 @@
  * So: the tally is matched anchored to the start of a line, and a run with no
  * tally at all is reported as its own outcome and never as a pass.
  */
-import { readFileSync, writeFileSync, openSync, fsyncSync, closeSync } from 'node:fs';
+import { readFileSync, writeFileSync, openSync, fsyncSync, closeSync, existsSync, unlinkSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 
@@ -1027,7 +1027,8 @@ const CONTROLS = [
   {
     name: 'graph: an endpoint that is not on the page is kept',
     file: 'src/lib/pageGraph.ts',
-    find: `    if (!blocks.has(from) || !blocks.has(to)) return;`,
+    // Was `blocks.has`, until a question and an action became nodes too.
+    find: `    if (!nodes.has(from) || !nodes.has(to)) return;`,
     with: `    // control: off-page endpoints are kept`,
     expect: ['nor on a block that is not on the page'],
   },
@@ -1105,6 +1106,115 @@ const CONTROLS = [
     with: `  // control: no words for trackedBlockId`,
     expect: ['a setting is named in words, not in field names'],
   },
+
+  // --- the nodes that drew nothing and counted for nothing -------------------
+  {
+    name: 'nodes: a question stops being a node, so its edges are dropped again',
+    file: 'src/lib/pageGraph.ts',
+    find: `  for (const q of page.queries ?? []) if (q?.id) nodes.add(\`query:\${q.id}\`);`,
+    with: `  // control: a question is not a node`,
+    expect: [
+      'A QUESTION READING A TABLE DEPENDS ON IT',
+      'and on whatever its condition asks about',
+      'so they reach the list a person reads',
+      'a question reads as a question there, not as a tag',
+      'and so is a question drawn from it',
+    ],
+  },
+  {
+    name: 'nodes: an action stops being a node',
+    file: 'src/lib/pageGraph.ts',
+    find: `  for (const a of page.actions ?? []) if (a?.id) nodes.add(\`action:\${a.id}\`);`,
+    with: `  // control: an action is not a node`,
+    expect: ['AN ACTION DOES TOO', 'and an action as an action'],
+  },
+  {
+    name: 'nodes: anything SHAPED like a question counts, so a typo invents one',
+    file: 'src/lib/pageGraph.ts',
+    find: `    if (!nodes.has(from) || !nodes.has(to)) return;`,
+    with: `    if (!nodes.has(from) && !String(from).includes(':')) return;
+    if (!nodes.has(to) && !String(to).includes(':')) return;`,
+    expect: ['A QUESTION WITH NO ID IS NOT A NODE'],
+  },
+
+  // --- what breaks if this block goes ---------------------------------------
+  {
+    name: 'breaks: the direction is flipped, so it lists what the block READS',
+    file: 'src/lib/blockDependents.ts',
+    find: `    if (edge.from !== blockId) continue;`,
+    with: `    if (edge.to !== blockId) continue; // control: the wrong direction`,
+    expect: [
+      'EVERYTHING THAT USES IT IS FOUND',
+      'DELETING SOMETHING IT READS IS A DIFFERENT QUESTION',
+    ],
+  },
+  {
+    name: 'breaks: the invisible ones stop coming first',
+    file: 'src/lib/blockDependents.ts',
+    find: `  rows.sort((a, b) =>
+    a.drawn === b.drawn ? a.dependent.localeCompare(b.dependent) : (a.drawn ? 1 : -1));`,
+    with: `  rows.sort((a, b) => a.dependent.localeCompare(b.dependent)); // control: name only`,
+    expect: ['THE INVISIBLE ONES COME FIRST'],
+  },
+  {
+    name: 'breaks: one wire stops being enough to call a dependency visible',
+    file: 'src/lib/blockDependents.ts',
+    find: `      existing.drawn = existing.drawn || edge.drawn;`,
+    with: `      existing.drawn = false; // control: a later reason hides an earlier wire`,
+    expect: ['THE INVISIBLE ONES COME FIRST'],
+  },
+  {
+    name: 'breaks: the summary counts everything as visible, so nothing is a surprise',
+    file: 'src/lib/blockDependents.ts',
+    find: `  const hidden = rows.filter(r => !r.drawn).length;`,
+    with: `  const hidden = 0; // control: nothing is hidden`,
+    expect: ['the summary counts the hidden ones separately', 'one thing is a thing that USES it'],
+  },
+  {
+    name: 'breaks: the summary says "0 things" instead of saying nothing',
+    file: 'src/lib/blockDependents.ts',
+    find: `  if (!rows.length) return '';`,
+    with: `  // control: no early return`,
+    expect: ['and says nothing at all when nothing uses it, rather than saying zero'],
+  },
+
+  // --- the delete that left an otherwise pointing at nothing ------------------
+  {
+    name: 'delete: the otherwise is left pointing at the deleted block',
+    file: 'src/lib/blockDependents.ts',
+    find: `    if (!steps.some((s: any) => s?.elseTargetId === blockId)) { out.push(w); continue; }`,
+    with: `    out.push(w); continue; // control: the otherwise is never cleared`,
+    expect: ['BUT A STEP WHOSE OTHERWISE POINTS AT IT IS KEPT, and the otherwise cleared'],
+  },
+  {
+    name: 'delete: an otherwise pointing ANYWHERE is cleared, not only at the deleted block',
+    file: 'src/lib/blockDependents.ts',
+    find: `      steps: steps.map((s: any) => (s?.elseTargetId === blockId ? { ...s, elseTargetId: undefined } : s)),`,
+    with: `      steps: steps.map((s: any) => ({ ...s, elseTargetId: undefined })), // control: clear them all`,
+    expect: ['AND THE OTHERWISE BESIDE IT, POINTING SOMEWHERE ELSE, IS LEFT ALONE'],
+  },
+  {
+    name: 'delete: a workflow that starts at the block is kept',
+    file: 'src/lib/blockDependents.ts',
+    find: `    if (w.sourceId === blockId) continue;`,
+    with: `    // control: a workflow starting at it is kept`,
+    expect: ['a workflow that STARTS at the deleted block goes', 'and the two that survive are the two that should'],
+  },
+  {
+    name: 'delete: a workflow nobody touched is rebuilt anyway',
+    file: 'src/lib/blockDependents.ts',
+    find: `    if (!steps.some((s: any) => s?.elseTargetId === blockId)) { out.push(w); continue; }
+    out.push({`,
+    with: `    out.push({`,
+    expect: ['a workflow nobody touched is the SAME object, so nothing re-renders for nothing'],
+  },
+  {
+    name: 'delete: App.tsx goes back to its own hand-rolled copy of the cleanup',
+    file: 'src/App.tsx',
+    find: `    setWorkflows(prev => workflowsAfterDeleting(prev, blockId))`,
+    with: `    setWorkflows(prev => prev.filter(w => w.sourceId !== blockId && !w.steps.some(step => step.targetId === blockId)))`,
+    expect: ['AND APP.TSX HAS NO HAND-ROLLED COPY OF IT LEFT', 'it calls the checked one instead, in both places'],
+  },
 ];
 
 /**
@@ -1164,12 +1274,57 @@ const runChecks = () => {
  * wrong a test tool can be.
  */
 const openEdits = new Map();
+
+/**
+ * A COPY ON DISK, BECAUSE THE HANDLERS BELOW DO NOT ALWAYS GET TO RUN.
+ *
+ * `openEdits` lives in memory, so the signal handlers can put every file back
+ * when this process is asked to stop. They cannot when it is KILLED -- SIGKILL
+ * is not catchable, and that is exactly what a wrapper does when a run outlives
+ * the time it was given. Twice now that has left a deliberate lie in a source
+ * file, and the next `npm run check` read as "the work you just did is broken",
+ * which the note at the top of this file calls the most expensive kind of wrong
+ * a test tool can be. Being right about it in a comment did not help.
+ *
+ * So the originals go to disk BEFORE the first edit and are removed only after
+ * everything is back. If this file is here when a run starts, the last run did
+ * not finish: put the files back, say so, and carry on. A cheap sidecar beats a
+ * clever handler, because it does not need this process to be alive.
+ */
+const RESTORE_FILE = '.control-restore.json';
+const rememberOnDisk = () => {
+  try { writeFileSync(RESTORE_FILE, JSON.stringify(Object.fromEntries(openEdits), null, 1)); }
+  catch { /* the in-memory path is still there */ }
+};
+const forgetOnDisk = () => { try { if (existsSync(RESTORE_FILE)) unlinkSync(RESTORE_FILE); } catch { /* ignore */ } };
+
 const restoreAll = () => {
   for (const [file, text] of openEdits) {
     try { write(file, text); } catch { /* nothing better to do while dying */ }
   }
   openEdits.clear();
+  forgetOnDisk();
 };
+
+/**
+ * Put back whatever a killed run left behind, before anything else reads it.
+ * Deliberately first: the green-tree test below would otherwise report a
+ * PREVIOUS run's sabotage as "the tree is not green before we start", which
+ * sends somebody looking for a bug that is not there.
+ */
+if (existsSync(RESTORE_FILE)) {
+  let saved = null;
+  try { saved = JSON.parse(readFileSync(RESTORE_FILE, 'utf8')); } catch { /* unreadable */ }
+  const files = saved ? Object.keys(saved) : [];
+  if (files.length) {
+    console.log(`the last run did not finish. Putting back ${files.length} file${files.length === 1 ? '' : 's'}:`);
+    for (const file of files) {
+      try { write(file, saved[file]); console.log(`  restored ${file}`); }
+      catch (e) { console.log(`  COULD NOT RESTORE ${file} — ${e && e.message}. Fix it by hand before reading anything below.`); }
+    }
+  }
+  forgetOnDisk();
+}
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
   process.on(signal, () => { restoreAll(); process.exit(130); });
 }
@@ -1235,7 +1390,10 @@ console.log(`running ${chosen.length} of ${CONTROLS.length} controls (${chosen[0
 function attempt(control) {
   const edits = [control, ...(control.also ? [control.also] : [])];
   const originals = edits.map(e => [e.file, readFileSync(e.file, 'utf8')]);
-  for (const [file, text] of originals) if (!openEdits.has(file)) openEdits.set(file, text);
+  let fresh = false;
+  for (const [file, text] of originals) if (!openEdits.has(file)) { openEdits.set(file, text); fresh = true; }
+  // On disk BEFORE the edit, or a kill between the two loses the only copy.
+  if (fresh) rememberOnDisk();
 
   try {
     for (const e of edits) {
@@ -1378,6 +1536,14 @@ while (!after && restoreRetries < 3) {
 }
 const restoreNote = restoreRetries ? `  (after ${restoreRetries} retr${restoreRetries === 1 ? 'y' : 'ies'} — the earlier run produced no tally at all)` : '';
 console.log(`\nrestored: ${after ? `${after[1]} passed, ${after[2]} failed${restoreNote}` : 'NO TALLY, three times running — the tree did not come back clean, look at it now'}`);
+
+/**
+ * The sidecar goes only once the tree has been SEEN to be clean. Deleting it
+ * on the way out regardless would throw away the copy that puts the files back,
+ * at the one moment it might still be needed.
+ */
+if (after && Number(after[2]) === 0) { openEdits.clear(); forgetOnDisk(); }
+else console.log(`${RESTORE_FILE} is being kept — it holds the originals, and the next run will put them back.`);
 if (!after || Number(after[2]) !== 0) process.exit(1);
 if (suspicious) {
   console.log(`${suspicious} control${suspicious === 1 ? '' : 's'} did not behave. Each one is a check that is not doing its job.`);

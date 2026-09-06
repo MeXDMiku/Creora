@@ -58,10 +58,33 @@ export function blocksOf(page: PageBlob): Set<string> {
  */
 export function edgesOf(page: PageBlob): Edge[] {
   const blocks = blocksOf(page);
+
+  /**
+   * A QUESTION AND AN ACTION ARE NODES TOO, AND USED NOT TO BE.
+   *
+   * The guard below asked whether both ends were BLOCKS. Sections 5 and 6 add
+   * edges that end at `query:<id>` and `action:<id>`, which are not blocks and
+   * never could be -- so every edge either of them added was dropped on the way
+   * out, and both sections had been dead since they were written. A page with a
+   * question reading a table and an action filtering on an input reported ZERO
+   * dependencies.
+   *
+   * That also means the measured "about two thirds of a page's dependencies are
+   * not drawn" was an UNDERCOUNT: the two kinds that draw nothing at all, and
+   * can be reached only through a panel, were contributing none of it.
+   *
+   * They are nodes by the only definition that matters here: they depend on
+   * blocks and things depend on them. They are listed rather than pattern-
+   * matched, so a typo in an id is still dropped rather than inventing a node.
+   */
+  const nodes = new Set(blocks);
+  for (const q of page.queries ?? []) if (q?.id) nodes.add(`query:${q.id}`);
+  for (const a of page.actions ?? []) if (a?.id) nodes.add(`action:${a.id}`);
+
   const out: Edge[] = [];
   const add = (from: string, to: string, via: string, drawn: boolean) => {
     if (!from || !to || from === to) return;
-    if (!blocks.has(from) || !blocks.has(to)) return;
+    if (!nodes.has(from) || !nodes.has(to)) return;
     out.push({ from, to, via, drawn });
   };
 

@@ -26,6 +26,7 @@ import { wireSentence, actionWords, eventWords, outputMeaning, PORT_OUT_HINT, PO
 import { canWire, typeWords } from '../src/lib/wireTypes';
 import { edgesOf, blocksOf } from '../src/lib/pageGraph';
 import { hiddenLinks, reasonWords } from '../src/lib/hiddenEdges';
+import { whatBreaksIfDeleted, breakageSummary, workflowsAfterDeleting } from '../src/lib/blockDependents';
 import {
   resolveLayout,
   layoutPage,
@@ -9873,6 +9874,164 @@ group('the two graphs a page has');
   check('and an entirely unknown reason is passed through, not swallowed',
     reasonWords('somethingElse'), 'somethingElse');
   check('an empty page has nothing hidden', hiddenLinks({}).length, 0);
+
+  /**
+   * THE TWO KINDS OF NODE THAT DREW NOTHING AND COUNTED FOR NOTHING.
+   *
+   * `edgesOf` has walked questions and actions since it was written, and every
+   * edge it found there was thrown away one line later: the guard asked whether
+   * both ends were BLOCKS, and `query:<id>` is not a block and never will be.
+   * A page with a question reading a table reported ZERO dependencies.
+   *
+   * Which makes the headline number this file quotes -- about two thirds of a
+   * page's dependencies are not drawn -- an UNDERCOUNT, because the two kinds
+   * that draw nothing whatsoever were contributing none of it.
+   */
+  const asked = {
+    runtimeStates: { [A]: {}, [B]: {} },
+    positions: {},
+    documentContent: { content: [] },
+    connections: [],
+    workflows: [],
+    formulas: [],
+    queries: [{ id: 'q1', name: 'Recent', def: { from: A, where: `${B} > 1` } }],
+    actions: [{ id: 'a1', name: 'Book', steps: [{ table: A, where: `${B} > 1` }] }],
+  };
+  const askedEdges = edgesOf(asked);
+  check('A QUESTION READING A TABLE DEPENDS ON IT, and used to depend on nothing',
+    askedEdges.some((e: any) => e.from === A && e.to === 'query:q1'), true);
+  check('and on whatever its condition asks about',
+    askedEdges.some((e: any) => e.from === B && e.to === 'query:q1'), true);
+  check('AN ACTION DOES TOO', askedEdges.some((e: any) => e.from === A && e.to === 'action:a1'), true);
+  check('and on whatever its condition asks about, the same way',
+    askedEdges.some((e: any) => e.from === B && e.to === 'action:a1'), true);
+  check('and not one of the four draws a wire',
+    askedEdges.every((e: any) => !e.drawn), true);
+  check('so they reach the list a person reads', hiddenLinks(asked).length, 4);
+  check('a question reads as a question there, not as a tag',
+    hiddenLinks(asked).find(l => l.to === 'query:q1')?.reasons, ['a question reads it']);
+  check('and an action as an action', hiddenLinks(asked).find(l => l.to === 'action:a1')?.reasons, ['an action reads it']);
+
+  // The node list is built from what the page DECLARES, not from anything
+  // shaped like `query:`, so a question with no id invents no node.
+  check('A QUESTION WITH NO ID IS NOT A NODE, so a typo cannot invent one',
+    edgesOf({ ...asked, queries: [{ name: 'Nameless', def: { from: A } }] })
+      .some((e: any) => String(e.to).startsWith('query:')), false);
+}
+
+/**
+ * WHAT BREAKS IF THIS BLOCK GOES.
+ *
+ * `deleteBlock` cleans up four things and every one of them is a place the
+ * block is the TARGET: its own node and atoms, the connections at either end,
+ * and the formulas that write into it. Nothing cleans up or mentions the places
+ * it is the SOURCE, which is most of them and all of the invisible ones.
+ *
+ * The page below is the smallest one that has both kinds: a wire, which is
+ * visible and already cleaned up, and four dependencies that are neither.
+ */
+group('what breaks if this block goes');
+{
+  const T = 'databaseBlock__tttt1';   // the one being deleted
+  const W = 'numberDisplayBlock__wwww2';  // wired to it, so visible
+  const F = 'numberDisplayBlock__ffff3';  // a formula names it, so not
+  const L = 'listBlock__llll4';            // tracks it through a setting
+  const page = {
+    runtimeStates: { [T]: {}, [W]: {}, [F]: {}, [L]: { trackedBlockId: T } },
+    positions: {},
+    documentContent: { content: [] },
+    connections: [{ sourceBlockId: T, targetBlockId: W }],
+    // W is BOTH wired to it and names it in a formula, so the row for W is the
+    // one place two reasons meet and one of them is drawn. Without that, the
+    // line that keeps a dependency visible when a later reason is not could be
+    // deleted and nothing here would notice.
+    formulas: [{ targetBlockId: F, formula: `${T} + 1` }, { targetBlockId: W, formula: `${T} * 2` }],
+    workflows: [],
+    queries: [{ id: 'q9', name: 'Recent', def: { from: T } }],
+    actions: [],
+  };
+  const breaks = whatBreaksIfDeleted(page, T);
+
+  check('EVERYTHING THAT USES IT IS FOUND, not only what is wired to it', breaks.length, 4);
+  check('THE INVISIBLE ONES COME FIRST, because those are the surprise',
+    breaks.map(b => b.drawn), [false, false, false, true]);
+  check('a formula naming it is one of them',
+    breaks.find(b => b.dependent === F)?.reasons, ['a formula reads it']);
+  check('so is a block tracking it through a setting',
+    breaks.find(b => b.dependent === L)?.reasons, ['that block shows it']);
+  check('and so is a question drawn from it',
+    breaks.find(b => b.dependent === 'query:q9')?.reasons, ['a question reads it']);
+  check('the wired one is found too, and marked as already visible',
+    breaks.find(b => b.dependent === W)?.drawn, true);
+  check('and a wire is a reason in WORDS here, because this list shows drawn ones',
+    breaks.find(b => b.dependent === W)?.reasons, ['a formula reads it', 'a wire connects them']);
+
+  // The direction is the whole point: deleting a block does not break the
+  // things it READS, only the things that read IT.
+  check('DELETING SOMETHING IT READS IS A DIFFERENT QUESTION, and this is not it',
+    whatBreaksIfDeleted(page, F).length, 0);
+  check('a block nothing uses breaks nothing', whatBreaksIfDeleted(page, W).length, 0);
+  check('and neither does a block that is not there', whatBreaksIfDeleted(page, 'noSuchBlock__z').length, 0);
+  check('nor an empty id, which is what a cleared selection looks like',
+    whatBreaksIfDeleted(page, '').length, 0);
+  check('an empty page breaks nothing and does not throw', whatBreaksIfDeleted({}, T).length, 0);
+
+  check('the summary counts the hidden ones separately',
+    breakageSummary(breaks), '4 things on this page use it, and 3 of them have no wire.');
+  check('and says nothing at all when nothing uses it, rather than saying zero',
+    breakageSummary([]), '');
+  check('one thing is a thing that USES it, not a things that use it',
+    breakageSummary([{ dependent: F, reasons: ['a formula reads it'], drawn: false }]),
+    '1 thing on this page uses it, and no wire shows it.');
+
+  /**
+   * AND THE ONE THE DELETE ACTUALLY GOT WRONG.
+   *
+   * Two copies of the same line in App.tsx dropped a workflow whose source was
+   * the block, or any of whose steps TARGETED it, and neither looked at
+   * `elseTargetId`. bindingEngine resolves the otherwise branch as
+   * `step.elseTargetId || step.targetId`, so a step whose otherwise pointed at
+   * a deleted block went on firing into a block that was not there.
+   */
+  const wfs = [
+    { id: 'w1', sourceId: T, steps: [{ targetId: W, action: 'set' }] },
+    { id: 'w2', sourceId: W, steps: [{ targetId: T, action: 'set' }] },
+    // w3 has TWO steps on purpose. One otherwise points at the block being
+    // deleted and one does not, and both live in the workflow that gets rebuilt
+    // -- which is the only place "clear that one, leave this one" can be seen.
+    // With one step each, a version that cleared EVERY otherwise passed.
+    { id: 'w3', sourceId: W, steps: [
+      { targetId: F, action: 'set', elseTargetId: T },
+      { targetId: L, action: 'set', elseTargetId: W },
+    ] },
+    { id: 'w4', sourceId: W, steps: [{ targetId: F, action: 'set', elseTargetId: L }] },
+  ];
+  const left = workflowsAfterDeleting(wfs, T);
+  check('a workflow that STARTS at the deleted block goes', left.some(w => w.id === 'w1'), false);
+  check('and one with a step that TARGETS it goes too', left.some(w => w.id === 'w2'), false);
+  check('BUT A STEP WHOSE OTHERWISE POINTS AT IT IS KEPT, and the otherwise cleared',
+    left.find(w => w.id === 'w3')?.steps[0].elseTargetId, undefined);
+  check('so the step falls back to its own target, which is what no otherwise means',
+    left.find(w => w.id === 'w3')?.steps[0].targetId, F);
+  check('AND THE OTHERWISE BESIDE IT, POINTING SOMEWHERE ELSE, IS LEFT ALONE',
+    left.find(w => w.id === 'w3')?.steps[1].elseTargetId, W);
+  check('as is one in a workflow that was not rebuilt at all',
+    left.find(w => w.id === 'w4')?.steps[0].elseTargetId, L);
+  check('and the two that survive are the two that should', left.map(w => w.id), ['w3', 'w4']);
+  // `===`, not equality: the point is that the SAME object comes back, and two
+  // objects with the same fields compare equal while still being a new one.
+  check('a workflow nobody touched is the SAME object, so nothing re-renders for nothing',
+    workflowsAfterDeleting(wfs, 'noSuchBlock__z')[3] === wfs[3], true);
+  check('deleting nothing changes nothing', workflowsAfterDeleting(wfs, '').length, 4);
+  check('and an empty list does not throw', workflowsAfterDeleting([], T).length, 0);
+
+  // The two copies of this cleanup in App.tsx are now one call each. A third
+  // copy appearing is the drift this is guarding against.
+  const appSrcDel = readFileSync('src/App.tsx', 'utf8');
+  check('AND APP.TSX HAS NO HAND-ROLLED COPY OF IT LEFT',
+    /w\.steps\.some\(step => step\.targetId === blockId\)/.test(appSrcDel), false);
+  check('it calls the checked one instead, in both places',
+    (appSrcDel.match(/workflowsAfterDeleting\(prev, blockId\)/g) || []).length, 2);
 }
 
 /**
@@ -9892,7 +10051,7 @@ group('the two graphs a page has');
  * Raise it in the same commit that adds the checks, the way the drift budget
  * above is raised: a number changed where it can be seen in a diff.
  */
-const EXPECTED_CHECKS = 2232;
+const EXPECTED_CHECKS = 2268;
 reachedTheEnd = true;
 if (passed + failed !== EXPECTED_CHECKS) {
   failed++;

@@ -6,6 +6,7 @@ import { PageStamps, interpretSave, shouldKeepAutosaving } from './lib/savePage'
 import { measurePage, verdictForPage } from './lib/pageSize'
 import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, queriesAtom, actionsAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, slotNameOf, slotNameForNodeType, getCanvasBlocks, shapeRoleDataType, currentPageIdAtom, currentPageIsPublishedAtom, pagesListAtom, switchPageFnAtom, isPreviewModeAtom, canvasModeAtom, editingBreakpointAtom, canvasZoomAtom } from './state/atoms'
 import { canWire } from './lib/wireTypes'
+import { workflowsAfterDeleting } from './lib/blockDependents'
 import { summarisePageData, describeWhatWillBeLost, downloadPageData, deletePage } from './lib/pageDelete'
 import { newBlockId, defaultRuntimeForNodeType, defaultAttrsForNodeType, BLOCK_FOOTPRINT, nodeTypeFromBlockId, shortBlockId, isBlockNodeType, withoutVisitorState, portableTypeFromNodeType, nodeTypeFromPortableType, type BlockNodeType } from './lib/blockRegistry'
 import { ButtonBlock } from './blocks/ButtonBlock'
@@ -1671,7 +1672,11 @@ function ContextMenu({ editor, deleteBlock }: { editor: any; deleteBlock: (block
     setConnections(prev => prev.filter(c => c.sourceBlockId !== blockId && c.targetBlockId !== blockId))
     
     // Remove workflows
-    setWorkflows(prev => prev.filter(w => w.sourceId !== blockId && !w.steps.some(step => step.targetId === blockId)))
+    // Not a filter any more: a step's `otherwise` branch could point at this block
+    // too, and neither copy of this line looked at it -- so it kept firing into a
+    // block that was gone. One shared function now, because there were two copies
+    // of this cleanup and that is how two copies drift. See workflowsAfterDeleting.
+    setWorkflows(prev => workflowsAfterDeleting(prev, blockId))
 
     // Trigger save
     triggerSave(prev => prev + 1)
@@ -2494,7 +2499,11 @@ function App() {
 
     // 3. Clean up connections and workflows
     setConnections(prev => prev.filter(c => c.sourceBlockId !== blockId && c.targetBlockId !== blockId))
-    setWorkflows(prev => prev.filter(w => w.sourceId !== blockId && !w.steps.some(step => step.targetId === blockId)))
+    // Not a filter any more: a step's `otherwise` branch could point at this block
+    // too, and neither copy of this line looked at it -- so it kept firing into a
+    // block that was gone. One shared function now, because there were two copies
+    // of this cleanup and that is how two copies drift. See workflowsAfterDeleting.
+    setWorkflows(prev => workflowsAfterDeleting(prev, blockId))
 
     // 4. Clear selection if this block was selected
     if (store.get(selectedBlockIdAtom) === blockId) {

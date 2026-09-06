@@ -51,6 +51,10 @@ const SETTING_WORDS: Record<string, string> = {
 };
 
 const VIA_WORDS: Record<string, string> = {
+  // `hiddenLinks` never sees this one -- a wire is drawn, so it is filtered out
+  // before the words are asked for. `whatBreaksIfDeleted` DOES list drawn
+  // dependencies, and without this the raw tag reached the reader.
+  wire: 'a wire connects them',
   'step:otherwise': 'an otherwise branch changes it',
   'step:condition': 'a condition asks about it',
   'step:condition-formula': 'a condition formula reads it',

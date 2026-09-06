@@ -95,6 +95,17 @@ export function HealthPanel({ onClose }: { onClose: () => void }) {
   }, [blockIds, store, rowCount, pagesList])
 
   const nameOf = (id: string) => {
+    // A question and an action are nodes in the dependency graph but not blocks,
+    // so there is no runtime state to ask. Without this they printed their raw
+    // internal id into a panel whose whole point is words a person can read.
+    if (id.startsWith('query:')) {
+      const q = queries.find((x: any) => `query:${x.id}` === id)
+      return `the question "${q?.name || q?.def?.from || 'unnamed'}"`
+    }
+    if (id.startsWith('action:')) {
+      const a = actions.find((x: any) => `action:${x.id}` === id)
+      return `the action "${a?.name || 'unnamed'}"`
+    }
     const st = store.get(blockRuntimeAtom(id))
     return st?.blockName || slotNameOf(id, st)
   }
