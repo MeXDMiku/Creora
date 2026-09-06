@@ -1215,6 +1215,28 @@ const CONTROLS = [
     with: `    setWorkflows(prev => prev.filter(w => w.sourceId !== blockId && !w.steps.some(step => step.targetId === blockId)))`,
     expect: ['AND APP.TSX HAS NO HAND-ROLLED COPY OF IT LEFT', 'it calls the checked one instead, in both places'],
   },
+
+  // --- the port that was missing, and the default that was absurd -----------
+  {
+    name: 'ports: Live Data loses its input port, so refresh has nowhere to arrive',
+    file: 'src/blocks/DataSourceBlock.tsx',
+    find: `        data-port-input={blockId}`,
+    with: `        data-control-not-a-port={blockId}`,
+    expect: [
+      'THE BLOCKS YOU CANNOT WIRE INTO ARE THE FOUR THAT SHOULD NOT BE',
+      'and Live Data is not one of them any more',
+    ],
+  },
+  {
+    name: 'ports: the default action goes back to adding to a text label',
+    file: 'src/App.tsx',
+    find: `        setAction(holds === 'string' ? 'setText' : holds === 'boolean' ? 'toggle' : 'increment')`,
+    with: `        void holds; setAction('increment')`,
+    expect: [
+      'a target that holds TEXT does not default to adding to it',
+      'a yes or no is flipped',
+    ],
+  },
 ];
 
 /**

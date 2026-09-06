@@ -2473,6 +2473,50 @@ group('ports do not agree on where they sit, which is why the rule above exists'
     }
   }
 
+  /**
+   * A BLOCK YOU CANNOT WIRE INTO, AND THE ACTION THAT AIMED AT IT.
+   *
+   * Live Data had an output port and no input port, so nothing could be wired
+   * INTO it -- while `refreshMode` offered "on a trigger", and an action called
+   * `refresh` was added to carry that out. Reachable and inert twice over, one
+   * level apart, and neither this file nor the type system could see it,
+   * because a missing port is not a wrong value. It took opening the page.
+   *
+   * Four blocks still have no input port and should not: a Formula works its
+   * own value out, an Input is what a visitor types into, and Page value and
+   * Visitor are read from the outside world. The list is written down so that
+   * a fifth one has to be added here on purpose, with a reason.
+   */
+  const NO_INPUT_ON_PURPOSE = [
+    'FormulaDisplayBlock.tsx',   // works its own value out
+    'InputBlock.tsx',            // a visitor types into it
+    'PageValueBlock.tsx',        // comes from the address the page was opened with
+    'VisitorBlock.tsx',          // comes from who is looking
+  ];
+  const withoutInput = readdirSync('src/blocks')
+    .filter(f => f.endsWith('.tsx'))
+    .filter(f => readFileSync(`src/blocks/${f}`, 'utf8').includes('data-port-output'))
+    .filter(f => !readFileSync(`src/blocks/${f}`, 'utf8').includes('data-port-input'))
+    .sort();
+  check('THE BLOCKS YOU CANNOT WIRE INTO ARE THE FOUR THAT SHOULD NOT BE',
+    withoutInput, NO_INPUT_ON_PURPOSE);
+  check('and Live Data is not one of them any more, or `refresh` has nowhere to arrive',
+    readFileSync('src/blocks/DataSourceBlock.tsx', 'utf8').includes('data-port-input'), true);
+
+  /**
+   * AND THE DEFAULT ACTION FOLLOWS WHAT THE TARGET HOLDS.
+   *
+   * Everything that was not a Toggle, a Database or Live Data fell through to
+   * `increment`. Harmless while almost nothing else could be a target -- and
+   * the moment a trigger could reach text, the first thing anybody tries
+   * opened on "When Button 1 is pressed → ADD TO Text Label 1".
+   */
+  const defaults = readFileSync('src/App.tsx', 'utf8');
+  check('a target that holds TEXT does not default to adding to it',
+    /holds === 'string' \? 'setText'/.test(defaults), true);
+  check('a yes or no is flipped', /holds === 'boolean' \? 'toggle'/.test(defaults), true);
+  check('and a number is still added to', /: 'increment'/.test(defaults), true);
+
   check('there are ports to find', ports > 0, true);
   // Both sides non-zero is the whole point: the day this stops being true a
   // transform in the shared rule becomes safe, and not before.
@@ -10051,7 +10095,7 @@ group('what breaks if this block goes');
  * Raise it in the same commit that adds the checks, the way the drift budget
  * above is raised: a number changed where it can be seen in a diff.
  */
-const EXPECTED_CHECKS = 2268;
+const EXPECTED_CHECKS = 2273;
 reachedTheEnd = true;
 if (passed + failed !== EXPECTED_CHECKS) {
   failed++;

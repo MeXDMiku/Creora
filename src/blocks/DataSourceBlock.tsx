@@ -71,6 +71,22 @@ function DataSourceComponent({ node }: NodeViewProps) {
   const isSnapTarget = snapTarget === blockId;
   const showRightPort = (isHovered || !!activeWire || isSnapTarget) && !isPreviewMode;
 
+  /**
+   * AND A LEFT PORT, WITHOUT WHICH `refresh` IS UNREACHABLE.
+   *
+   * This block had an output and no input, so nothing could be wired INTO it.
+   * `refreshMode` has offered 'on a trigger' since the block shipped; the
+   * action that carries it out was added later; and both were still pointless,
+   * because the canvas had nowhere to drop a wire. Reachable-and-inert twice
+   * over, one level apart -- found by opening it in a browser, which is the
+   * only place a missing port is visible at all.
+   *
+   * Shown while a wire is being dragged from somewhere else, the same rule the
+   * other input ports use: hovering it does nothing on its own.
+   */
+  const isWireSource = !!activeWire && activeWire.sourceBlockId === blockId;
+  const showLeftPort = (isHovered || (!!activeWire && !isWireSource)) && !isPreviewMode;
+
   const onOutputPortPointerDown = (e: React.PointerEvent) => {
     e.preventDefault(); e.stopPropagation();
     const container = containerRef.current; if (!container) return;
@@ -112,6 +128,28 @@ function DataSourceComponent({ node }: NodeViewProps) {
         </div>
         <div>{shown}</div>
       </div>
+
+      {/* Left (input) port -- a trigger fires in here and the block fetches again. */}
+      <div
+        contentEditable={false}
+        data-port-input={blockId}
+        title="Something wired into here makes this block react"
+        style={{
+          position: 'absolute',
+          left: '-5px',
+          top: '50%',
+          transform: isSnapTarget ? 'translateY(-50%) scale(1.5)' : 'translateY(-50%)',
+          width: '10px',
+          height: '10px',
+          borderRadius: '50%',
+          backgroundColor: '#22c55e',
+          border: '2px solid white',
+          boxShadow: isSnapTarget ? '0 0 8px 2px #22c55e' : 'none',
+          opacity: showLeftPort ? 1 : 0,
+          pointerEvents: showLeftPort ? 'all' as const : 'none' as const,
+          transition: 'transform 0.15s, box-shadow 0.15s, opacity 0.15s',
+        }}
+      />
 
       {showRightPort && (
         <div

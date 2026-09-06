@@ -542,6 +542,21 @@ function ConnectionPopup({ editor }: { editor: any }) {
       }
       editor.getJSON().content?.forEach(traverse)
 
+      /**
+       * THE DEFAULT ACTION FOLLOWS WHAT THE TARGET HOLDS.
+       *
+       * Everything that was not a Toggle, a Database or Live Data fell through
+       * to `increment`, and until today almost nothing else could be a target,
+       * so it was never wrong out loud. Then a trigger became able to reach
+       * text, and the first thing anybody tries -- "when the button is pressed,
+       * set the words" -- opened on "When Button 1 is pressed → ADD TO Text
+       * Label 1". Adding to a text label is not a thing.
+       *
+       * So the last branch asks the type rather than guessing: text is set,
+       * a yes/no is flipped, a number is added to. Found by dragging the wire
+       * in a browser; no check would have called this wrong, because it is not
+       * wrong, only absurd.
+       */
       if (type === 'toggleBlock') {
         setAction('toggle')
       } else if (type === 'databaseBlock') {
@@ -550,7 +565,8 @@ function ConnectionPopup({ editor }: { editor: any }) {
         // The only thing anybody wires INTO live data is "go and get it again".
         setAction('refresh')
       } else {
-        setAction('increment')
+        const holds = getBlockDataType(type || '')
+        setAction(holds === 'string' ? 'setText' : holds === 'boolean' ? 'toggle' : 'increment')
       }
     }
   }, [pending, editor])
