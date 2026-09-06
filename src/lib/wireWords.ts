@@ -82,6 +82,9 @@ const ACTION_WORDS: Record<string, string> = {
   sendWebhook: 'send',
   goToPage: 'go to',
   openUrl: 'open',
+  // The one action that reaches the STORE, and the one with no words for two
+  // months: every wire that ran a compiled action read back "-> runAction X".
+  runAction: 'run',
   validate: 'check the rules on',
   setLoading: 'show as busy',
   clearLoading: 'stop showing as busy',

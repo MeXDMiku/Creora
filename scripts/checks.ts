@@ -6479,13 +6479,12 @@ group('this audit still describes the product');
 
   // The workflow actions come from a type union, so they are read from source.
   const creoraTypes = readFileSync('src/types/creora.ts', 'utf8');
-  const actionSlice = creoraTypes.slice(
-    creoraTypes.indexOf('  action:'),
-    // The union's last member IS the end marker, so it moves whenever an
-    // action is added. It moved once already, to 'refresh', and the check
-    // below is what noticed.
-    creoraTypes.indexOf("| 'refresh';") + 20,
-  );
+  // The end marker used to be the union's LAST MEMBER spelled out, which moves
+  // every time an action is added -- it moved once already, to 'refresh', and
+  // broke this check on the way. A quote followed straight by a semicolon occurs
+  // once in the union, at its end, whatever the last member happens to be called.
+  const actionStart = creoraTypes.indexOf('  action:');
+  const actionSlice = creoraTypes.slice(actionStart, creoraTypes.indexOf("';", actionStart) + 2);
   const actionCount = new Set(Array.from(actionSlice.matchAll(/'([a-zA-Z]+)'/g)).map(m => m[1])).size;
   check('the action slice was actually found, or the count below proves nothing',
     actionCount > 10, true);
@@ -9701,10 +9700,12 @@ group('what may be wired into what');
 
   check('a source nobody has typed refuses', canWire('unknown', 'number').ok, false);
   check('and says it was the giving end it could not name',
-    String(canWire('unknown', 'number').reason).includes('gives'), true);
+    canWire('unknown', 'number').reason,
+    'That block has not been told what kind of value it gives yet.');
   check('a target nobody has typed refuses too', canWire('number', 'unknown').ok, false);
   check('and says it was the holding end',
-    String(canWire('number', 'unknown').reason).includes('holds'), true);
+    canWire('number', 'unknown').reason,
+    'That block has not been told what kind of value it holds yet.');
   check('TWO UNKNOWNS ARE NOT A MATCH, they are two questions',
     canWire('unknown', 'unknown').ok, false);
 
@@ -9725,12 +9726,49 @@ group('what may be wired into what');
    */
   check('A BUTTON MAY NOW REACH LIVE DATA, which reports unknown',
     canWire('trigger', 'unknown').ok, true);
-  check('refresh has words of its own', actionWords('refresh'), 'refresh');
+  // `actionWords` falls back to the action's own name, and this action is CALLED
+  // 'refresh' -- so asking it for the words cannot tell the two apart. Ask the map.
+  check('refresh has words of its own, rather than falling through to its name',
+    /^\s*refresh:/m.test(readFileSync('src/lib/wireWords.ts', 'utf8')), true);
   check('and reads as a whole sentence',
     wireSentence({ sourceName: 'Reload', targetName: 'Prices', event: 'onClick', action: 'refresh' }),
     'When Reload is pressed → refresh Prices');
   check('an unknown action still falls back to its own name rather than a blank',
     actionWords('nonsenseAction'), 'nonsenseAction');
+}
+
+/**
+ * EVERY ACTION THE UNION OFFERS IS ONE THE ENGINE CARRIES OUT.
+ *
+ * `refresh` was the second half of a bug whose first half had shipped months
+ * earlier: `refreshMode` offered 'on a trigger' from the day Live Data shipped,
+ * and nothing anywhere ran it. The setting was reachable and inert, and nothing
+ * in this file noticed -- because nothing in this file had ever compared the
+ * list of actions against the code that carries them out.
+ *
+ * Three lists have to agree, and each disagreement is its own kind of broken:
+ *   in the union, not in the engine     the user can say it and nothing happens
+ *   in the union, not in wireWords      the wire reads back with a code word in it
+ *
+ * This is the check that makes the NEXT one of those impossible to ship, which
+ * is worth more than the one it was written for.
+ */
+group('every action the union offers is one the engine carries out');
+{
+  const types = readFileSync('src/types/creora.ts', 'utf8');
+  const start = types.indexOf('  action:');
+  const union = types.slice(start, types.indexOf("';", start) + 2);
+  const actions = Array.from(new Set(Array.from(union.matchAll(/'([a-zA-Z]+)'/g)).map(m => m[1])));
+  const engine = readFileSync('src/lib/bindingEngine.ts', 'utf8');
+  const words = readFileSync('src/lib/wireWords.ts', 'utf8');
+
+  // Without this, an empty slice would make both lists below empty and the
+  // group would pass by finding nothing at all.
+  check('the union was found, or neither list below proves anything', actions.length > 10, true);
+  check('AND EVERY ONE OF THEM HAS A CASE IN THE ENGINE',
+    actions.filter(a => !new RegExp(`case '${a}'`).test(engine)), []);
+  check('and words of its own, so no wire reads back as a code word',
+    actions.filter(a => !new RegExp(`^\\s*${a}:`, 'm').test(words)), []);
 }
 
 /**
@@ -9794,7 +9832,7 @@ group('the two graphs a page has');
   const links = hiddenLinks(page);
   check('ONE ROW PER PAIR, however many reasons there are', links.length, 2);
   check('and the wire is not among them, because it is on screen',
-    links.some(l => l.from === A && l.to === B && l.reasons.includes('a formula reads it')), true);
+    links.find(l => l.from === A && l.to === B)?.reasons, ['a formula reads it']);
   check('a setting is named in words, not in field names',
     links.find(l => l.to === C)?.reasons, ['that block shows it']);
   check('two reasons for one pair are merged into one row',
@@ -9803,8 +9841,15 @@ group('the two graphs a page has');
       formulas: [{ targetBlockId: C, formula: `${A} + 1` }],
     }).find(l => l.from === A && l.to === C)?.reasons,
     ['a formula reads it', 'that block shows it']);
-  check('the order is stable, so two runs can be compared',
-    JSON.stringify(hiddenLinks(page)), JSON.stringify(hiddenLinks(page)));
+  const outOfOrder = hiddenLinks({
+    ...page,
+    // B>C is found first (formulas are walked before settings) and must come back second.
+    formulas: [{ targetBlockId: C, formula: `${B} + 1` }],
+  }).map(l => `${l.from}>${l.to}`);
+  check('the order is by pair, so two runs line up rather than merely agreeing',
+    outOfOrder, [...outOfOrder].sort());
+  check('and it really was found in the other order, or the line above proves nothing',
+    outOfOrder[0].startsWith(A), true);
   check('a reason nobody wrote words for looks unfinished rather than vague',
     reasonWords('setting:someNewField'), 'a setting (someNewField) points at it');
   check('and an entirely unknown reason is passed through, not swallowed',
@@ -9829,7 +9874,7 @@ group('the two graphs a page has');
  * Raise it in the same commit that adds the checks, the way the drift budget
  * above is raised: a number changed where it can be seen in a diff.
  */
-const EXPECTED_CHECKS = 2228;
+const EXPECTED_CHECKS = 2232;
 reachedTheEnd = true;
 if (passed + failed !== EXPECTED_CHECKS) {
   failed++;
