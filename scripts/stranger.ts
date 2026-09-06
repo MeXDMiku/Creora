@@ -118,9 +118,18 @@ const { url, key, target } = (() => { try { return credentials(); } catch (e) { 
 // argument for not hand-rolling the client, and a good reminder that "access denied"
 // and "you asked wrongly" are different facts that arrive as the same status code.
 const isJwt = key.startsWith('ey');
-const H: Record<string, string> = isJwt
-  ? { apikey: key, Authorization: `Bearer ${key}` }
-  : { apikey: key };
+
+// NEW KEYS NEED BEARER TOO — ASK, DON'T GUESS.
+//
+// LOG: a live test against a WORKING project (its app runs fine on this key) showed that
+// apikey-only returns 401, while supabase-js — which also sends `Authorization: Bearer` —
+// succeeds. The earlier "fix" that dropped Bearer for sb_publishable_ keys was never
+// re-run, and it is wrong: on such a project this file would falsely report "could not
+// reach the backend". So we no longer guess. We try apikey alone; if the backend refuses,
+// we retry WITH Bearer and keep whichever it accepts. Correct for both key regimes.
+let useBearer = isJwt;
+const H = (): Record<string, string> =>
+  useBearer ? { apikey: key, Authorization: `Bearer ${key}` } : { apikey: key };
 
 /** Turn whatever came back into something a person can read. Never "[object Object]". */
 function readable(body: any): string {
@@ -138,7 +147,7 @@ function readable(body: any): string {
 
 async function GET(path: string) {
   try {
-    const r = await fetch(`${url}/rest/v1/${path}`, { headers: H });
+    const r = await fetch(`${url}/rest/v1/${path}`, { headers: H() });
     const text = await r.text();
     let body: any = text;
     try { body = JSON.parse(text); } catch { /* not json */ }
@@ -155,7 +164,11 @@ const add = (severity: Finding['severity'], what: string, detail: string) =>
 console.log(`\n  arriving as a total stranger at ${target},\n  with only the key that frontend already ships to every visitor\n`);
 
 // --- what tables even exist? ------------------------------------------------
-const spec = await GET('');
+let spec = await GET('');
+if (!spec.ok && (spec.status === 401 || spec.status === 403) && !useBearer) {
+  useBearer = true;         // apikey alone was refused; the new keys want Bearer as well.
+  spec = await GET('');
+}
 if (!spec.ok) {
   console.log(`  Could not reach the backend — HTTP ${spec.status || 'no response'}`);
   console.log(`  It said: ${readable(spec.body)}`);

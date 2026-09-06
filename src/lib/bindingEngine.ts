@@ -1300,6 +1300,18 @@ export function executeWorkflow(
           store.set(targetAtom, { ...currentTargetState, disabled: false });
           break;
         }
+        /**
+         * Imported dynamically ON PURPOSE. dataSource.ts already imports this
+         * file -- it re-runs formulas and fires onChange once a fetch lands --
+         * so a static import here would close a cycle. Nothing is awaited: a
+         * refresh is fire-and-forget, exactly as it is on load and on an
+         * interval, and `fetchDataSource` returns immediately when no URL is
+         * set rather than reaching the network.
+         */
+        case 'refresh': {
+          void import('./dataSource').then((m) => m.fetchDataSource(step.targetId, store));
+          break;
+        }
         case 'setVisible': {
           store.set(targetAtom, {
             ...currentTargetState,

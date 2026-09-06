@@ -87,6 +87,7 @@ const ACTION_WORDS: Record<string, string> = {
   clearLoading: 'stop showing as busy',
   setDisabled: 'switch off',
   setEnabled: 'switch on',
+  refresh: 'refresh',
 };
 
 export function actionWords(action: string | null | undefined): string {

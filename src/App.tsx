@@ -5,6 +5,7 @@ import { useSetAtom, useAtom, useAtomValue, useStore } from 'jotai'
 import { PageStamps, interpretSave, shouldKeepAutosaving } from './lib/savePage'
 import { measurePage, verdictForPage } from './lib/pageSize'
 import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, queriesAtom, actionsAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, slotNameOf, slotNameForNodeType, getCanvasBlocks, shapeRoleDataType, currentPageIdAtom, currentPageIsPublishedAtom, pagesListAtom, switchPageFnAtom, isPreviewModeAtom, canvasModeAtom, editingBreakpointAtom, canvasZoomAtom } from './state/atoms'
+import { canWire } from './lib/wireTypes'
 import { summarisePageData, describeWhatWillBeLost, downloadPageData, deletePage } from './lib/pageDelete'
 import { newBlockId, defaultRuntimeForNodeType, defaultAttrsForNodeType, BLOCK_FOOTPRINT, nodeTypeFromBlockId, shortBlockId, isBlockNodeType, withoutVisitorState, portableTypeFromNodeType, nodeTypeFromPortableType, type BlockNodeType } from './lib/blockRegistry'
 import { ButtonBlock } from './blocks/ButtonBlock'
@@ -461,6 +462,7 @@ function ConnectionPopup({ editor }: { editor: any }) {
 
   const isToggleBlock = targetNodeType === 'toggleBlock'
   const isDatabaseBlock = targetNodeType === 'databaseBlock'
+  const isDataSourceBlock = targetNodeType === 'dataSourceBlock'
   const targetState = pending ? store.get(blockRuntimeAtom(pending.targetBlockId)) : null
   const sourceState = pending ? store.get(blockRuntimeAtom(pending.sourceBlockId)) : null
 
@@ -543,6 +545,9 @@ function ConnectionPopup({ editor }: { editor: any }) {
         setAction('toggle')
       } else if (type === 'databaseBlock') {
         setAction('addRow')
+      } else if (type === 'dataSourceBlock') {
+        // The only thing anybody wires INTO live data is "go and get it again".
+        setAction('refresh')
       } else {
         setAction('increment')
       }
@@ -897,6 +902,16 @@ function ConnectionPopup({ editor }: { editor: any }) {
               <option value="turnOff">Turn Off</option>
               <option value="toggle">Toggle</option>
               <option value="reset">Reset</option>
+            </>
+          ) : isDataSourceBlock ? (
+            <>
+              <option value="refresh">Fetch it again now</option>
+              <option value="setVisible">Show it</option>
+              <option value="setHidden">Hide it</option>
+              <optgroup label="Going somewhere">
+                <option value="goToPage">Go to another page</option>
+                <option value="openUrl">Open a web address</option>
+              </optgroup>
             </>
           ) : isDatabaseBlock ? (
             <>
@@ -3105,22 +3120,30 @@ function App() {
           }
         }
 
-        // Check if types are compatible
-        let isCompatible = false
-        if (sourceDataType === 'string' && targetDataType === 'string') isCompatible = true
-        else if (sourceDataType === 'number' && targetDataType === 'number') isCompatible = true
-        else if (sourceDataType === 'boolean' && targetDataType === 'boolean') isCompatible = true
-        else if (sourceDataType === 'trigger' && targetDataType === 'number') isCompatible = true
-        else if (sourceDataType === 'trigger' && targetDataType === 'boolean') isCompatible = true
-        else if (sourceDataType === 'trigger' && targetDataType === 'database') isCompatible = true
+        /**
+         * A Visitor block's type depends on which field it was pointed at:
+         * "signed in" is a yes/no, the rest are text. Same shape as the
+         * Database resolution above -- and without it a Visitor block reports
+         * `unknown` for ever and can never be wired out of at all.
+         */
+        if (sourceNodeType === 'visitorBlock') {
+          const vf = store.get(blockRuntimeAtom(activeWire.sourceBlockId))?.visitorField
+          sourceDataType = vf === 'signedIn' ? 'boolean' : 'string'
+        }
+        if (targetNodeType === 'visitorBlock') {
+          const vf = store.get(blockRuntimeAtom(droppedOnBlockId!))?.visitorField
+          targetDataType = vf === 'signedIn' ? 'boolean' : 'string'
+        }
 
-        if (!isCompatible) {
-          const srcLbl = sourceDataType === 'string' ? 'text' : sourceDataType
-          const tgtLbl = targetDataType === 'string' ? 'text' : targetDataType
+        // The whole rule is in src/lib/wireTypes.ts now: one place to read it,
+        // and somewhere a check can reach it.
+        const verdict = canWire(sourceDataType, targetDataType)
+
+        if (!verdict.ok) {
           setTypeMismatch({
             x: targetPortX,
             y: targetPortY,
-            message: `Type mismatch: ${srcLbl} cannot connect to a ${tgtLbl}`
+            message: verdict.reason || 'These two cannot be wired together.'
           })
           if (mismatchTimeoutRef.current) {
             clearTimeout(mismatchTimeoutRef.current)

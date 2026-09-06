@@ -23,6 +23,9 @@ import { diagnosePage, sortProblems, referencedIds } from '../src/lib/diagnose';
 import { guessMappings, matchScore, normaliseName, whyItCannotWork, draftFromWorkflow, defaultWireDraft } from '../src/lib/connectionDraft';
 import { clampZoom, stepZoom, zoomToFit, zoomLabel, contentExtent, toCanvasPoint, MIN_ZOOM, MAX_ZOOM } from '../src/lib/zoom';
 import { wireSentence, actionWords, eventWords, outputMeaning, PORT_OUT_HINT, PORT_IN_HINT } from '../src/lib/wireWords';
+import { canWire, typeWords } from '../src/lib/wireTypes';
+import { edgesOf, blocksOf } from '../src/lib/pageGraph';
+import { hiddenLinks, reasonWords } from '../src/lib/hiddenEdges';
 import {
   resolveLayout,
   layoutPage,
@@ -6478,7 +6481,10 @@ group('this audit still describes the product');
   const creoraTypes = readFileSync('src/types/creora.ts', 'utf8');
   const actionSlice = creoraTypes.slice(
     creoraTypes.indexOf('  action:'),
-    creoraTypes.indexOf("| 'setEnabled';") + 20,
+    // The union's last member IS the end marker, so it moves whenever an
+    // action is added. It moved once already, to 'refresh', and the check
+    // below is what noticed.
+    creoraTypes.indexOf("| 'refresh';") + 20,
   );
   const actionCount = new Set(Array.from(actionSlice.matchAll(/'([a-zA-Z]+)'/g)).map(m => m[1])).size;
   check('the action slice was actually found, or the count below proves nothing',
@@ -9661,6 +9667,152 @@ group('a slot can contain a slot');
 }
 
 /**
+ * WHAT MAY BE WIRED INTO WHAT.
+ *
+ * This rule had no checks at all. It lived as a six-branch `if` chain inside a
+ * 4,500-line pointer handler in App.tsx, where nothing could reach it, and
+ * `grep isCompatible scripts/checks.ts` came back empty -- in a suite of two
+ * thousand checks, the mechanism deciding which connections are expressible at
+ * all was the untested one.
+ *
+ * The first four below are the refusals that were WRONG. A trigger hands over
+ * no value, so there is nothing to fit; the old chain listed three targets it
+ * was allowed to reach and refused the rest, which meant Button -> Text Label
+ * -- "when pressed, set the words" -- was rejected by the type system.
+ */
+group('what may be wired into what');
+{
+  check('A TRIGGER MAY FIRE INTO TEXT, which "when pressed, set the words" needs',
+    canWire('trigger', 'string').ok, true);
+  check('and into a block whose type nobody has worked out, which six of seventeen are',
+    canWire('trigger', 'unknown').ok, true);
+  check('and into another trigger', canWire('trigger', 'trigger').ok, true);
+  check('and into a table, as it always could', canWire('trigger', 'database').ok, true);
+
+  check('text still fits where text is held', canWire('string', 'string').ok, true);
+  check('a number still fits a number', canWire('number', 'number').ok, true);
+  check('a yes or no still fits a yes or no', canWire('boolean', 'boolean').ok, true);
+  check('a trigger still fits a number', canWire('trigger', 'number').ok, true);
+
+  check('A NUMBER DOES NOT FIT WHERE TEXT IS HELD', canWire('number', 'string').ok, false);
+  check('nor text where a number is', canWire('string', 'number').ok, false);
+  check('nor a whole table where a number is', canWire('database', 'number').ok, false);
+  check('nor a yes or no where text is', canWire('boolean', 'string').ok, false);
+
+  check('a source nobody has typed refuses', canWire('unknown', 'number').ok, false);
+  check('and says it was the giving end it could not name',
+    String(canWire('unknown', 'number').reason).includes('gives'), true);
+  check('a target nobody has typed refuses too', canWire('number', 'unknown').ok, false);
+  check('and says it was the holding end',
+    String(canWire('number', 'unknown').reason).includes('holds'), true);
+  check('TWO UNKNOWNS ARE NOT A MATCH, they are two questions',
+    canWire('unknown', 'unknown').ok, false);
+
+  check('every refusal carries a reason a person can read',
+    canWire('number', 'string').reason !== null, true);
+  check('and nothing that passes carries one', canWire('number', 'number').reason, null);
+  check('the words are the product\'s, never the internal name',
+    typeWords('string'), 'text');
+
+  /**
+   * REFRESH, THE ACTION THAT WAS MISSING UNDER A SETTING THAT EXISTED.
+   *
+   * `refreshMode` offered 'trigger' from the day Live Data shipped and nothing
+   * implemented it, so the mode was reachable and inert. It is now an action,
+   * which is also why the wire above had to become legal first: a trigger
+   * could not reach a Live Data block at all, because that block reports
+   * `unknown`.
+   */
+  check('A BUTTON MAY NOW REACH LIVE DATA, which reports unknown',
+    canWire('trigger', 'unknown').ok, true);
+  check('refresh has words of its own', actionWords('refresh'), 'refresh');
+  check('and reads as a whole sentence',
+    wireSentence({ sourceName: 'Reload', targetName: 'Prices', event: 'onClick', action: 'refresh' }),
+    'When Reload is pressed → refresh Prices');
+  check('an unknown action still falls back to its own name rather than a blank',
+    actionWords('nonsenseAction'), 'nonsenseAction');
+}
+
+/**
+ * THE TWO GRAPHS A PAGE HAS, AND THE ONE NOBODY DRAWS.
+ *
+ * `edgesOf` is where the claim that two thirds of a page's dependencies are
+ * invisible comes from -- and it had no checks at all, in the same way the wire
+ * rule had none. A measurement nothing runs is a number somebody typed once.
+ *
+ * The page below is deliberately tiny and every edge in it is known by hand: one
+ * wire, which is drawn, and two dependencies that are real and draw nothing.
+ */
+group('the two graphs a page has');
+{
+  const A = 'inputBlock__aaaa1';
+  const B = 'numberDisplayBlock__bbbb2';
+  const C = 'listBlock__cccc3';
+  const page = {
+    runtimeStates: { [A]: {}, [B]: {}, [C]: { trackedBlockId: A } },
+    positions: {},
+    documentContent: { content: [] },
+    connections: [{ sourceBlockId: A, targetBlockId: B }],
+    formulas: [{ targetBlockId: B, formula: `${A} + 1` }],
+    workflows: [],
+    queries: [],
+    actions: [],
+  };
+  const edges = edgesOf(page);
+  const key = (e: any) => `${e.from}>${e.to}`;
+  const drawn = edges.filter((e: any) => e.drawn).map(key);
+  const hidden = edges.filter((e: any) => !e.drawn);
+
+  check('every block is found, whatever it was listed in', blocksOf(page).size, 3);
+  check('THE WIRE IS THE ONLY THING DRAWN', drawn, [`${A}>${B}`]);
+  check('a formula depends on a block and draws nothing',
+    hidden.some((e: any) => e.via === 'formula' && e.from === A && e.to === B), true);
+  check('and so does a block reading another through its own settings',
+    hidden.some((e: any) => e.via === 'setting:trackedBlockId' && e.from === A && e.to === C), true);
+  check('SO THE REAL GRAPH IS BIGGER THAN THE DRAWN ONE', edges.length > drawn.length, true);
+  check('and every hidden edge says why it exists',
+    hidden.every((e: any) => typeof e.via === 'string' && e.via.length > 0), true);
+
+  // The two refusals, which stop the count being flattered by nonsense.
+  const selfWired = edgesOf({ ...page, connections: [{ sourceBlockId: A, targetBlockId: A }] });
+  check('A BLOCK DOES NOT DEPEND ON ITSELF',
+    selfWired.some((e: any) => e.from === A && e.to === A && e.via === 'wire'), false);
+  const ghost = edgesOf({ ...page, connections: [{ sourceBlockId: A, targetBlockId: 'noSuchBlock__zzz' }] });
+  check('nor on a block that is not on the page',
+    ghost.some((e: any) => e.to === 'noSuchBlock__zzz'), false);
+
+  check('an empty page has no edges and does not throw', edgesOf({}).length, 0);
+
+  /**
+   * THE SAME DEPENDENCIES, WRITTEN SO A PERSON CAN READ THEM.
+   *
+   * One row per PAIR, not per reason: a block can depend on another four
+   * different ways, and printing that four times makes a short list look like
+   * a crisis. And the reason in words -- `setting:trackedBlockId` is not a
+   * sentence.
+   */
+  const links = hiddenLinks(page);
+  check('ONE ROW PER PAIR, however many reasons there are', links.length, 2);
+  check('and the wire is not among them, because it is on screen',
+    links.some(l => l.from === A && l.to === B && l.reasons.includes('a formula reads it')), true);
+  check('a setting is named in words, not in field names',
+    links.find(l => l.to === C)?.reasons, ['that block shows it']);
+  check('two reasons for one pair are merged into one row',
+    hiddenLinks({
+      ...page,
+      formulas: [{ targetBlockId: C, formula: `${A} + 1` }],
+    }).find(l => l.from === A && l.to === C)?.reasons,
+    ['a formula reads it', 'that block shows it']);
+  check('the order is stable, so two runs can be compared',
+    JSON.stringify(hiddenLinks(page)), JSON.stringify(hiddenLinks(page)));
+  check('a reason nobody wrote words for looks unfinished rather than vague',
+    reasonWords('setting:someNewField'), 'a setting (someNewField) points at it');
+  check('and an entirely unknown reason is passed through, not swallowed',
+    reasonWords('somethingElse'), 'somethingElse');
+  check('an empty page has nothing hidden', hiddenLinks({}).length, 0);
+}
+
+/**
  * HOW MANY CHECKS THERE ARE, WRITTEN DOWN.
  *
  * Not a vanity number. Two runs an hour apart reported 1737 and 1736 with
@@ -9677,7 +9829,7 @@ group('a slot can contain a slot');
  * Raise it in the same commit that adds the checks, the way the drift budget
  * above is raised: a number changed where it can be seen in a diff.
  */
-const EXPECTED_CHECKS = 2187;
+const EXPECTED_CHECKS = 2228;
 reachedTheEnd = true;
 if (passed + failed !== EXPECTED_CHECKS) {
   failed++;

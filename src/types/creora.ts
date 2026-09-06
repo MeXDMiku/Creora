@@ -93,7 +93,28 @@ export interface WorkflowStep {
     | 'runAction'
     | 'validate'
     | 'setLoading' | 'clearLoading'
-    | 'setDisabled' | 'setEnabled';
+    | 'setDisabled' | 'setEnabled'
+    /**
+     * FETCH A LIVE DATA BLOCK AGAIN, NOW.
+     *
+     * `refreshMode` has offered three settings since Live Data shipped --
+     * on load, on an interval, and on a trigger -- and DataSourceBlock
+     * implemented the first two. There was no third branch and no action that
+     * could stand in for one, so choosing "when something fires into it" set a
+     * mode nothing could ever fire: a setting that did nothing, silently,
+     * which is the exact shape of bug the rest of this file exists to prevent.
+     *
+     * Nothing needed to change in the block. Its effect already declines to
+     * fetch unless the mode is on-load or on-interval, so the trigger setting
+     * already meant "do not fetch on your own" correctly. What was missing was
+     * any way to fire it.
+     *
+     * NOTE FOR THE NEXT PERSON: the audit check in scripts/checks.ts counts
+     * single-quoted words in this union to work out how many actions there
+     * are. Write comment prose in backticks or plain words, never in single
+     * quotes, or the count silently gains members that are not actions.
+     */
+    | 'refresh';
   amount?: number;
   value?: any;
   /** A single condition. Kept because every page saved before conditions[] uses it. */
