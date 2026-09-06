@@ -759,7 +759,7 @@ const CONTROLS = [
     file: 'src/lib/query.ts',
     find: `  const { value: v, error } = rowFormulaValue(row, text, { pageValues: page, tables });`,
     with: `  const { value: v, error } = rowFormulaValue({}, text, { pageValues: { ...page, ...row }, tables });`,
-    expect: ['A QUESTION KNOWS WHICH ROW IT IS STANDING IN', 'so a feed can be ordered by a count'],
+    expect: ['A QUESTION KNOWS WHICH ROW IT IS STANDING IN'],
   },
   {
     // WENT STALE ONCE, and the tool said so rather than passing. value() used
@@ -884,16 +884,226 @@ const CONTROLS = [
   {
     name: 'actions: a page-supplied price stops being warned about',
     file: 'src/lib/actions.ts',
-    find: `        if (origin.fromPage.length && !origin.anyTrusted) {`,
+    // The condition gained `!onlyCheckedKeys` when a key looked up in an earlier
+    // step stopped counting as page-supplied. The control has to follow it, or it
+    // silently stops testing anything -- which is what it did.
+    find: `        if (origin.fromPage.length && !origin.anyTrusted && !onlyCheckedKeys) {`,
     with: `        if (false) {`,
     expect: ['A PRICE THE PAGE SENT IS WARNED ABOUT'],
   },
   {
     name: 'actions: a delete with no where stops being warned about',
     file: 'src/lib/actions.ts',
-    find: `      out.push(\`\${at}: this removes EVERY row in \${step.table}. Say which ones.\`);`,
-    with: `      // control: silent`,
+    // The sentence gained a verb, and a branch in front of it, when an unfinished
+    // step stopped being warned about as if it would delete everything.
+    find: `    } else if (writesRows && !String(step.where ?? '').trim()) {`,
+    with: `    } else if (false) { // control: silent about a missing where`,
     expect: ['A DELETE WITH NO WHERE IS WARNED ABOUT'],
+  },
+
+  /**
+   * THE FOUR THINGS ADDED IN THE COMMIT THAT MADE THE ENGINE'S OWN RULES
+   * READABLE. Every one of them arrived with checks and none with controls,
+   * which is the same hole those checks were written to close, one level up.
+   *
+   * Writing these found four checks that could not fail: two matched a word
+   * that also appears in the fallback sentence, one asked `actionWords` about
+   * an action whose NAME is the answer, and one compared a function to itself.
+   * All four are stronger now. That is what this file is for.
+   */
+
+  // --- what may be wired into what ------------------------------------------
+  {
+    name: 'wire: a trigger goes back to carrying a value, so it must match',
+    file: 'src/lib/wireTypes.ts',
+    find: `  if (source === 'trigger') return { ok: true, reason: null };`,
+    with: `  // control: a trigger carries a value after all`,
+    expect: [
+      'A TRIGGER MAY FIRE INTO TEXT',
+      'and into a block whose type nobody has worked out',
+      'and into a table, as it always could',
+      'a trigger still fits a number',
+      'A BUTTON MAY NOW REACH LIVE DATA',
+    ],
+  },
+  {
+    name: 'wire: an unnamed SOURCE stops being refused by name',
+    file: 'src/lib/wireTypes.ts',
+    find: `  if (source === 'unknown')
+    return { ok: false, reason: 'That block has not been told what kind of value it gives yet.' };`,
+    with: `  // control: an unnamed source falls through`,
+    // It still refuses -- by the mismatch rule, with the WRONG sentence. That
+    // is exactly why the check now compares the whole sentence.
+    expect: ['and says it was the giving end it could not name'],
+  },
+  {
+    name: 'wire: an unnamed TARGET stops being refused by name',
+    file: 'src/lib/wireTypes.ts',
+    find: `  if (target === 'unknown')
+    return { ok: false, reason: 'That block has not been told what kind of value it holds yet.' };`,
+    with: `  // control: an unnamed target falls through`,
+    expect: ['and says it was the holding end'],
+  },
+  {
+    name: 'wire: nothing matches itself any more',
+    file: 'src/lib/wireTypes.ts',
+    find: `  if (source === target) return { ok: true, reason: null };`,
+    with: `  // control: sameness is not a match`,
+    expect: [
+      'text still fits where text is held',
+      'a number still fits a number',
+      'a yes or no still fits a yes or no',
+      'and nothing that passes carries one',
+    ],
+  },
+  {
+    name: 'wire: the last refusal turns into a pass, so anything fits anything',
+    file: 'src/lib/wireTypes.ts',
+    find: `  return {
+    ok: false,
+    reason: \`This gives \${typeWords(source)}, and that holds \${typeWords(target)}.\`,
+  };`,
+    with: `  return { ok: true, reason: null }; // control: anything fits anything`,
+    expect: [
+      'A NUMBER DOES NOT FIT WHERE TEXT IS HELD',
+      'nor text where a number is',
+      'nor a whole table where a number is',
+      'nor a yes or no where text is',
+      'every refusal carries a reason a person can read',
+    ],
+  },
+  {
+    name: 'wire: the refusal names the internal type instead of the product word',
+    file: 'src/lib/wireTypes.ts',
+    find: `    case 'string': return 'text';`,
+    with: `    case 'string': return 'string'; // control: the internal name`,
+    expect: ['the words are the product'],
+  },
+
+  // --- refresh, and the list that says it is carried out ---------------------
+  {
+    name: 'refresh: the words are removed, so the wire reads back as a code word',
+    file: 'src/lib/wireWords.ts',
+    find: `  refresh: 'refresh',`,
+    with: `  // control: no words for refresh`,
+    expect: [
+      'refresh has words of its own',
+      'and words of its own, so no wire reads back as a code word',
+    ],
+  },
+  {
+    name: 'refresh: runAction loses its words again, which is how it shipped',
+    file: 'src/lib/wireWords.ts',
+    find: `  runAction: 'run',`,
+    with: `  // control: no words for runAction`,
+    expect: ['and words of its own, so no wire reads back as a code word'],
+  },
+  {
+    name: 'refresh: the engine stops carrying it out, so the setting is inert again',
+    file: 'src/lib/bindingEngine.ts',
+    find: `        case 'refresh': {
+          void import('./dataSource').then((m) => m.fetchDataSource(step.targetId, store));
+          break;
+        }`,
+    with: `        // control: refresh is offered and does nothing`,
+    expect: ['AND EVERY ONE OF THEM HAS A CASE IN THE ENGINE'],
+  },
+
+  // --- the two graphs a page has --------------------------------------------
+  {
+    name: 'graph: a wire stops counting as drawn, so nothing is on screen',
+    file: 'src/lib/pageGraph.ts',
+    find: `  for (const c of page.connections ?? []) add(c?.sourceBlockId, c?.targetBlockId, 'wire', true);`,
+    with: `  for (const c of page.connections ?? []) add(c?.sourceBlockId, c?.targetBlockId, 'wire', false);`,
+    expect: ['THE WIRE IS THE ONLY THING DRAWN', 'and the wire is not among them'],
+  },
+  {
+    name: 'graph: a block is allowed to depend on itself',
+    file: 'src/lib/pageGraph.ts',
+    find: `    if (!from || !to || from === to) return;`,
+    with: `    if (!from || !to) return; // control: self-edges allowed`,
+    expect: ['A BLOCK DOES NOT DEPEND ON ITSELF'],
+  },
+  {
+    name: 'graph: an endpoint that is not on the page is kept',
+    file: 'src/lib/pageGraph.ts',
+    find: `    if (!blocks.has(from) || !blocks.has(to)) return;`,
+    with: `    // control: off-page endpoints are kept`,
+    expect: ['nor on a block that is not on the page'],
+  },
+  {
+    name: 'graph: a formula stops being a dependency at all',
+    file: 'src/lib/pageGraph.ts',
+    find: `    for (const id of referencedIds(f?.formula)) add(id, f?.targetBlockId, 'formula', false);`,
+    with: `    void f; // control: formulas depend on nothing`,
+    expect: [
+      'a formula depends on a block and draws nothing',
+      'ONE ROW PER PAIR',
+      'and the wire is not among them',
+      'two reasons for one pair are merged into one row',
+    ],
+  },
+  {
+    name: 'graph: runtime states stop being a place blocks are listed',
+    file: 'src/lib/pageGraph.ts',
+    find: `  for (const id of Object.keys(page.runtimeStates ?? {})) ids.add(id);`,
+    with: `  // control: runtime states list no blocks`,
+    expect: ['every block is found, whatever it was listed in'],
+  },
+  {
+    name: 'graph: a block reading another through its settings stops counting',
+    file: 'src/lib/pageGraph.ts',
+    find: `      if (isBlockId(state?.[field], blocks)) add(state[field], id, \`setting:\${field}\`, false);`,
+    with: `      void field; // control: settings point at nothing`,
+    expect: [
+      'and so does a block reading another through its own settings',
+      'a setting is named in words, not in field names',
+      'ONE ROW PER PAIR',
+    ],
+  },
+
+  // --- the same dependencies, written for a person --------------------------
+  {
+    name: 'hidden: a drawn wire is listed as hidden as well',
+    file: 'src/lib/hiddenEdges.ts',
+    find: `    if (edge.drawn) continue;`,
+    with: `    // control: drawn edges are listed too`,
+    expect: ['and the wire is not among them'],
+  },
+  {
+    name: 'hidden: one row per REASON again, which made a short list look like a crisis',
+    file: 'src/lib/hiddenEdges.ts',
+    find: `    const key = \`\${edge.from}>\${edge.to}\`;`,
+    with: `    const key = \`\${edge.from}>\${edge.to}>\${edge.via}\`; // control: per reason`,
+    expect: ['two reasons for one pair are merged into one row'],
+  },
+  {
+    name: 'hidden: the canonical order is dropped for whatever order they were found in',
+    file: 'src/lib/hiddenEdges.ts',
+    find: `  links.sort((a, b) => (a.from === b.from ? a.to.localeCompare(b.to) : a.from.localeCompare(b.from)));`,
+    with: `  // control: no canonical order`,
+    expect: ['the order is by pair'],
+  },
+  {
+    name: 'hidden: a setting nobody wrote words for reads as vague instead of unfinished',
+    file: 'src/lib/hiddenEdges.ts',
+    find: `    return SETTING_WORDS[field] ?? \`a setting (\${field}) points at it\`;`,
+    with: `    return SETTING_WORDS[field] ?? 'a setting points at it'; // control: vague`,
+    expect: ['a reason nobody wrote words for looks unfinished rather than vague'],
+  },
+  {
+    name: 'hidden: an unknown reason is swallowed rather than passed through',
+    file: 'src/lib/hiddenEdges.ts',
+    find: `  return via;`,
+    with: `  return 'something points at it'; // control: swallowed`,
+    expect: ['and an entirely unknown reason is passed through, not swallowed'],
+  },
+  {
+    name: 'hidden: trackedBlockId loses its words, so a field name reaches the panel',
+    file: 'src/lib/hiddenEdges.ts',
+    find: `  trackedBlockId: 'that block shows it',`,
+    with: `  // control: no words for trackedBlockId`,
+    expect: ['a setting is named in words, not in field names'],
   },
 ];
 
@@ -974,12 +1184,50 @@ if (!before || Number(before[2]) !== 0) {
   process.exit(1);
 }
 
-const only = process.argv[2];
-const chosen = only ? CONTROLS.filter(c => c.name.includes(only)) : CONTROLS;
-if (!chosen.length) {
-  console.log(`no control matches "${only}". They are:\n${CONTROLS.map(c => '  ' + c.name).join('\n')}`);
+/**
+ * A WINDOW SHORTER THAN THE RUN.
+ *
+ * The whole set takes about five minutes, and it is often run somewhere that
+ * cuts a command off before then. That is not an inconvenience, it is a
+ * correctness problem: a run killed part way through leaves a DELIBERATE LIE in
+ * a source file, which is the failure the restore machinery above was written
+ * for and which then has to be noticed and undone by hand.
+ *
+ * So the set can be run in slices that each fit:
+ *
+ *   node scripts/control.mjs --from=0 --to=45
+ *   node scripts/control.mjs --from=45 --to=90
+ *
+ * Each slice restores the tree and verifies it, exactly as a whole run does.
+ * The indexes are into the full list and are printed with each control, so a
+ * slice that dies says where to start again.
+ */
+const args = process.argv.slice(2);
+const numArg = (flag) => {
+  const hit = args.find(a => a.startsWith(flag));
+  return hit === undefined ? undefined : Number(hit.slice(flag.length));
+};
+const from = numArg('--from=');
+const to = numArg('--to=');
+if ([from, to].some(n => n !== undefined && !Number.isFinite(n))) {
+  console.log('--from and --to take numbers.');
   process.exit(1);
 }
+const only = args.find(a => !a.startsWith('--'));
+const numbered = CONTROLS.map((c, i) => ({ ...c, index: i }));
+let chosen = only ? numbered.filter(c => c.name.includes(only)) : numbered;
+if (from !== undefined || to !== undefined) {
+  chosen = chosen.slice(from ?? 0, to ?? CONTROLS.length);
+}
+if (!chosen.length) {
+  if (from !== undefined || to !== undefined) {
+    console.log(`no control in that range. There are ${CONTROLS.length}.`);
+  } else {
+    console.log(`no control matches "${only}". They are:\n${CONTROLS.map((c, i) => `  ${i}  ${c.name}`).join('\n')}`);
+  }
+  process.exit(1);
+}
+console.log(`running ${chosen.length} of ${CONTROLS.length} controls (${chosen[0].index}..${chosen[chosen.length - 1].index})`);
 
 /**
  * Run one control and say what happened, without deciding what it means.
@@ -1053,7 +1301,7 @@ for (const control of chosen) {
     result = attempt(control);
   }
 
-  console.log(`\n${control.name}`);
+  console.log(`\n[${control.index}] ${control.name}`);
   /**
    * SUITE STOPPED EARLY is printed WHATEVER the verdict, and that is a fix.
    *
@@ -1107,8 +1355,29 @@ for (const control of chosen) {
   if (result.reds.length > 8) console.log(`    …and ${result.reds.length - 8} more`);
 }
 
-const after = runChecks().match(TALLY);
-console.log(`\nrestored: ${after ? `${after[1]} passed, ${after[2]} failed` : 'NO TALLY — the tree did not come back clean, look at it now'}`);
+/**
+ * THE LAST RUN GETS THE SAME PATIENCE THE CONTROLS DO.
+ *
+ * It did not, and that asymmetry bit on the first full run after it was written:
+ * twenty controls all behaved, the tree WAS restored -- `git diff` clean, the
+ * suite green by hand a second later -- and this line still printed "the tree
+ * did not come back clean, look at it now". The flake documented above, in the
+ * one place that was not allowed to retry.
+ *
+ * That is worse than a flaky control, because it is the line a person reads
+ * last and believes: it accuses the restore, which is the one thing here that
+ * must never be doubted without cause. So: a run with NO TALLY is retried, the
+ * same bounded way. A run with REDS is not -- reds are a real answer, and
+ * retrying a red until it goes green is how a flake becomes a habit.
+ */
+let after = runChecks().match(TALLY);
+let restoreRetries = 0;
+while (!after && restoreRetries < 3) {
+  restoreRetries++;
+  after = runChecks().match(TALLY);
+}
+const restoreNote = restoreRetries ? `  (after ${restoreRetries} retr${restoreRetries === 1 ? 'y' : 'ies'} — the earlier run produced no tally at all)` : '';
+console.log(`\nrestored: ${after ? `${after[1]} passed, ${after[2]} failed${restoreNote}` : 'NO TALLY, three times running — the tree did not come back clean, look at it now'}`);
 if (!after || Number(after[2]) !== 0) process.exit(1);
 if (suspicious) {
   console.log(`${suspicious} control${suspicious === 1 ? '' : 's'} did not behave. Each one is a check that is not doing its job.`);

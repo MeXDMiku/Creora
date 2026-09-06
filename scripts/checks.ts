@@ -8601,19 +8601,34 @@ group('a question can ask about another table');
    */
   const posts: any = {
     Posts: T3([{ id: 'p1', ReplyToId: '' }, { id: 'p2', ReplyToId: '' }, { id: 'p3', ReplyToId: '' }], ['ReplyToId']),
-    Likes: T3([{ id: 'l1', PostId: 'p1' }, { id: 'l2', PostId: 'p1' }, { id: 'l3', PostId: 'p2' }], ['PostId']),
+    /**
+     * THE LIKES CLIMB p1 < p2 < p3 ON PURPOSE.
+     *
+     * They used to fall p1 > p2 > p3, which is also the order the rows are
+     * listed in -- so "sorted by likes, descending" and "not sorted at all"
+     * gave the same answer, and the check below passed with the ranking
+     * broken. Found by a negative control that sabotaged the scope and could
+     * not make this go red. The correct answer must not be the input order.
+     */
+    Likes: T3([
+      { id: 'l1', PostId: 'p1' },
+      { id: 'l2', PostId: 'p2' }, { id: 'l3', PostId: 'p2' },
+      { id: 'l4', PostId: 'p3' }, { id: 'l5', PostId: 'p3' }, { id: 'l6', PostId: 'p3' },
+    ], ['PostId']),
   };
   const ranked = ran(() => runQuery({
     from: 'Posts',
     orderBy: `countOf("Likes", '{{PostId}} == RowId')`,
     direction: 'desc',
   }, posts, {})) as any;
-  check('A QUESTION KNOWS WHICH ROW IT IS STANDING IN', Array.isArray(ranked), true);
-  check('so a feed can be ordered by a count of another table',
-    ran(() => (ranked as any[]).map((r: any) => r.id)), ['p1', 'p2', 'p3']);
+  // The headline used to sit on `Array.isArray`, which is true of any answer at
+  // all, including a wrong one. It belongs on the order.
+  check('the question ran at all, or the order below proves nothing', Array.isArray(ranked), true);
+  check('A QUESTION KNOWS WHICH ROW IT IS STANDING IN, so a feed can be ordered by a count',
+    ran(() => (ranked as any[]).map((r: any) => r.id)), ['p3', 'p2', 'p1']);
   check('and a question can FILTER on one too',
     ran(() => runQuery({ from: 'Posts', where: `countOf("Likes", '{{PostId}} == RowId') > 1` }, posts, {})
-      .map((r: any) => r.id)), ['p1']);
+      .map((r: any) => r.id)), ['p2', 'p3']);
   check('AND IT IS THE SAME EVALUATOR A REPEATER USES, not a second one',
     readFileSync('src/lib/query.ts', 'utf8').includes('rowFormulaValue(row, text'), true);
 }
@@ -9848,8 +9863,11 @@ group('the two graphs a page has');
   }).map(l => `${l.from}>${l.to}`);
   check('the order is by pair, so two runs line up rather than merely agreeing',
     outOfOrder, [...outOfOrder].sort());
+  // `?? ''` rather than `[0]` on purpose: a control that empties this list made the
+  // check THROW, which stops the whole suite and hides every check after it. A
+  // check whose job is to catch a broken neighbour must not take the file with it.
   check('and it really was found in the other order, or the line above proves nothing',
-    outOfOrder[0].startsWith(A), true);
+    String(outOfOrder[0] ?? '').startsWith(A), true);
   check('a reason nobody wrote words for looks unfinished rather than vague',
     reasonWords('setting:someNewField'), 'a setting (someNewField) points at it');
   check('and an entirely unknown reason is passed through, not swallowed',
