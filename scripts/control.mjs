@@ -1379,6 +1379,28 @@ const CONTROLS = [
     },
     expect: ['NO BLOCK MOUNTS A PORT ONLY WHILE IT IS HOVERED'],
   },
+
+  // --- the hidden edges drawn for the selected block -------------------------
+  {
+    name: 'canvas: only one side of the selection is looked at',
+    file: 'src/lib/hiddenEdges.ts',
+    find: `    .filter((l) => l.from === blockId || l.to === blockId)`,
+    with: `    .filter((l) => l.to === blockId)`,
+    expect: [
+      'BOTH DIRECTIONS, because "this needs that" and "that needs this" are different questions',
+      'and each says which way round it is',
+    ],
+  },
+  {
+    name: 'canvas: the arrow is drawn the wrong way round',
+    file: 'src/lib/hiddenEdges.ts',
+    find: `    .map((l) => ({ ...l, direction: l.to === blockId ? 'needs' as const : 'feeds' as const }));`,
+    with: `    .map((l) => ({ ...l, direction: l.to === blockId ? 'feeds' as const : 'needs' as const }));`,
+    expect: [
+      'and each says which way round it is',
+      'the block at the other end sees the same link the other way up',
+    ],
+  },
 ];
 
 /**

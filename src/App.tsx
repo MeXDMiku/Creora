@@ -35,6 +35,7 @@ import { HealthPanel } from './components/HealthPanel'
 import { QuestionsPanel } from './components/QuestionsPanel'
 import { ActionsPanel } from './components/ActionsPanel'
 import { WireOverlay } from './components/WireOverlay'
+import { HiddenEdgeOverlay } from './components/HiddenEdgeOverlay'
 import { supabase } from './lib/supabase'
 import { ensureSession } from './lib/session'
 import type { PageRow } from './types/creora'
@@ -4510,6 +4511,8 @@ function App() {
           )}
           <EditorContent editor={editor} style={{ flex: 1, position: 'relative', pointerEvents: activeWire ? 'none' : 'auto' }} />
           {!isPreviewMode && canvasMode === 'action' && <WireOverlay />}
+          {/* The dependencies with no wire, for the selected block only. See the file. */}
+          {!isPreviewMode && canvasMode === 'action' && <HiddenEdgeOverlay />}
           {!isPreviewMode && <ConnectionPopup editor={editor} />}
           {!isPreviewMode && <ContextMenu editor={editor} deleteBlock={requestDeleteBlock} />}
           {!isPreviewMode && <ConnectionContextMenu />}

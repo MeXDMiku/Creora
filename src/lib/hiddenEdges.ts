@@ -120,3 +120,35 @@ export function hiddenLinks(page: PageBlob): HiddenLink[] {
   links.sort((a, b) => (a.from === b.from ? a.to.localeCompare(b.to) : a.from.localeCompare(b.from)));
   return links;
 }
+
+/**
+ * The hidden dependencies that touch one block, in either direction.
+ *
+ * WHY ONE BLOCK AND NOT THE WHOLE PAGE
+ * Drawing every undrawn dependency at once is how you get the hairball this
+ * project's own notes warn about -- and it would be a big one, because most of
+ * a page's dependencies are undrawn. Kobourov's line, quoted in the docs, is
+ * that you cannot route your way out of a hairball; the way out is to draw
+ * fewer edges, not to draw them more cleverly.
+ *
+ * So the canvas shows the dependencies of the block you have SELECTED. That is
+ * the moment somebody wants them -- "what does this touch, and what touches
+ * it" -- and it is never more than one block's worth of lines.
+ *
+ * `direction` is from the selected block's point of view, because "this needs
+ * that" and "that needs this" are different questions and the arrow has to know
+ * which one it is drawing.
+ */
+export interface TouchingLink extends HiddenLink {
+  /** 'needs' — the selected block depends on `from`. 'feeds' — `to` depends on it. */
+  direction: 'needs' | 'feeds';
+}
+
+export function hiddenLinksTouching(page: PageBlob, blockId: string): TouchingLink[] {
+  // No `if (!blockId) return []` guard: no edge has an empty end, so the filter
+  // below already returns nothing, and the overlay does not call this at all
+  // when nothing is selected. A guard no control can break only LOOKS tested.
+  return hiddenLinks(page)
+    .filter((l) => l.from === blockId || l.to === blockId)
+    .map((l) => ({ ...l, direction: l.to === blockId ? 'needs' as const : 'feeds' as const }));
+}

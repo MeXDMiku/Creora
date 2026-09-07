@@ -25,7 +25,7 @@ import { clampZoom, stepZoom, zoomToFit, zoomLabel, contentExtent, toCanvasPoint
 import { wireSentence, actionWords, eventWords, outputMeaning, PORT_OUT_HINT, PORT_IN_HINT } from '../src/lib/wireWords';
 import { canWire, typeWords } from '../src/lib/wireTypes';
 import { edgesOf, blocksOf } from '../src/lib/pageGraph';
-import { hiddenLinks, reasonWords } from '../src/lib/hiddenEdges';
+import { hiddenLinks, reasonWords, hiddenLinksTouching } from '../src/lib/hiddenEdges';
 import { RUNTIME_BLOCK_ID_FIELDS } from '../src/lib/remapBlockIds';
 import { whatBreaksIfDeleted, breakageSummary, workflowsAfterDeleting, nodeName } from '../src/lib/blockDependents';
 import { planFormulas, circleMessage } from '../src/lib/formulaOrder';
@@ -9954,6 +9954,31 @@ group('the two graphs a page has');
   check('an empty page has nothing hidden', hiddenLinks({}).length, 0);
 
   /**
+   * ONE BLOCK'S WORTH, WHICH IS ALL THE CANVAS CAN HONESTLY DRAW.
+   *
+   * Every undrawn dependency at once is the hairball the docs warn about, and
+   * it would be a big one -- most of a page's dependencies are undrawn. The way
+   * out of a hairball is fewer edges, not cleverer routing. So the canvas draws
+   * the dependencies of the SELECTED block, which is the moment anybody wants
+   * them and is never more than one block's worth of lines.
+   */
+  check('BOTH DIRECTIONS, because "this needs that" and "that needs this" are different questions',
+    hiddenLinksTouching(page, A).length, 2);
+  check('and each says which way round it is',
+    hiddenLinksTouching(page, A).map(l => l.direction), ['feeds', 'feeds']);
+  check('the block at the other end sees the same link the other way up',
+    hiddenLinksTouching(page, C).map(l => [l.direction, l.from]), [['needs', A]]);
+  check('the block at the far end sees the same link as something it NEEDS',
+    hiddenLinksTouching(page, B).map(l => [l.direction, l.from]), [['needs', A]]);
+  check('a block with nothing hidden touching it draws nothing',
+    hiddenLinksTouching({ ...page, formulas: [], runtimeStates: { [A]: {}, [B]: {}, [C]: {} } }, B).length, 0);
+  check('nor does one that is not on the page', hiddenLinksTouching(page, 'noSuchBlock__z').length, 0);
+  check('nor an empty id, which is what nothing selected looks like',
+    hiddenLinksTouching(page, '').length, 0);
+  check('the drawn wire is still not among them, because it is already on screen',
+    hiddenLinksTouching(page, A).some(l => l.reasons.includes('a wire connects them')), false);
+
+  /**
    * EVERY REASON THE GRAPH CAN GIVE HAS WORDS FOR IT.
    *
    * The delete warning read "Text Label 1 — a wire connects them · step" in a
@@ -10311,7 +10336,7 @@ group('formulas are worked out in an order, not in two passes');
  * Raise it in the same commit that adds the checks, the way the drift budget
  * above is raised: a number changed where it can be seen in a diff.
  */
-const EXPECTED_CHECKS = 2309;
+const EXPECTED_CHECKS = 2317;
 reachedTheEnd = true;
 if (passed + failed !== EXPECTED_CHECKS) {
   failed++;
