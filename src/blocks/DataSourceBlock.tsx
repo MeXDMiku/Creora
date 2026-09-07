@@ -151,15 +151,27 @@ function DataSourceComponent({ node }: NodeViewProps) {
         }}
       />
 
-      {showRightPort && (
-        <div
-          contentEditable={false}
-          data-port-output={blockId}
-          title="Drag from here to another block: this hands over its value and makes that block react"
-          onPointerDown={onOutputPortPointerDown}
-          style={{ position: 'absolute', right: '-5px', top: '50%', transform: 'translateY(-50%)', width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#6366f1', border: '2px solid white', cursor: 'crosshair' }}
-        />
-      )}
+      {/*
+        ALWAYS IN THE DOM, HIDDEN WITH OPACITY -- NEVER MOUNTED ON HOVER.
+
+        It used to be `{showRightPort && (...)}`, and a wire drawn FROM this
+        block could not be drawn at all. `PermanentWire` measures a wire by
+        looking the two ports up in the DOM and gives up if either is missing;
+        its effect runs on mount and when a block moves, not on hover. So after
+        a reload the port was absent, the measurement failed, and the wire
+        silently did not exist -- on a canvas whose entire job is showing what
+        is connected to what.
+
+        Visibility is an opacity question. Whether a wire can be measured is
+        not, so it must not depend on where the pointer is.
+      */}
+      <div
+        contentEditable={false}
+        data-port-output={blockId}
+        title="Drag from here to another block: this hands over its value and makes that block react"
+        onPointerDown={onOutputPortPointerDown}
+        style={{ position: 'absolute', right: '-5px', top: '50%', transform: 'translateY(-50%)', width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#6366f1', border: '2px solid white', cursor: 'crosshair', opacity: showRightPort ? 1 : 0, pointerEvents: showRightPort ? 'all' as const : 'none' as const, transition: 'opacity 0.15s' }}
+      />
     </NodeViewWrapper>
   );
 }

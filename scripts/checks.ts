@@ -2519,6 +2519,38 @@ group('ports do not agree on where they sit, which is why the rule above exists'
   check('a yes or no is flipped', /holds === 'boolean' \? 'toggle'/.test(defaults), true);
   check('and a number is still added to', /: 'increment'/.test(defaults), true);
 
+  /**
+   * A PORT IS NEVER MOUNTED ON HOVER, BECAUSE A WIRE IS MEASURED FROM THE DOM.
+   *
+   * `PermanentWire` finds a wire's two ends with
+   * `container.querySelector('[data-port-output="..."]')` and gives up if either
+   * is missing. Its effect runs on mount and when a block moves -- not when the
+   * pointer moves. Two blocks rendered their output port as
+   * `{showRightPort && (...)}`, so after a reload the port was simply absent,
+   * the measurement failed, and a wire drawn FROM one of them did not appear at
+   * all. On a canvas whose whole job is showing what is connected to what.
+   *
+   * Every other block already did it the right way: always in the DOM, hidden
+   * with opacity. Visibility is an opacity question; whether a wire can be
+   * measured is not, and must not depend on where the pointer is.
+   *
+   * A ROLE gate is a different thing and still allowed -- a Shape with a role
+   * that emits nothing has no output to point at, so there is no wire to miss.
+   */
+  // Comments stripped first, and not optionally: the note left in the two files
+  // that had this bug QUOTES the shape it is about, so a check reading the raw
+  // text would report the fix as the bug. (`withoutComments` further up this
+  // file is local to another group, which is why this is its own two lines.)
+  const noComments = (text: string) =>
+    text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  const hoverMounted = readdirSync('src/blocks')
+    .filter(f => f.endsWith('.tsx'))
+    .filter(f => /\{\s*show(Right|Left)Port\s*&&\s*\(/.test(
+      noComments(readFileSync(`src/blocks/${f}`, 'utf8'))))
+    .sort();
+  check('NO BLOCK MOUNTS A PORT ONLY WHILE IT IS HOVERED, or its wires cannot be measured',
+    hoverMounted, []);
+
   check('there are ports to find', ports > 0, true);
   // Both sides non-zero is the whole point: the day this stops being true a
   // transform in the shared rule becomes safe, and not before.
@@ -10279,7 +10311,7 @@ group('formulas are worked out in an order, not in two passes');
  * Raise it in the same commit that adds the checks, the way the drift budget
  * above is raised: a number changed where it can be seen in a diff.
  */
-const EXPECTED_CHECKS = 2308;
+const EXPECTED_CHECKS = 2309;
 reachedTheEnd = true;
 if (passed + failed !== EXPECTED_CHECKS) {
   failed++;

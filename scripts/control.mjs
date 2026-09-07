@@ -1359,6 +1359,26 @@ const CONTROLS = [
     with: `  // control: no words for the row markup`,
     expect: ['AND EVERY SETTING A BLOCK CAN POINT THROUGH HAS ITS OWN WORDS'],
   },
+
+  // --- a port must not be mounted on hover ----------------------------------
+  {
+    name: 'mount: the Visitor block goes back to mounting its port on hover',
+    file: 'src/blocks/VisitorBlock.tsx',
+    find: `      <div
+        contentEditable={false}
+        data-port-output={blockId}`,
+    with: `      {showRightPort && (<div
+        contentEditable={false}
+        data-port-output={blockId}`,
+    also: {
+      file: 'src/blocks/VisitorBlock.tsx',
+      find: `        style={{ position: 'absolute', right: '-5px', top: '50%', transform: 'translateY(-50%)', width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#6366f1', border: '2px solid white', cursor: 'crosshair', opacity: showRightPort ? 1 : 0, pointerEvents: showRightPort ? 'all' as const : 'none' as const, transition: 'opacity 0.15s' }}
+      />`,
+      with: `        style={{ position: 'absolute', right: '-5px' }}
+      />)}`,
+    },
+    expect: ['NO BLOCK MOUNTS A PORT ONLY WHILE IT IS HOVERED'],
+  },
 ];
 
 /**
