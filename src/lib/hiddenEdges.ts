@@ -42,6 +42,9 @@ const SETTING_WORDS: Record<string, string> = {
   filterBlockId: 'it filters that block',
   searchBlockId: 'it searches that block',
   sortColumnBlockId: 'it sorts that block',
+  // Found in the delete warning, in a browser: a List pointed at a block for its
+  // sort DIRECTION read "a setting (sortDirectionBlockId) points at it".
+  sortDirectionBlockId: 'it sets which way that block sorts',
   rowHtml: 'the row markup names it',
   html: 'the markup names it',
   text: 'the words name it',
@@ -55,6 +58,15 @@ const VIA_WORDS: Record<string, string> = {
   // before the words are asked for. `whatBreaksIfDeleted` DOES list drawn
   // dependencies, and without this the raw tag reached the reader.
   wire: 'a wire connects them',
+  // Also found by looking: the delete warning read "a wire connects them · step".
+  // The fallback did its job -- an unworded reason is supposed to look
+  // unfinished rather than vague -- and this is the reason nobody had worded.
+  //
+  // Worded so it does not repeat `wire`. A pair can have both, because a drawn
+  // connection makes two records: the line, and the thing it does. First draft
+  // read "a wire changes it · a wire connects them", which sounds like two
+  // wires. These are two facts about one.
+  step: 'this makes it change',
   'step:otherwise': 'an otherwise branch changes it',
   'step:condition': 'a condition asks about it',
   'step:condition-formula': 'a condition formula reads it',

@@ -26,6 +26,7 @@ import { wireSentence, actionWords, eventWords, outputMeaning, PORT_OUT_HINT, PO
 import { canWire, typeWords } from '../src/lib/wireTypes';
 import { edgesOf, blocksOf } from '../src/lib/pageGraph';
 import { hiddenLinks, reasonWords } from '../src/lib/hiddenEdges';
+import { RUNTIME_BLOCK_ID_FIELDS } from '../src/lib/remapBlockIds';
 import { whatBreaksIfDeleted, breakageSummary, workflowsAfterDeleting, nodeName } from '../src/lib/blockDependents';
 import { planFormulas, circleMessage } from '../src/lib/formulaOrder';
 import {
@@ -9921,6 +9922,37 @@ group('the two graphs a page has');
   check('an empty page has nothing hidden', hiddenLinks({}).length, 0);
 
   /**
+   * EVERY REASON THE GRAPH CAN GIVE HAS WORDS FOR IT.
+   *
+   * The delete warning read "Text Label 1 — a wire connects them · step" in a
+   * browser. `step` is the internal tag for a workflow step and nobody had ever
+   * written words for it -- and `setting:sortDirectionBlockId` was the same,
+   * one of the five runtime fields with words for only four.
+   *
+   * The fallback behaved exactly as designed: an unworded reason is meant to
+   * look unfinished rather than vague, and it did. What was missing was anything
+   * that NOTICES. This derives the tags from pageGraph itself, so a new one
+   * added there without words fails here rather than in somebody's panel.
+   */
+  const graphSrc = readFileSync('src/lib/pageGraph.ts', 'utf8');
+  const plainTags = Array.from(new Set(
+    Array.from(graphSrc.matchAll(/add\([^;]*?,\s*'([^']+)',\s*(?:true|false)\)/g)).map(m => m[1]),
+  ));
+  check('the tags were found in pageGraph, or nothing below proves anything',
+    plainTags.length > 6, true);
+  check('AND EVERY ONE OF THEM READS AS WORDS, not as its own internal name',
+    plainTags.filter(t => reasonWords(t) === t), []);
+
+  // The settings are built from two lists rather than written out, so both are
+  // read from where they actually live.
+  const markupKeys = (graphSrc.match(/for \(const key of \[([^\]]+)\]\) \{\s*\n\s*for \(const ref of referencedIds/)?.[1] ?? '')
+    .split(',').map(k => k.trim().replace(/'/g, '')).filter(Boolean);
+  check('the markup settings were found too', markupKeys.length > 3, true);
+  const settingFields = [...RUNTIME_BLOCK_ID_FIELDS, ...markupKeys];
+  check('AND EVERY SETTING A BLOCK CAN POINT THROUGH HAS ITS OWN WORDS',
+    settingFields.filter(f => reasonWords(`setting:${f}`).includes('(')), []);
+
+  /**
    * THE TWO KINDS OF NODE THAT DREW NOTHING AND COUNTED FOR NOTHING.
    *
    * `edgesOf` has walked questions and actions since it was written, and every
@@ -10247,7 +10279,7 @@ group('formulas are worked out in an order, not in two passes');
  * Raise it in the same commit that adds the checks, the way the drift budget
  * above is raised: a number changed where it can be seen in a diff.
  */
-const EXPECTED_CHECKS = 2304;
+const EXPECTED_CHECKS = 2308;
 reachedTheEnd = true;
 if (passed + failed !== EXPECTED_CHECKS) {
   failed++;

@@ -1336,6 +1336,29 @@ const CONTROLS = [
     ready.reverse(); // control: ties come out backwards`,
     expect: ['two formulas that need nothing keep the order they were written in'],
   },
+
+  // --- every reason the graph can give has words for it ----------------------
+  {
+    name: 'words: a workflow step loses its words, which is how it reached a panel',
+    file: 'src/lib/hiddenEdges.ts',
+    find: `  step: 'this makes it change',`,
+    with: `  // control: no words for a step`,
+    expect: ['AND EVERY ONE OF THEM READS AS WORDS, not as its own internal name'],
+  },
+  {
+    name: 'words: the fifth runtime setting loses its words, the way it never had any',
+    file: 'src/lib/hiddenEdges.ts',
+    find: `  sortDirectionBlockId: 'it sets which way that block sorts',`,
+    with: `  // control: no words for the sort direction`,
+    expect: ['AND EVERY SETTING A BLOCK CAN POINT THROUGH HAS ITS OWN WORDS'],
+  },
+  {
+    name: 'words: a markup setting loses its words too',
+    file: 'src/lib/hiddenEdges.ts',
+    find: `  rowHtml: 'the row markup names it',`,
+    with: `  // control: no words for the row markup`,
+    expect: ['AND EVERY SETTING A BLOCK CAN POINT THROUGH HAS ITS OWN WORDS'],
+  },
 ];
 
 /**
