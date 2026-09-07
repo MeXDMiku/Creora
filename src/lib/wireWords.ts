@@ -28,6 +28,23 @@ export const PORT_OUT_HINT =
   'Drag from here to another block: this hands over its value and makes that block react';
 export const PORT_IN_HINT = 'Something wired into here makes this block react';
 
+/**
+ * A BRANCH'S PORTS MEAN SOMETHING ELSE, SO THEY SAY SOMETHING ELSE.
+ *
+ * "hands over its value" is not true of them: a branch hands over the TRIGGER it
+ * was given, down one side or the other, and which side is the only fact worth
+ * putting in a tooltip. Kept here rather than written loose in the block, so the
+ * check that every port is labelled counts these too -- the rule is that every
+ * port is labelled from one vocabulary, not that every port says one sentence.
+ */
+export const PORT_IF_HINT = 'Runs when the question is true';
+export const PORT_ELSE_HINT = 'Runs when the question is not true';
+export const PORT_BRANCH_IN_HINT = 'Something wired into here makes this block work out its question';
+
+/** Every sentence a port may carry, so a check can count them without a list of its own. */
+export const PORT_OUT_HINTS = [PORT_OUT_HINT, PORT_IF_HINT, PORT_ELSE_HINT] as const;
+export const PORT_IN_HINTS = [PORT_IN_HINT, PORT_BRANCH_IN_HINT] as const;
+
 /** What an output port hands over, in words. */
 export function outputMeaning(dataType: string | null | undefined): string {
   switch (dataType) {
@@ -85,6 +102,8 @@ const ACTION_WORDS: Record<string, string> = {
   // The one action that reaches the STORE, and the one with no words for two
   // months: every wire that ran a compiled action read back "-> runAction X".
   runAction: 'run',
+  // "run" alone is the block; "run an action" is the one at the store.
+  run: 'set off',
   validate: 'check the rules on',
   setLoading: 'show as busy',
   clearLoading: 'stop showing as busy',

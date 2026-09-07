@@ -1,8 +1,32 @@
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useLayoutEffect, useState } from 'react';
 import { activeWireAtom, connectionsAtom, blockPositionAtom, pendingConnectionAtom, contextMenuAtom, connectionContextMenuAtom } from '../state/atoms';
+import { portOf, portWords, type OutputPort } from '../lib/ports';
 
-function PermanentWire({ connectionId, sourceBlockId, targetBlockId }: { connectionId: string; sourceBlockId: string; targetBlockId: string }) {
+/**
+ * The output a wire leaves from, in the DOM.
+ *
+ * Every block but one has a single output and no `data-port-name`, so the plain
+ * lookup is unchanged for them -- which is the migration promise: a wire saved
+ * before branches existed has no `sourcePort`, `portOf` reads that as `out`, and
+ * this finds exactly the element it always found.
+ *
+ * A branch has two, told apart by `data-port-name`. The `:not([data-port-name])`
+ * first, with the plain lookup behind it, so an `out` wire from a block that
+ * somehow has named ports still finds something rather than disappearing.
+ */
+function findOutputPort(container: HTMLElement, blockId: string, port: OutputPort): Element | null {
+  if (port !== 'out') {
+    return container.querySelector(`[data-port-output="${blockId}"][data-port-name="${port}"]`);
+  }
+  return (
+    container.querySelector(`[data-port-output="${blockId}"]:not([data-port-name])`) ||
+    container.querySelector(`[data-port-output="${blockId}"]`)
+  );
+}
+
+function PermanentWire({ connectionId, sourceBlockId, targetBlockId, sourcePort }: { connectionId: string; sourceBlockId: string; targetBlockId: string; sourcePort?: string }) {
+  const port = portOf(sourcePort);
   // Subscribe to both block positions so we re-render when either block is dragged
   const _sourcePos = useAtomValue(blockPositionAtom(sourceBlockId));
   const _targetPos = useAtomValue(blockPositionAtom(targetBlockId));
@@ -15,7 +39,7 @@ function PermanentWire({ connectionId, sourceBlockId, targetBlockId }: { connect
     if (!container) return;
     const containerRect = container.getBoundingClientRect();
 
-    const outputPort = container.querySelector(`[data-port-output="${sourceBlockId}"]`);
+    const outputPort = findOutputPort(container, sourceBlockId, port);
     const inputPort = container.querySelector(`[data-port-input="${targetBlockId}"]`);
     if (!outputPort || !inputPort) return;
 
@@ -28,7 +52,7 @@ function PermanentWire({ connectionId, sourceBlockId, targetBlockId }: { connect
       x2: inRect.left + inRect.width / 2 - containerRect.left,
       y2: inRect.top + inRect.height / 2 - containerRect.top,
     });
-  }, [_sourcePos, _targetPos, sourceBlockId, targetBlockId]);
+  }, [_sourcePos, _targetPos, sourceBlockId, targetBlockId, port]);
 
   if (coords.x1 === 0 && coords.y1 === 0 && coords.x2 === 0 && coords.y2 === 0) return null;
 
@@ -61,13 +85,19 @@ function PermanentWire({ connectionId, sourceBlockId, targetBlockId }: { connect
 
   return (
     <>
-      {/* Visible Bezier Wire */}
+      {/*
+        A branch's two sides are coloured, which is the whole reason the node
+        exists: the answer a page gives is readable from across the canvas
+        instead of being buried in a popup. An ordinary wire is unchanged.
+      */}
       <path
         d={pathData}
         fill="none"
-        stroke="#6366f1"
+        stroke={port === 'if' ? '#22c55e' : port === 'else' ? '#f97316' : '#6366f1'}
         strokeWidth={2}
-      />
+      >
+        {port !== 'out' && <title>{portWords(port)}</title>}
+      </path>
       {/* Invisible Wider Hit Path */}
       <path
         d={pathData}
@@ -124,6 +154,7 @@ export function WireOverlay() {
           connectionId={conn.id}
           sourceBlockId={conn.sourceBlockId}
           targetBlockId={conn.targetBlockId}
+          sourcePort={conn.sourcePort}
         />
       ))}
       {/* Pending connection wire (dashed) */}

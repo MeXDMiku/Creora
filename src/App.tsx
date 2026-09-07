@@ -8,6 +8,7 @@ import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom
 import { canWire } from './lib/wireTypes'
 import { workflowsAfterDeleting, whatBreaksIfDeleted, breakageSummary, nodeName, type Breakage } from './lib/blockDependents'
 import { chooseFirstPage } from './lib/firstPage'
+import { portToSave } from './lib/ports'
 import { summarisePageData, describeWhatWillBeLost, downloadPageData, deletePage } from './lib/pageDelete'
 import { newBlockId, defaultRuntimeForNodeType, defaultAttrsForNodeType, BLOCK_FOOTPRINT, nodeTypeFromBlockId, shortBlockId, isBlockNodeType, withoutVisitorState, portableTypeFromNodeType, nodeTypeFromPortableType, type BlockNodeType } from './lib/blockRegistry'
 import { ButtonBlock } from './blocks/ButtonBlock'
@@ -27,6 +28,7 @@ import { VisitorBlock } from './blocks/VisitorBlock'
 import { ImageBlock } from './blocks/ImageBlock'
 import { RepeatBlock } from './blocks/RepeatBlock'
 import { PageValueBlock } from './blocks/PageValueBlock'
+import { BranchBlock } from './blocks/BranchBlock'
 import { PHONE_MAX_WIDTH } from './lib/layout'
 import { stepZoom, zoomToFit, zoomLabel, contentExtent, clampZoom } from './lib/zoom'
 import { guessMappings, whyItCannotWork, draftFromWorkflow, defaultWireDraft } from './lib/connectionDraft'
@@ -175,11 +177,22 @@ function RunRow({ run, label }: { run: WorkflowRun; label: (id: string) => strin
   const [open, setOpen] = useState(false)
   const ran = run.steps.filter(s => s.status === 'ran').length
   const skipped = run.steps.length - ran
-  const nothingListening = run.matched === 0
+  /**
+   * "nothing wired to this" is what `matched === 0` has always printed, and it
+   * was the only thing that could produce that count -- until a branch could
+   * REFUSE, which also runs no workflows. Two very different facts sharing one
+   * sentence: one means "you have not finished wiring", the other means "the
+   * question could not be worked out". Told apart by the step the refusal
+   * records, because guessing from the count is what made them look the same.
+   */
+  const refusal = run.matched === 0 && run.steps.find(s => s.action === '(branch)')
+  const nothingListening = run.matched === 0 && !refusal
 
-  const summary = nothingListening
-    ? 'nothing wired to this'
-    : [ran ? `${ran} ran` : null, skipped ? `${skipped} skipped` : null].filter(Boolean).join(', ') || 'no steps'
+  const summary = refusal
+    ? `did not decide — ${refusal.reason || 'the question could not be worked out'}`
+    : nothingListening
+      ? 'nothing wired to this'
+      : [ran ? `${ran} ran` : null, skipped ? `${skipped} skipped` : null].filter(Boolean).join(', ') || 'no steps'
 
   return (
     <div style={{ borderBottom: '1px solid #f1f5f9', padding: '8px 10px', fontSize: '12px' }}>
@@ -466,6 +479,7 @@ function ConnectionPopup({ editor }: { editor: any }) {
   const isToggleBlock = targetNodeType === 'toggleBlock'
   const isDatabaseBlock = targetNodeType === 'databaseBlock'
   const isDataSourceBlock = targetNodeType === 'dataSourceBlock'
+  const isBranchBlock = targetNodeType === 'branchBlock'
   const targetState = pending ? store.get(blockRuntimeAtom(pending.targetBlockId)) : null
   const sourceState = pending ? store.get(blockRuntimeAtom(pending.sourceBlockId)) : null
 
@@ -566,6 +580,11 @@ function ConnectionPopup({ editor }: { editor: any }) {
       } else if (type === 'dataSourceBlock') {
         // The only thing anybody wires INTO live data is "go and get it again".
         setAction('refresh')
+      } else if (type === 'branchBlock') {
+        // Wiring into a branch means "work out your question", nothing else.
+        // Without this it defaulted to `increment`, and "add to If" is not a
+        // thing -- the same absurdity a Text Label had until a browser showed it.
+        setAction('run')
       } else {
         const holds = getBlockDataType(type || '')
         setAction(holds === 'string' ? 'setText' : holds === 'boolean' ? 'toggle' : 'increment')
@@ -698,6 +717,10 @@ function ConnectionPopup({ editor }: { editor: any }) {
         id: connId,
         sourceBlockId: pending.sourceBlockId,
         targetBlockId: pending.targetBlockId,
+        // Spread so the key is ABSENT for an ordinary wire rather than present
+        // and undefined -- the saved JSON is then identical to what it was
+        // before branches existed, which is the migration promise in ports.ts.
+        ...(pending.sourcePort ? { sourcePort: pending.sourcePort } : {}),
       }])
     }
 
@@ -706,6 +729,8 @@ function ConnectionPopup({ editor }: { editor: any }) {
       action: action,
       targetId: pending.targetBlockId,
       condition: null,
+      // Same rule as the connection: absent for the plain output.
+      ...(pending.sourcePort ? { sourcePort: pending.sourcePort } : {}),
     }
 
     if (isToggleBlock) {
@@ -921,6 +946,16 @@ function ConnectionPopup({ editor }: { editor: any }) {
               <option value="turnOff">Turn Off</option>
               <option value="toggle">Toggle</option>
               <option value="reset">Reset</option>
+            </>
+          ) : isBranchBlock ? (
+            <>
+              {/* A branch is asked to work out its question. Nothing else on
+                  this list means anything to it -- it holds no value to set. */}
+              <option value="run">Work out its question</option>
+              <optgroup label="Going somewhere">
+                <option value="goToPage">Go to another page</option>
+                <option value="openUrl">Open a web address</option>
+              </optgroup>
             </>
           ) : isDataSourceBlock ? (
             <>
@@ -2052,6 +2087,7 @@ function App() {
       ImageBlock,
       RepeatBlock,
       PageValueBlock,
+      BranchBlock,
     ],
     content: '',
     onUpdate: ({ editor }) => {
@@ -2815,6 +2851,21 @@ function App() {
       action: () => insertBlock('dataSourceBlock')
     },
     {
+      id: 'branch',
+      category: 'Operations',
+      title: 'If',
+      description: 'Ask a question and send the trigger down one of two ways',
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 12h6" />
+          <path d="M9 12l5-6h7" />
+          <path d="M9 12l5 6h7" />
+          <circle cx="9" cy="12" r="1.6" />
+        </svg>
+      ),
+      action: () => insertBlock('branchBlock')
+    },
+    {
       id: 'pagevalue',
       category: 'Operations',
       title: 'Page value',
@@ -3272,6 +3323,10 @@ function App() {
             // Normal connection popup
             setPendingConnection({
               sourceBlockId: activeWire.sourceBlockId,
+              // Carried, not defaulted. `portToSave` turns the plain output back
+              // into ABSENT when it is written, so an ordinary wire saves the
+              // bytes it always saved. See src/lib/ports.ts.
+              sourcePort: portToSave(activeWire.sourcePort),
               targetBlockId: droppedOnBlockId,
               x1: activeWire.sourceX,
               y1: activeWire.sourceY,

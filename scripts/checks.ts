@@ -22,7 +22,7 @@ import { resolvePageValue, buildParamsFromTemplate } from '../src/lib/pageValue'
 import { diagnosePage, sortProblems, referencedIds } from '../src/lib/diagnose';
 import { guessMappings, matchScore, normaliseName, whyItCannotWork, draftFromWorkflow, defaultWireDraft } from '../src/lib/connectionDraft';
 import { clampZoom, stepZoom, zoomToFit, zoomLabel, contentExtent, toCanvasPoint, MIN_ZOOM, MAX_ZOOM } from '../src/lib/zoom';
-import { wireSentence, actionWords, eventWords, outputMeaning, PORT_OUT_HINT, PORT_IN_HINT } from '../src/lib/wireWords';
+import { wireSentence, actionWords, eventWords, outputMeaning, PORT_OUT_HINTS, PORT_IN_HINTS } from '../src/lib/wireWords';
 import { canWire, typeWords } from '../src/lib/wireTypes';
 import { edgesOf, blocksOf } from '../src/lib/pageGraph';
 import { hiddenLinks, reasonWords, hiddenLinksTouching } from '../src/lib/hiddenEdges';
@@ -30,6 +30,8 @@ import { RUNTIME_BLOCK_ID_FIELDS } from '../src/lib/remapBlockIds';
 import { whatBreaksIfDeleted, breakageSummary, workflowsAfterDeleting, nodeName } from '../src/lib/blockDependents';
 import { planFormulas, circleMessage } from '../src/lib/formulaOrder';
 import { chooseFirstPage } from '../src/lib/firstPage';
+import { portOf, isDefaultPort, portToSave, portWords, OUTPUT_PORTS } from '../src/lib/ports';
+import { answerBranch, portForAnswer } from '../src/lib/branch';
 import {
   resolveLayout,
   layoutPage,
@@ -2216,8 +2218,11 @@ group('every port in every block is labelled');
     const text = readFileSync(`src/blocks/${file}`, 'utf8');
     const outs = (text.match(/data-port-output=\{blockId\}/g) || []).length;
     const ins = (text.match(/data-port-input=\{blockId\}/g) || []).length;
-    const outTitles = (text.split(PORT_OUT_HINT).length - 1);
-    const inTitles = (text.split(PORT_IN_HINT).length - 1);
+    // Any of the known port sentences counts. A branch's two outputs say which
+    // side they are rather than "hands over its value", which is not true of
+    // them -- the rule is one vocabulary, not one sentence.
+    const outTitles = PORT_OUT_HINTS.reduce((n, h) => n + text.split(h).length - 1, 0);
+    const inTitles = PORT_IN_HINTS.reduce((n, h) => n + text.split(h).length - 1, 0);
     if (outs > outTitles) missingOut.push(file);
     if (ins > inTitles) missingIn.push(file);
   }
@@ -10429,6 +10434,130 @@ group('which page opens, and whether one has to be made');
 }
 
 /**
+ * WHICH OUTPUT A WIRE LEFT FROM, AND THE MIGRATION THAT MUST NOT GO WRONG.
+ *
+ * A block has had exactly one output since Creora started. An If/Else needs two,
+ * which means every connection and every workflow step gains a port -- and every
+ * one already saved has none. There are pages in the wild.
+ *
+ * So ABSENT MEANS `out`, everywhere, forever. Not "unknown", not a default
+ * written in on load, not a value backfilled into old data. This group is the
+ * whole safety argument for the branch work, and it is deliberately paranoid:
+ * a wire in the wrong place is visible and fixable, a wire that silently stops
+ * running is the failure this project keeps finding.
+ */
+group('which output a wire left from');
+{
+  check('NOTHING MEANS THE OUTPUT EVERY BLOCK HAS ALWAYS HAD', portOf(undefined), 'out');
+  check('and so does null', portOf(null), 'out');
+  check('and so does the word itself', portOf('out'), 'out');
+  check('the two branch ports are themselves', [portOf('if'), portOf('else')], ['if', 'else']);
+  check('AND ANYTHING UNRECOGNISED IS AN ORDINARY WIRE, not a wire that vanishes',
+    [portOf('sideways'), portOf(7), portOf({}), portOf('')], ['out', 'out', 'out', 'out']);
+  check('which is the whole migration rule in one line', isDefaultPort(undefined), true);
+  check('and a branch port is not it', isDefaultPort('else'), false);
+
+  /**
+   * Written back as ABSENT, so a page with no branches saves the bytes it saved
+   * before any of this existed and an older Creora reading it finds nothing new.
+   */
+  check('AN ORDINARY WIRE SAVES NOTHING, so old pages stay byte-identical',
+    portToSave('out'), undefined);
+  check('and so does one that never had a port', portToSave(undefined), undefined);
+  check('a branch port is saved', [portToSave('if'), portToSave('else')], ['if', 'else']);
+  check('and nonsense is not saved either, rather than saved as nonsense',
+    portToSave('sideways'), undefined);
+
+  check('every port has words', OUTPUT_PORTS.map(p => portWords(p)),
+    ['when it fires', 'when it is true', 'when it is not']);
+  check('and something with no port reads as the plain one', portWords(undefined), 'when it fires');
+
+  // The type and the list must not drift apart: the union in creora.ts is what
+  // persistence allows, and OUTPUT_PORTS is what the code walks.
+  const creoraSrcPorts = readFileSync('src/types/creora.ts', 'utf8');
+  check('THE SAVED TYPE ALLOWS EXACTLY THESE THREE',
+    (creoraSrcPorts.match(/sourcePort\?: 'out' \| 'if' \| 'else';/g) || []).length, 2);
+  check('on the connection and on the step, which are the two things saved',
+    /interface Connection[\s\S]{0,600}sourcePort/.test(creoraSrcPorts), true);
+}
+
+/**
+ * THE QUESTION A BRANCH ASKS, AND THE THIRD ANSWER.
+ *
+ * A condition inside a step is boolean: it passes or it does not, and failing
+ * is the same as not running. A BRANCH cannot work that way, because its two
+ * ways of being wrong are not equally visible:
+ *
+ *   taking YES wrongly   something happens that should not have
+ *   taking NO wrongly    NOTHING happens, which is what a quiet page looks like
+ *
+ * So a question that cannot be worked out fires NEITHER side. That is the same
+ * rule the rest of this engine follows -- a filter that cannot be worked out
+ * keeps every row, a rule that cannot be worked out refuses -- and it is the
+ * reason this group exists rather than trusting a boolean.
+ */
+group('the question a branch asks');
+{
+  const yes = () => true;
+  const truthy = (v: unknown) => !!v;
+
+  check('A QUESTION THAT ANSWERS TRUE TAKES THE YES SIDE',
+    answerBranch('1 < 2', yes, truthy), { ok: true, value: true, describe: '1 < 2 -> YES (answered true)' });
+  check('and one that answers false takes the NO side',
+    (answerBranch('1 > 2', () => false, truthy) as any).value, false);
+  check('the log line says which side and what it answered',
+    (answerBranch('x', () => 0, truthy) as any).describe, 'x -> NO (answered 0)');
+
+  /**
+   * EMPTY IS NOT FALSE. An unfinished branch quietly taking NO for ever is a
+   * page that looks like it is simply not doing anything, which is the exact
+   * shape of defect this project keeps turning up.
+   */
+  check('AN UNASKED QUESTION REFUSES, rather than quietly meaning no',
+    answerBranch('', yes, truthy),
+    { ok: false, reason: 'This branch has not been asked a question yet.' });
+  check('and so does one that is only spaces', (answerBranch('   ', yes, truthy) as any).ok, false);
+  check('and one that was never set at all', (answerBranch(undefined, yes, truthy) as any).ok, false);
+  check('A QUESTION THAT THROWS REFUSES TOO, and says what it said',
+    answerBranch('Total >', () => { throw new Error('that is not finished'); }, truthy),
+    { ok: false, reason: 'that is not finished' });
+  check('a throw with nothing to say still says something',
+    (answerBranch('x', () => { throw new Error(''); }, truthy) as any).reason,
+    'The question could not be worked out.');
+
+  // The engine's own idea of true is passed in rather than reinvented, so
+  // "0", "" and an empty list mean here exactly what they mean everywhere else.
+  check('THE ENGINE DECIDES WHAT TRUE MEANS, not this file',
+    (answerBranch('x', () => 'anything', () => false) as any).value, false);
+
+  check('true takes the if port', portForAnswer(true), 'if');
+  check('and false takes the else port', portForAnswer(false), 'else');
+
+  /**
+   * And the wiring: the engine has to ask ONCE per arrival, and filter the
+   * steps by port. Read from source, because the alternative is a fixture of
+   * the whole store and this is a two-line rule that must not quietly change.
+   */
+  const engineSrc = readFileSync('src/lib/bindingEngine.ts', 'utf8');
+  check('THE ENGINE ASKS THE QUESTION ONCE, before any step runs',
+    /const branch =\s*\n\s*nodeTypeFromBlockId\(sourceId\) === 'branchBlock'/.test(engineSrc), true);
+  check('and a refusal runs nothing at all',
+    /if \(branch && !branch\.ok\) \{[\s\S]{0,400}?return;/.test(engineSrc), true);
+  check('and the steps are filtered by the side it chose',
+    /workflow\.steps\.filter\(\(s\) => portOf\(s\.sourcePort\) === wanted\)/.test(engineSrc), true);
+  check('A SOURCE THAT IS NOT A BRANCH RUNS EVERY STEP, which is every page ever saved',
+    /wanted === null \? workflow\.steps/.test(engineSrc), true);
+
+  // `run` is what makes a branch reachable at all: nothing else could trigger
+  // one, because the engine propagates by noticing a value changed and a
+  // branch has no value.
+  check('THERE IS AN ACTION THAT SETS A BLOCK OFF WITHOUT CHANGING IT',
+    /case 'run': \{/.test(engineSrc), true);
+  check('and it cannot set off the block that set it off',
+    /that would set off the block that set this off/.test(engineSrc), true);
+}
+
+/**
  * HOW MANY CHECKS THERE ARE, WRITTEN DOWN.
  *
  * Not a vanity number. Two runs an hour apart reported 1737 and 1736 with
@@ -10445,7 +10574,7 @@ group('which page opens, and whether one has to be made');
  * Raise it in the same commit that adds the checks, the way the drift budget
  * above is raised: a number changed where it can be seen in a diff.
  */
-const EXPECTED_CHECKS = 2334;
+const EXPECTED_CHECKS = 2366;
 reachedTheEnd = true;
 if (passed + failed !== EXPECTED_CHECKS) {
   failed++;

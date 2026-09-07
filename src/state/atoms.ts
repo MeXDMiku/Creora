@@ -57,18 +57,26 @@ export const selectedBlockIdAtom = atom<string | null>(null);
 
 export const activeWireAtom = atom<{
   sourceBlockId: string;
+  /**
+   * Which output the drag started from. Absent means the single output every
+   * block has always had -- see src/lib/ports.ts, where absent must keep
+   * meaning `out` for every page already saved.
+   */
+  sourcePort?: 'out' | 'if' | 'else';
   sourceX: number;
   sourceY: number;
   currentX: number;
   currentY: number;
 } | null>(null);
 
-export const connectionsAtom = atom<{ id: string; sourceBlockId: string; targetBlockId: string }[]>([]);
+export const connectionsAtom = atom<{ id: string; sourceBlockId: string; targetBlockId: string; sourcePort?: 'out' | 'if' | 'else' }[]>([]);
 
 export const snapTargetAtom = atom<string | null>(null);
 
 export const pendingConnectionAtom = atom<{
   sourceBlockId: string;
+  /** Which output the wire left from. Absent means the plain one. */
+  sourcePort?: 'out' | 'if' | 'else';
   targetBlockId: string;
   sourceEvent?: 'onClick' | 'onChange' | 'onTick' | 'onComplete';
   /**
@@ -176,6 +184,8 @@ export function getBlockDataType(nodeType: string): BlockDataType {
   switch (nodeType) {
     case 'buttonBlock': return 'trigger';
     case 'timerBlock': return 'trigger';
+    // A branch hands on the trigger it was given, down one side or the other.
+    case 'branchBlock': return 'trigger';
     case 'numberDisplayBlock': return 'number';
     case 'formulaDisplayBlock': return 'number';
     case 'toggleBlock': return 'boolean';

@@ -1483,6 +1483,77 @@ const CONTROLS = [
       'and no longer sums rows on every block itself',
     ],
   },
+
+  // --- the branch, and the port model under it -------------------------------
+  {
+    name: 'ports: a missing port stops meaning the plain one, which breaks every saved wire',
+    file: 'src/lib/ports.ts',
+    find: `  return value === 'if' || value === 'else' ? value : 'out';`,
+    with: `  return (value as any) ?? 'if';`,
+    expect: [
+      'NOTHING MEANS THE OUTPUT EVERY BLOCK HAS ALWAYS HAD',
+      'AND ANYTHING UNRECOGNISED IS AN ORDINARY WIRE, not a wire that vanishes',
+      'which is the whole migration rule in one line',
+    ],
+  },
+  {
+    name: 'ports: the plain output starts being written into saved pages',
+    file: 'src/lib/ports.ts',
+    find: `  return p === 'out' ? undefined : p;`,
+    with: `  return p;`,
+    expect: [
+      'AN ORDINARY WIRE SAVES NOTHING, so old pages stay byte-identical',
+      'and so does one that never had a port',
+    ],
+  },
+  {
+    name: 'branch: an unasked question quietly means no',
+    file: 'src/lib/branch.ts',
+    find: `  if (!q) return { ok: false, reason: 'This branch has not been asked a question yet.' };`,
+    with: `  if (!q) return { ok: true, value: false, describe: 'empty -> NO' };`,
+    expect: [
+      'AN UNASKED QUESTION REFUSES, rather than quietly meaning no',
+      'and so does one that is only spaces',
+      'and one that was never set at all',
+    ],
+  },
+  {
+    name: 'branch: a question that throws is treated as false instead of refusing',
+    file: 'src/lib/branch.ts',
+    find: `    return { ok: false, reason: err?.message || 'The question could not be worked out.' };`,
+    with: `    return { ok: true, value: false, describe: 'threw -> NO' };`,
+    expect: ['A QUESTION THAT THROWS REFUSES TOO, and says what it said'],
+  },
+  {
+    name: 'branch: the two sides are swapped',
+    file: 'src/lib/branch.ts',
+    find: `  return value ? 'if' : 'else';`,
+    with: `  return value ? 'else' : 'if';`,
+    expect: ['true takes the if port', 'and false takes the else port'],
+  },
+  {
+    name: 'branch: the engine stops filtering steps by the side it chose',
+    file: 'src/lib/bindingEngine.ts',
+    find: `      wanted === null ? workflow.steps : workflow.steps.filter((s) => portOf(s.sourcePort) === wanted);`,
+    with: `      workflow.steps;`,
+    expect: ['and the steps are filtered by the side it chose'],
+  },
+  {
+    name: 'branch: a refusal runs the steps anyway',
+    file: 'src/lib/bindingEngine.ts',
+    find: `  if (branch && !branch.ok) {`,
+    with: `  if (false && branch && !branch.ok) {`,
+    expect: ['and a refusal runs nothing at all'],
+  },
+  {
+    name: 'branch: `run` can set off the block that set it off',
+    file: 'src/lib/bindingEngine.ts',
+    find: `              reason: step.targetId === sourceId
+                ? 'that would set off the block that set this off'`,
+    with: `              reason: step.targetId === sourceId
+                ? 'looping is fine actually'`,
+    expect: ['and it cannot set off the block that set it off'],
+  },
 ];
 
 /**

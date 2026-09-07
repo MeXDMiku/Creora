@@ -114,7 +114,20 @@ export interface WorkflowStep {
      * are. Write comment prose in backticks or plain words, never in single
      * quotes, or the count silently gains members that are not actions.
      */
-    | 'refresh';
+    | 'refresh'
+    /**
+     * MAKE THAT BLOCK DO ITS THING, WITHOUT CHANGING IT.
+     *
+     * Every other action changes a value, and the engine propagates by noticing
+     * that a value changed. A branch has no value -- it decides, it does not
+     * hold -- so nothing could trigger one: a step pointing at it did nothing
+     * and the chain stopped there.
+     *
+     * `run` fires the target's own workflows directly. It is a primitive rather
+     * than a branch special case, because "press that button from here" is the
+     * same idea and now works for free.
+     */
+    | 'run';
   amount?: number;
   value?: any;
   /** A single condition. Kept because every page saved before conditions[] uses it. */
@@ -193,6 +206,15 @@ export interface WorkflowStep {
   elseTargetId?: string;
   elseValue?: any;
   elseAmount?: number;
+  /**
+   * Which of the SOURCE block's outputs this step hangs off.
+   *
+   * Absent means `out` -- the single output every block has always had -- and
+   * must keep meaning that: every step saved before branches existed has no
+   * such field. A branch block fires only the steps whose port matches the
+   * answer it worked out. See src/lib/ports.ts.
+   */
+  sourcePort?: 'out' | 'if' | 'else';
 }
 
 /**
@@ -223,6 +245,15 @@ export interface Connection {
   id: string;
   sourceBlockId: string;
   targetBlockId: string;
+  /**
+   * Which of the source's outputs this wire left from.
+   *
+   * ABSENT MEANS `out`, and must always mean `out`: every connection saved
+   * before branches existed has no such field, and there are pages in the wild.
+   * Never fill it in on load, never write `out` into it. `portOf` in
+   * src/lib/ports.ts is the one place that answers this.
+   */
+  sourcePort?: 'out' | 'if' | 'else';
 }
 
 export interface StyleConfig {
@@ -336,6 +367,13 @@ export interface FormulaBinding {
 export interface BlockRuntimeState {
   blockName?: string;
   value: any;
+  /**
+   * A branch block's question, written as a formula. Empty is NOT false: an
+   * unfinished branch refuses rather than quietly taking the NO side, because
+   * a page that silently always goes one way is the failure mode this engine
+   * keeps finding. See runBranch in bindingEngine.
+   */
+  question?: string;
   visible: boolean;
   disabled: boolean;
   loading: boolean;

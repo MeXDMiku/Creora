@@ -25,16 +25,16 @@ Legend: `HAVE` · `PART` partly · `MISSING` · `UNPROVED` written but never run
 
 ## Part 1 — What exists today, counted
 
-**17 block types**
+**18 block types**
 Button · Number display · Toggle · Input · Text label · Formula · Timer ·
 History chart · Database · List · Shape · Live data · My design · Visitor ·
-Image · For each row · **Page value**
+Image · For each row · Page value · **If**
 
-**22 workflow actions**
+**23 workflow actions**
 increment · decrement · set · setText · toggle · reset · setVisible · setHidden ·
 addRow · updateRow · deleteRow · exportCsv · sendWebhook · validate · setLoading ·
 clearLoading · setDisabled · setEnabled · goToPage · openUrl · runAction ·
-**refresh**
+refresh · **run**
 
 Twenty of those twenty-one happen in the BROWSER. `runAction` is the only one
 that happens at the store, which is the only place a value a visitor cannot

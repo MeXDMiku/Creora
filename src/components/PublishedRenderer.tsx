@@ -801,6 +801,22 @@ function RenderedBlock({ block }: { block: ExtractedBlock }) {
     );
   }
 
+  /**
+   * A BRANCH DRAWS NOTHING FOR A VISITOR.
+   *
+   * It is a question the page asks itself, not something to look at. The engine
+   * still runs it -- `executeWorkflow` decides the side before any step -- so
+   * the page behaves the same; there is simply nothing on screen, which is what
+   * a visitor should see of the page's reasoning.
+   *
+   * Returning null rather than omitting the case on purpose: the check that
+   * every block type renders when published is what stops a type being
+   * forgotten, and "renders nothing, deliberately" is an answer to it.
+   */
+  if (block.type === 'branchBlock') {
+    return null;
+  }
+
   if (block.type === 'pageValueBlock') {
     // Deliberately visible. A builder who does not want it on the page hides it
     // with the visible switch, exactly like any other block -- rather than this

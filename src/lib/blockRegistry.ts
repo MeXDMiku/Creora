@@ -33,6 +33,7 @@ export const BLOCK_NODE_TYPES = [
   'imageBlock',
   'repeatBlock',
   'pageValueBlock',
+  'branchBlock',
 ] as const;
 
 export type BlockNodeType = (typeof BLOCK_NODE_TYPES)[number];
@@ -116,6 +117,8 @@ export function defaultValueForNodeType(nodeType: BlockNodeType | null): any {
     case 'repeatBlock':
     // A page value is whatever the address carried, so it starts empty too.
     case 'pageValueBlock':
+    // A branch has no value of its own -- it decides, it does not hold.
+    case 'branchBlock':
       return '';
     default:
       return 0;
@@ -137,6 +140,18 @@ export function defaultRuntimeForNodeType(nodeType: BlockNodeType | null): Block
   };
 
   switch (nodeType) {
+    case 'branchBlock':
+      return {
+        ...base,
+        blockName: 'If',
+        value: '',
+        // The question, as a formula. Empty is not false: an unfinished branch
+        // must refuse rather than quietly take the NO side every time.
+        question: '',
+        backgroundColor: '#1e293b',
+        color: '#e2e8f0',
+        width: 150,
+      } as BlockRuntimeState;
     case 'pageValueBlock':
       return {
         ...base,
@@ -418,6 +433,7 @@ export const PORTABLE_TYPE_BY_NODE_TYPE: Record<BlockNodeType, string> = {
   imageBlock: 'image',
   repeatBlock: 'repeat',
   pageValueBlock: 'pageValue',
+  branchBlock: 'branch',
 };
 
 const NODE_TYPE_BY_PORTABLE_TYPE: Record<string, BlockNodeType> = Object.fromEntries(
@@ -477,4 +493,5 @@ export const BLOCK_DISPLAY_NAMES: Record<BlockNodeType, string> = {
   imageBlock: 'Image',
   repeatBlock: 'For each row',
   pageValueBlock: 'Page value',
+  branchBlock: 'If',
 };

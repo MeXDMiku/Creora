@@ -16,6 +16,8 @@ import { addFacets, evaluateExpression, truthy, type FormulaValue, explainUnread
 import { describeRowWriteError, withoutRow } from './rowWrite';
 import { functionNameFor, argsFor, describeActionError } from './actions';
 import { planFormulas, circleMessage } from './formulaOrder';
+import { answerBranch, portForAnswer } from './branch';
+import { portOf } from './ports';
 export { evaluateCondition };
 import { renderTemplate } from './format';
 import { supabase } from './supabase';
@@ -471,9 +473,60 @@ export function executeWorkflow(
     recordRun(store, { sourceId, event, workflowId: null, matched: 0, steps: [] });
   }
 
+  /**
+   * A BRANCH DECIDES ONCE, HERE, BEFORE ANY STEP RUNS.
+   *
+   * Once per arrival rather than once per step, so two wires leaving the same
+   * port cannot be given different answers by a question that reads something
+   * that moved in between.
+   *
+   * `null` means this source is not a branch, and every step runs as it always
+   * has -- which is what keeps every page saved before branches existed working
+   * exactly as it did.
+   */
+  const branch =
+    nodeTypeFromBlockId(sourceId) === 'branchBlock'
+      ? answerBranch(
+          store.get(blockRuntimeAtom(sourceId))?.question,
+          (q) => evaluateExpression(q, formulaScope(store), tableScope(store)),
+          truthy,
+        )
+      : null;
+
+  if (branch && !branch.ok) {
+    // Neither side. See branch.ts: taking NO wrongly is invisible, so an
+    // unanswerable question refuses instead of picking the quiet option.
+    recordRun(store, {
+      sourceId,
+      event,
+      workflowId: null,
+      matched: 0,
+      steps: [{ targetId: sourceId, action: '(branch)', status: 'skipped', reason: branch.reason }],
+    });
+    return;
+  }
+
+  const wanted = branch ? portForAnswer(branch.value) : null;
+
   for (const workflow of matchingWorkflows) {
     const runSteps: RunStep[] = [];
-    for (const step of workflow.steps) {
+    const stepsToRun =
+      wanted === null ? workflow.steps : workflow.steps.filter((s) => portOf(s.sourcePort) === wanted);
+
+    // Said out loud, because "half my wires did not run" is the thing a branch
+    // makes normal and a run log has to explain rather than leave to be guessed.
+    if (branch && branch.ok) {
+      // `ran`, not a new status: the run log only knows two, and inventing a
+      // third here would mean every reader of a run learning about it.
+      runSteps.push({
+        targetId: sourceId,
+        action: '(branch)',
+        status: 'ran',
+        reason: branch.describe,
+      } as RunStep);
+    }
+
+    for (const step of stepsToRun) {
       const targetAtom = blockRuntimeAtom(step.targetId);
       const currentTargetState = store.get(targetAtom);
 
@@ -1311,6 +1364,31 @@ export function executeWorkflow(
          */
         case 'refresh': {
           void import('./dataSource').then((m) => m.fetchDataSource(step.targetId, store));
+          break;
+        }
+        /**
+         * Fire the target's own workflows. Chain-depth guarded like every other
+         * hop, because "run" pointing back at its own source is the shortest
+         * possible loop and somebody will draw it within a day.
+         */
+        case 'run': {
+          if (step.targetId !== sourceId && chainDepth < MAX_CHAIN_DEPTH) {
+            chainDepth += 1;
+            try {
+              executeWorkflow(step.targetId, 'onClick', store);
+            } finally {
+              chainDepth -= 1;
+            }
+          } else {
+            runSteps.push({
+              targetId: step.targetId,
+              action: 'run',
+              status: 'skipped',
+              reason: step.targetId === sourceId
+                ? 'that would set off the block that set this off'
+                : `more than ${MAX_CHAIN_DEPTH} blocks set one another off`,
+            } as RunStep);
+          }
           break;
         }
         case 'setVisible': {
