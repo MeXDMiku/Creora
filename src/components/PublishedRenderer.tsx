@@ -10,7 +10,8 @@ import { blockToCSS } from '../lib/renderBlockStyles';
 import { valueAtPath } from '../lib/jsonPaths';
 import { fetchDataSource } from '../lib/dataSource';
 import { runPageLoadWorkflows } from '../lib/bindingEngine';
-import { loadDatabaseRows, parseRows } from '../lib/databaseRows';
+import { loadDatabaseRows } from '../lib/databaseRows';
+import { useDatabaseRows } from '../hooks/useDatabaseRows';
 import { CustomHtmlView } from '../blocks/CustomHtmlBlock';
 import { RepeatView } from '../blocks/RepeatBlock';
 import { ListRowsView } from '../blocks/ListBlock';
@@ -446,34 +447,17 @@ function PublishedDatabaseBlock({ block }: { block: ExtractedBlock }) {
 function PublishedListBlock({ block }: { block: ExtractedBlock }) {
   const position = useAtomValue(blockPositionAtom(block.id));
   const runtimeState = useAtomValue(blockRuntimeAtom(block.id));
-  const store = useStore();
 
   const { outer: outerStyle } = blockToCSS(block.type, position, runtimeState);
 
   const trackedBlockId = runtimeState?.trackedBlockId;
-  const [supabaseRows, setSupabaseRows] = useState<any[]>([]);
-
-  useEffect(() => {
-    if (!trackedBlockId) {
-      setSupabaseRows([]);
-      return;
-    }
-
-    supabase
-      .rpc('list_database_rows', { p_block_id: trackedBlockId })
-      .then(({ data, error }: any) => {
-        if (error) return;
-        if (data) {
-          setSupabaseRows(parseRows(data));
-        }
-      });
-  }, [trackedBlockId]);
-
-  const dbAtom = useMemo(() => blockRuntimeAtom(trackedBlockId || ''), [trackedBlockId]);
-  const dbState = useAtomValue(dbAtom, { store });
-  const dbRows = dbState?.rows || [];
-
-  const displayRows = dbRows.length > 0 ? dbRows : supabaseRows;
+  /**
+   * The same hook the editor's List and the repeater use. This was a second
+   * copy of it, which fetched ONCE -- so a visitor watching a page never saw a
+   * new row arrive. Polling here, because that is the whole shared-state idea
+   * and the hook already pauses on a hidden tab.
+   */
+  const { rows: displayRows, columns: trackedColumns } = useDatabaseRows(trackedBlockId, true);
 
   const customBg = runtimeState?.backgroundColor || '#ffffff';
   const customBorderRadius = runtimeState?.borderRadius !== undefined ? `${runtimeState.borderRadius}px` : '8px';
@@ -507,7 +491,7 @@ function PublishedListBlock({ block }: { block: ExtractedBlock }) {
         */}
         <ListRowsView
           rows={displayRows}
-          columns={dbState?.columns}
+          columns={trackedColumns}
           trackedBlockId={trackedBlockId}
         />
       </div>

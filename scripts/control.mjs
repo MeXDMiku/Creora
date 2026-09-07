@@ -1619,7 +1619,31 @@ const CONTROLS = [
     file: 'src/lib/bindingEngine.ts',
     find: `            const parsedRows = parseRows(data);`,
     with: `            const parsedRows = (data || []).map((item) => ({ id: item.id, ...item.row_data }));`,
-    expect: ['AND NOBODY KEEPS THEIR OWN COPY OF WHAT A STORED ROW LOOKS LIKE'],
+    expect: ['AND NOBODY ANYWHERE KEEPS THEIR OWN COPY OF WHAT A STORED ROW LOOKS LIKE'],
+  },
+
+  {
+    name: 'rows: a List prefers its fetched copy over the live one',
+    file: 'src/hooks/useDatabaseRows.ts',
+    find: `    rows: trackedIsHere ? trackedRows : fetched,`,
+    with: `    rows: fetched.length ? fetched : trackedRows,`,
+    expect: ['THE LIVE ROWS WIN OVER THE FETCHED ONES, because the store is the live one'],
+  },
+  {
+    name: 'rows: the published List goes back to its own copy of the two-source read',
+    file: 'src/components/PublishedRenderer.tsx',
+    find: `  const { rows: displayRows, columns: trackedColumns } = useDatabaseRows(trackedBlockId, true);`,
+    with: `  const { rows: displayRows, columns: trackedColumns } = itsOwnTwoSourceRead(trackedBlockId);`,
+    expect: ['EVERY LIST AND REPEATER ASKS THE SAME HOOK', 'and the published one polls, so a visitor sees a new row arrive'],
+  },
+  {
+    name: 'rows: a file outside the shared one keeps its own row parse',
+    file: 'src/blocks/ListBlock.tsx',
+    find: `  const { rows: displayRows, columns: trackedColumns } = useDatabaseRows(trackedBlockId);`,
+    with: `  const _copy = (d: any) => (d || []).map((item: any) => ({ id: item.id, ...item.row_data }));
+  void _copy;
+  const { rows: displayRows, columns: trackedColumns } = useDatabaseRows(trackedBlockId);`,
+    expect: ['AND NOBODY ANYWHERE KEEPS THEIR OWN COPY OF WHAT A STORED ROW LOOKS LIKE'],
   },
 ];
 

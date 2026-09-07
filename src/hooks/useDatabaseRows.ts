@@ -4,6 +4,7 @@ import { blockRuntimeAtom } from '../state/atoms';
 import { supabase } from '../lib/supabase';
 import { usePollWhileVisible } from './usePollWhileVisible';
 import type { Row } from '../lib/rows';
+import { parseRows } from '../lib/databaseRows';
 
 /**
  * The rows of a Database, for a block that is not that Database.
@@ -40,7 +41,7 @@ export function useDatabaseRows(trackedBlockId: string | undefined | null, poll 
         setLoadState('error');
         return;
       }
-      setFetched(((data || []) as any[]).map((item) => ({ id: item.id, ...item.row_data })));
+      setFetched(parseRows(data) as Row[]);
       setError(null);
       setLoadState('ready');
     } catch (err: any) {

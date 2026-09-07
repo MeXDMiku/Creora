@@ -6964,9 +6964,50 @@ group('a page left open does not spend the month');
    * row is STORED and how a page reads it, which is the last line that should
    * be written three ways.
    */
-  const parseCopies = ['src/blocks/DatabaseBlock.tsx', 'src/components/PublishedRenderer.tsx', 'src/lib/bindingEngine.ts']
+  /**
+   * Every file, not a list of three.
+   *
+   * The first version of this check named the three files I had just changed,
+   * and ListBlock -- which had its own copy of the same two lines -- was not
+   * among them. It slipped through and was found by hand a few minutes later,
+   * while merging the block beside it. A check that only looks where you
+   * already looked is a check that agrees with you.
+   */
+  const walk = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap(e =>
+      e.isDirectory() ? walk(`${dir}/${e.name}`) : /\.tsx?$/.test(e.name) ? [`${dir}/${e.name}`] : []);
+  const parseCopies = walk('src')
+    .filter(f => f !== 'src/lib/databaseRows.ts')
     .filter(f => /\.\.\.item\.row_data/.test(readFileSync(f, 'utf8')));
-  check('AND NOBODY KEEPS THEIR OWN COPY OF WHAT A STORED ROW LOOKS LIKE', parseCopies, []);
+  check('AND NOBODY ANYWHERE KEEPS THEIR OWN COPY OF WHAT A STORED ROW LOOKS LIKE',
+    parseCopies, []);
+  check('and the src tree was actually walked, or the line above proves nothing',
+    walk('src').length > 40, true);
+
+  /**
+   * A List holds no rows of its own: it shows another block's. Getting them is
+   * a two-source job -- the tracked block's own rows when it is on this page, a
+   * direct read when it is not, which is the ordinary case on a published page
+   * where only the List is on screen. Both Lists had their own copy of that,
+   * and the editor's still carried the row parse above.
+   *
+   * `useDatabaseRows` had done the job properly for a repeater the whole time,
+   * and its own note says why: "two components fetching the same thing
+   * separately is exactly how the editor and the published renderer drifted
+   * apart before." I wrote a FIFTH copy before noticing, and the check above --
+   * once it walked the whole tree instead of three files I had picked -- is
+   * what found it.
+   */
+  const trackedSrc = readFileSync('src/hooks/useDatabaseRows.ts', 'utf8');
+  check('THE LIVE ROWS WIN OVER THE FETCHED ONES, because the store is the live one',
+    /rows: trackedIsHere \? trackedRows : fetched/.test(trackedSrc), true);
+  check('and the columns come back with them, since every caller wants both',
+    /columns: \(tracked\?\.columns/.test(trackedSrc), true);
+  check('EVERY LIST AND REPEATER ASKS THE SAME HOOK',
+    ['src/blocks/ListBlock.tsx', 'src/components/PublishedRenderer.tsx', 'src/blocks/RepeatBlock.tsx']
+      .filter(f => !/useDatabaseRows\(/.test(readFileSync(f, 'utf8'))), []);
+  check('and the published one polls, so a visitor sees a new row arrive',
+    /useDatabaseRows\(trackedBlockId, true\)/.test(readFileSync('src/components/PublishedRenderer.tsx', 'utf8')), true);
 
   const hookSrc = readFileSync('src/hooks/usePollWhileVisible.ts', 'utf8');
   /**
@@ -10694,7 +10735,7 @@ group('reading a table rows, for both sides at once');
  * Raise it in the same commit that adds the checks, the way the drift budget
  * above is raised: a number changed where it can be seen in a diff.
  */
-const EXPECTED_CHECKS = 2386;
+const EXPECTED_CHECKS = 2391;
 reachedTheEnd = true;
 if (passed + failed !== EXPECTED_CHECKS) {
   failed++;

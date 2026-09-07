@@ -1,12 +1,12 @@
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
 import type { NodeViewProps } from '@tiptap/react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
+import { useDatabaseRows } from '../hooks/useDatabaseRows';
 import { listRowLines, listIsEmpty } from '../lib/rows';
 import { blockRuntimeAtom, contextMenuAtom, getBlockTypeDisplayName } from '../state/atoms';
-import { useMemo, useRef, useState, useEffect, useCallback } from 'react';
+import { useRef, useState, useEffect, useCallback } from 'react';
 import { useBlockDrag } from '../hooks/useBlockDrag';
 import { Node } from '@tiptap/core';
-import { supabase } from '../lib/supabase';
 
 const ListBlockComponent = (props: NodeViewProps) => {
   const { node } = props;
@@ -23,7 +23,6 @@ const ListBlockComponent = (props: NodeViewProps) => {
   }
 
   const [isHovered, setIsHovered] = useState(false);
-  const [supabaseRows, setSupabaseRows] = useState<any[]>([]);
 
   const { position, handlePointerDown, handlePointerMove, handlePointerUp } = useBlockDrag(
     blockId,
@@ -58,37 +57,13 @@ const ListBlockComponent = (props: NodeViewProps) => {
 
   const trackedBlockId = runtimeState?.trackedBlockId;
 
-  // Fetch from Supabase when tracked block changes
-  useEffect(() => {
-    if (!trackedBlockId) {
-      setSupabaseRows([]);
-      return;
-    }
-
-    supabase
-      .rpc('list_database_rows', { p_block_id: trackedBlockId })
-      .then(({ data, error }: any) => {
-        if (error) {
-          console.warn('[ListBlock] Supabase fetch warning:', error.message);
-          return;
-        }
-        if (data) {
-          const parsed = data.map((item: any) => ({
-            id: item.id,
-            ...item.row_data
-          }));
-          setSupabaseRows(parsed);
-        }
-      });
-  }, [trackedBlockId]);
-
-  // Read DatabaseBlock state from store reactively
-  const dbAtom = useMemo(() => blockRuntimeAtom(trackedBlockId || ''), [trackedBlockId]);
-  const dbState = useAtomValue(dbAtom, { store });
-  const dbRows = dbState?.rows || [];
-
-  // Use store rows if populated/active, fallback to fetched supabaseRows
-  const displayRows = dbRows.length > 0 ? dbRows : supabaseRows;
+  /**
+   * The hook a repeater already used, rather than a fourth copy of the same
+   * two-source read. Its own note says why it exists: "two components fetching
+   * the same thing separately is exactly how the editor and the published
+   * renderer drifted apart before." Both Lists had done precisely that.
+   */
+  const { rows: displayRows, columns: trackedColumns } = useDatabaseRows(trackedBlockId);
 
   // Determine standard styles from runtime config
   const customBg = runtimeState?.backgroundColor || '#ffffff';
@@ -157,7 +132,7 @@ const ListBlockComponent = (props: NodeViewProps) => {
       >
         <ListRowsView
           rows={displayRows}
-          columns={dbState?.columns}
+          columns={trackedColumns}
           trackedBlockId={trackedBlockId}
         />
       </div>
