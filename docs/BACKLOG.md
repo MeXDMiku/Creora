@@ -208,7 +208,7 @@ un-cheatable. **Three hats, one problem: there is nowhere private to run code.**
 | | |
 | :--- | :--- |
 | PART | **Named, typed outputs.** Dropdowns now show names. Still missing: a block publishing a *named variable* later blocks reference by name, not by block id. |
-| TODO | **If / Else as a visible branch node** — spec below. |
+| DONE | **If / Else as a visible branch node** *(7 Sep)* — built to the spec below, in that order. A `branchBlock` with one input and two outputs; `sourcePort` on connections and steps, where ABSENT means the single old output; `run`, a new action, because nothing could trigger a block that holds no value. Verified in a browser: the two sides swap with the answer, and draw green and orange. |
 | DONE | **Runs** — a run log exists. |
 | TODO | **Versions**, and a Draft / Activate distinction. |
 | TODO | **Per-node permissions** — the ownership model arriving at node level. |
@@ -311,6 +311,10 @@ Conditions today live *inside* a workflow step (`step.condition`, set in the
 ConnectionPopup). They work, but they are invisible: the branch cannot be seen on
 the canvas, which is the whole complaint.
 
+**Built on 7 Sep 2026, in exactly this order.** Kept below as written, because
+the five steps were right and the notes on migration safety are the reason it
+did not break anything.
+
 **The blocker is the port model.** A block has exactly one output today —
 `data-port-output={blockId}` — and a connection is
 `{id, sourceBlockId, targetBlockId}`. An If/Else node needs **two distinguishable
@@ -325,6 +329,23 @@ outputs**. So:
    condition **once**, then runs only the steps whose `sourcePort` matches.
 5. The node itself: a new `branchBlock`, **or** a ShapeBlock role `branch` — the
    role system now exists, so the second is worth considering first.
+
+*Done, 1–4 as written. For 5 the role was considered and rejected: a branch is
+control flow, not a shape, and ShapeBlock's ports are already role-gated — a
+second output for one role would tangle it. A dedicated `branchBlock` instead.*
+
+*One thing the spec did not foresee, and it is the piece without which none of
+the rest is reachable: the engine propagates by noticing a value CHANGED, and a
+branch has no value. Nothing could trigger one — a step pointing at it did
+nothing and the chain stopped dead. That needed a new action, `run`, which fires
+a target's own workflows without changing it. A primitive, so "press that button
+from here" came free with it.*
+
+*And a third answer. The spec says "evaluates the branch condition once, then
+runs only the steps whose sourcePort matches", which assumes the condition
+answers. One that CANNOT be worked out now fires neither side and says why:
+taking YES wrongly makes something happen, taking NO wrongly makes nothing
+happen, and nothing is what a quiet page looks like.*
 
 **Do not start this in the last third of a session.** It touches wiring, the
 overlay, the engine and persistence at once, and a half-migrated port model would
