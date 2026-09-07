@@ -10555,6 +10555,23 @@ group('the question a branch asks');
     /case 'run': \{/.test(engineSrc), true);
   check('and it cannot set off the block that set it off',
     /that would set off the block that set this off/.test(engineSrc), true);
+
+  /**
+   * AND EDITING A BRANCH WIRE MUST NOT QUIETLY KILL IT.
+   *
+   * Reopening a wire rebuilds its step. Without the port carried across, the
+   * rebuilt step has none, `portOf` reads that as `out`, a branch runs only the
+   * side it chose, and `out` is neither -- so the step can never run again.
+   * The connection is KEPT when editing, so the wire goes on being drawn, in
+   * green, pointing at something dead. Shipped and found within the hour.
+   */
+  const appBranchSrc = readFileSync('src/App.tsx', 'utf8');
+  check('EDITING A WIRE CARRIES ITS PORT ACROSS',
+    /sourcePort: connection\.sourcePort/.test(appBranchSrc), true);
+  check('and a new wire carries the one it was dragged from',
+    /sourcePort: portToSave\(activeWire\.sourcePort\)/.test(appBranchSrc), true);
+  check('and both the connection and the step are written only when there is one',
+    (appBranchSrc.match(/\.\.\.\(pending\.sourcePort \? \{ sourcePort: pending\.sourcePort \} : \{\}\)/g) || []).length, 2);
 }
 
 /**
@@ -10574,7 +10591,7 @@ group('the question a branch asks');
  * Raise it in the same commit that adds the checks, the way the drift budget
  * above is raised: a number changed where it can be seen in a diff.
  */
-const EXPECTED_CHECKS = 2366;
+const EXPECTED_CHECKS = 2369;
 reachedTheEnd = true;
 if (passed + failed !== EXPECTED_CHECKS) {
   failed++;

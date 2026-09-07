@@ -1554,6 +1554,21 @@ const CONTROLS = [
                 ? 'looping is fine actually'`,
     expect: ['and it cannot set off the block that set it off'],
   },
+
+  {
+    name: 'branch: editing a wire drops its port, so it draws but never runs again',
+    file: 'src/App.tsx',
+    find: `      sourcePort: connection.sourcePort,`,
+    with: `      // control: the port is not carried`,
+    expect: ['EDITING A WIRE CARRIES ITS PORT ACROSS'],
+  },
+  {
+    name: 'branch: a new wire forgets which port it was dragged from',
+    file: 'src/App.tsx',
+    find: `              sourcePort: portToSave(activeWire.sourcePort),`,
+    with: `              // control: the drag forgets its port`,
+    expect: ['and a new wire carries the one it was dragged from'],
+  },
 ];
 
 /**

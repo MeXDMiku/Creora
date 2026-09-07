@@ -1830,6 +1830,20 @@ function ConnectionContextMenu() {
     if (!connection) { setMenu(null); return }
     setPending({
       sourceBlockId: connection.sourceBlockId,
+      /**
+       * CARRIED, OR EDITING A BRANCH WIRE SILENTLY KILLS IT.
+       *
+       * Without this, reopening a YES wire rebuilt its step with no port. A
+       * missing port reads as `out`, a branch runs only the steps whose port
+       * matches the side it chose, and `out` matches neither -- so the step
+       * could never run again. The connection is kept when editing, so the wire
+       * would go on being DRAWN, in green, pointing at something dead.
+       *
+       * Taken from the connection rather than from the loaded step: the
+       * connection is what the canvas draws, so it is the thing that must not
+       * disagree with itself.
+       */
+      sourcePort: connection.sourcePort,
       targetBlockId: connection.targetBlockId,
       editingConnectionId: menu.connectionId,
       x1: menu.x, y1: menu.y, x2: menu.x, y2: menu.y,
