@@ -10,7 +10,7 @@ import { blockToCSS } from '../lib/renderBlockStyles';
 import { valueAtPath } from '../lib/jsonPaths';
 import { fetchDataSource } from '../lib/dataSource';
 import { runPageLoadWorkflows } from '../lib/bindingEngine';
-import { computeDatabaseOutput } from '../lib/databaseOutput';
+import { loadDatabaseRows, parseRows } from '../lib/databaseRows';
 import { CustomHtmlView } from '../blocks/CustomHtmlBlock';
 import { RepeatView } from '../blocks/RepeatBlock';
 import { ListRowsView } from '../blocks/ListBlock';
@@ -329,52 +329,18 @@ function PublishedDatabaseBlock({ block }: { block: ExtractedBlock }) {
   // happening -- see hooks/usePollWhileVisible.
   const loadRowsRef = useRef<() => boolean | Promise<boolean>>(() => false);
   useEffect(() => {
-    async function loadRows(): Promise<boolean> {
-      try {
-        const { data, error } = await supabase
-          .rpc('list_database_rows', { p_block_id: block.id });
-
-        if (error) return true;
-
-        if (data) {
-          const parsedRows = data.map((item: any) => ({
-            id: item.id,
-            ...item.row_data
-          }));
-          const currentLocalState = store.get(blockRuntimeAtom(block.id));
-          const currentLocalRows = currentLocalState?.rows || [];
-          if (parsedRows.length > 0 || currentLocalRows.length === 0) {
-            let nextValue = 0;
-            nextValue = computeDatabaseOutput(parsedRows, currentLocalState);
-            // Did anything actually change? This runs on first paint AND on every
-            // poll, so firing workflows unconditionally would re-run them forever.
-            const changed =
-              JSON.stringify(currentLocalRows) !== JSON.stringify(parsedRows) ||
-              currentLocalState?.value !== nextValue;
-
-            store.set(blockRuntimeAtom(block.id), {
-              ...currentLocalState,
-              rows: parsedRows,
-              value: nextValue
-            });
-            recalculateAllFormulas(store);
-
-            if (changed) {
-              // Without this a visitor sees whatever count was saved into the page
-              // rather than the real one: "Count: 2" beside a Number Display of 0.
-              executeWorkflow(block.id, 'onChange', store);
-              recalculateAllFormulas(store);
-            }
-            return changed;
-          }
-        }
-        return false;
-      } catch (err) {
-        // Not "nothing changed" -- nothing was learned, and backing off from an
-        // unreachable server is backing off from the thing that needs retrying.
-        return true;
-      }
-    }
+    /**
+     * The same function the editor calls. It used to be a second copy of the
+     * same fifty lines, and the two had already drifted -- see the note in
+     * src/lib/databaseRows.ts, which is the whole reason this is one function.
+     */
+    const loadRows = () => loadDatabaseRows(
+      block.id,
+      store,
+      (id) => supabase.rpc('list_database_rows', { p_block_id: id }),
+      () => { executeWorkflow(block.id, 'onChange', store); recalculateAllFormulas(store); },
+      () => recalculateAllFormulas(store),
+    );
     loadRowsRef.current = loadRows;
     loadRows();
   }, [block.id, outputMode, columns.length, store]);
@@ -498,11 +464,7 @@ function PublishedListBlock({ block }: { block: ExtractedBlock }) {
       .then(({ data, error }: any) => {
         if (error) return;
         if (data) {
-          const parsed = data.map((item: any) => ({
-            id: item.id,
-            ...item.row_data
-          }));
-          setSupabaseRows(parsed);
+          setSupabaseRows(parseRows(data));
         }
       });
   }, [trackedBlockId]);

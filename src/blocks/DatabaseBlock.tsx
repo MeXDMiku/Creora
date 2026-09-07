@@ -8,6 +8,7 @@ import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { executeWorkflow, recalculateAllFormulas } from '../lib/bindingEngine';
 import { describeRowWriteError, withoutRow } from '../lib/rowWrite';
 import { computeDatabaseOutput } from '../lib/databaseOutput';
+import { loadDatabaseRows } from '../lib/databaseRows';
 import { blockRuntimeAtom, activeWireAtom, snapTargetAtom, triggerSaveAtom, contextMenuAtom, getPortBadge, getBlockTypeDisplayName } from '../state/atoms';
 import { useMemo, useRef, useState, useEffect, useCallback } from 'react';
 import { useBlockDrag } from '../hooks/useBlockDrag';
@@ -44,68 +45,24 @@ const DatabaseBlockComponent = (props: NodeViewProps) => {
   // nothing is happening -- see hooks/usePollWhileVisible.
   const loadRowsRef = useRef<() => boolean | Promise<boolean>>(() => false);
   useEffect(() => {
-    async function loadRows(): Promise<boolean> {
-      try {
-        const { data, error } = await supabase
-          .rpc('list_database_rows', { p_block_id: blockId });
-
-        if (error) {
-          console.warn('[Supabase load info]: Table public.database_rows not initialized or missing, using local state.', error.message);
-          // Not "nothing changed" -- nothing was learned. Slowing down because
-          // the server is unreachable would be backing off from the one thing
-          // that needs retrying.
-          return true;
-        }
-
-        if (data) {
-          const parsedRows = data.map((item: any) => ({
-            id: item.id,
-            ...item.row_data
-          }));
-
-          const currentLocalState = store.get(atomInstance);
-          const currentLocalRows = currentLocalState?.rows || [];
-
-          if (parsedRows.length > 0 || currentLocalRows.length === 0) {
-            // Sync value based on outputMode
-            let nextValue = 0;
-            nextValue = computeDatabaseOutput(parsedRows, currentLocalState || runtimeState);
-
-            const changed =
-              JSON.stringify(currentLocalRows) !== JSON.stringify(parsedRows) ||
-              currentLocalState?.value !== nextValue;
-
-            // Spread the CURRENT stored state, not the one captured when this
-            // effect ran. This fetch is async and races page hydration: with the
-            // stale closure it wrote this block's *default* columns and name back
-            // over the page that had just loaded, and the next save persisted it.
-            // The Feedback page rendered as "Database / Name / Age" in the editor
-            // while disk still said "Submissions / Name / Message".
-            store.set(atomInstance, {
-              ...(currentLocalState || runtimeState),
-              rows: parsedRows,
-              value: nextValue
-            });
-            recalculateAllFormulas(store);
-
-            if (changed) {
-              // Same reason as the published renderer: a Number Display wired to
-              // this block otherwise shows whatever count was saved, not the real one.
-              executeWorkflow(blockId, 'onChange', store);
-              recalculateAllFormulas(store);
-            }
-            return changed;
-          }
-        }
-        return false;
-      } catch (err) {
-        console.error('Error fetching database rows from Supabase:', err);
-        return true;
-      }
-    }
+    /**
+     * One implementation, shared with the published page.
+     *
+     * This was fifty lines here and fifty more in PublishedRenderer, and they
+     * had already drifted in the one place the comment inside `loadDatabaseRows`
+     * describes. Database is the block that writes real data, so it is the
+     * worst possible place for two copies. See src/lib/databaseRows.ts.
+     */
+    const loadRows = () => loadDatabaseRows(
+      blockId,
+      store,
+      (id) => supabase.rpc('list_database_rows', { p_block_id: id }),
+      () => { executeWorkflow(blockId, 'onChange', store); recalculateAllFormulas(store); },
+      () => recalculateAllFormulas(store),
+    );
     loadRowsRef.current = loadRows;
     loadRows();
-  }, [blockId, outputMode, columns.length]);
+  }, [blockId, outputMode, columns.length, store]);
 
   // Rows can arrive from anyone using the published page, so keep looking --
   // and, once migration 0010 is run, be told the moment they do.

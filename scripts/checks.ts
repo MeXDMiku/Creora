@@ -31,6 +31,7 @@ import { whatBreaksIfDeleted, breakageSummary, workflowsAfterDeleting, nodeName 
 import { planFormulas, circleMessage } from '../src/lib/formulaOrder';
 import { chooseFirstPage } from '../src/lib/firstPage';
 import { portOf, isDefaultPort, portToSave, portWords, OUTPUT_PORTS } from '../src/lib/ports';
+import { loadDatabaseRows, parseRows } from '../src/lib/databaseRows';
 import { answerBranch, portForAnswer } from '../src/lib/branch';
 import {
   resolveLayout,
@@ -6171,10 +6172,18 @@ group('a row that was not saved does not stay on the page');
     /debouncedSaveRef[\s\S]{0,900}reportWriteFailure\(error\)/.test(blockSrc), true);
   check('and the reason for that exception is written down',
     blockSrc.includes('would lose'), true);
-  // Loading is still allowed to fall back quietly: nothing was written, so
-  // nothing is being misreported.
-  check('reading rows may still fall back quietly, since nothing was written',
-    blockSrc.includes('[Supabase load info]'), true);
+  /**
+   * Loading is still allowed to fail quietly: nothing was WRITTEN, so nothing
+   * is being misreported. The proof used to be a console string in this file;
+   * the reading half now lives in one place for both sides, so the property is
+   * asserted where it actually is -- a failed read returns without touching the
+   * rows it already holds.
+   */
+  const rowsSrc = readFileSync('src/lib/databaseRows.ts', 'utf8');
+  check('reading rows may still fail quietly, since nothing was written',
+    /if \(error\) return true;/.test(rowsSrc), true);
+  check('and a failed read never writes over the rows already held',
+    /catch \{\s*\n\s*return true;\s*\n\s*\}/.test(rowsSrc), true);
 
   /**
    * AND SOMETHING HAS TO RENDER IT.
@@ -6933,12 +6942,31 @@ group('a page left open does not spend the month');
    * as "something changed" -- backing off from an unreachable server is backing
    * off from the one thing that needs retrying.
    */
+  /**
+   * These used to read the two copies of this loader and assert each behaved.
+   * There is one copy now -- BACKLOG.md had the duplication written down as
+   * debt, and the two had already drifted -- so the behaviour is asserted once,
+   * and what the two SIDES are checked for is that they both call it.
+   */
   const dbSrc = readFileSync('src/blocks/DatabaseBlock.tsx', 'utf8');
   const pubSrc = readFileSync('src/components/PublishedRenderer.tsx', 'utf8');
-  check('the editor’s table says whether anything changed', /return changed;/.test(dbSrc), true);
-  check('AND SO DOES THE PUBLISHED ONE', /return changed;/.test(pubSrc), true);
-  check('a failure does not slow the poll down in either',
-    (dbSrc.match(/return true;/g) || []).length >= 2 && (pubSrc.match(/return true;/g) || []).length >= 2, true);
+  const sharedRows = readFileSync('src/lib/databaseRows.ts', 'utf8');
+  check('the loader says whether anything changed', /return changed;/.test(sharedRows), true);
+  check('and a failure does not slow the poll down',
+    (sharedRows.match(/return true;/g) || []).length >= 2, true);
+  check('THE EDITOR READS ROWS THROUGH THE SHARED ONE', /loadDatabaseRows\(/.test(dbSrc), true);
+  check('AND SO DOES THE PUBLISHED PAGE, which is where the two used to drift',
+    /loadDatabaseRows\(/.test(pubSrc), true);
+  /**
+   * The shape of a stored row -- its own id with the saved fields spread on top
+   * -- was written in three places: the editor's table, the published List's
+   * fetch, and the List loader in the engine. It is the boundary between how a
+   * row is STORED and how a page reads it, which is the last line that should
+   * be written three ways.
+   */
+  const parseCopies = ['src/blocks/DatabaseBlock.tsx', 'src/components/PublishedRenderer.tsx', 'src/lib/bindingEngine.ts']
+    .filter(f => /\.\.\.item\.row_data/.test(readFileSync(f, 'utf8')));
+  check('AND NOBODY KEEPS THEIR OWN COPY OF WHAT A STORED ROW LOOKS LIKE', parseCopies, []);
 
   const hookSrc = readFileSync('src/hooks/usePollWhileVisible.ts', 'utf8');
   /**
@@ -10575,6 +10603,81 @@ group('the question a branch asks');
 }
 
 /**
+ * READING A TABLE'S ROWS — ONE IMPLEMENTATION, CHECKED BY RUNNING IT.
+ *
+ * The editor and the published page each had their own fifty-line copy of this.
+ * BACKLOG.md has had it written down as debt since August: "that is where the
+ * two sides silently drift -- and Database is the one that writes real data."
+ * They HAD drifted, in the exact place the editor's own comment warns about.
+ *
+ * These run the function rather than reading its source, which the two copies
+ * never allowed: there was no one thing to run.
+ */
+group('reading a table rows, for both sides at once');
+{
+  const B = 'databaseBlock__rr00000001';
+  const base = { visible: true, disabled: false, loading: false, error: null };
+  const mk = (rows?: any[]) => {
+    const store = createStore();
+    store.set(allBlockIdsAtom, [B]);
+    store.set(blockRuntimeAtom(B), { ...base, value: 0, outputMode: 'row_count', ...(rows ? { rows } : {}) });
+    return store;
+  };
+  const server = (rows: any[]) => async () => ({ data: rows });
+  const rowsOf = (store: any) => store.get(blockRuntimeAtom(B))?.rows;
+
+  const s1 = mk();
+  const changed1 = await loadDatabaseRows(B, s1, server([{ id: 'r1', row_data: { Name: 'Ada' } }]));
+  check('ROWS ARRIVE AND LAND IN THE BLOCK', rowsOf(s1), [{ id: 'r1', Name: 'Ada' }]);
+  check('and that counts as a change, so the poll stays quick', changed1, true);
+  check('the count is worked out from them', s1.get(blockRuntimeAtom(B))?.value, 1);
+
+  const s2 = mk([{ id: 'r1', Name: 'Ada' }]);
+  s2.set(blockRuntimeAtom(B), { ...s2.get(blockRuntimeAtom(B)), value: 1 });
+  check('THE SAME ROWS AGAIN ARE NOT A CHANGE, or the poll never slows down',
+    await loadDatabaseRows(B, s2, server([{ id: 'r1', row_data: { Name: 'Ada' } }])), false);
+
+  /**
+   * The guard that matters most. A read coming back empty is far more often a
+   * server that has not caught up than a table somebody emptied, and an empty
+   * table is indistinguishable from a page that is simply quiet.
+   */
+  const s3 = mk([{ id: 'r1', Name: 'Ada' }]);
+  const changed3 = await loadDatabaseRows(B, s3, server([]));
+  check('AN EMPTY ANSWER DOES NOT WIPE THE ROWS ALREADY HELD', rowsOf(s3), [{ id: 'r1', Name: 'Ada' }]);
+  check('and it is not reported as a change either', changed3, false);
+  const s4 = mk();
+  await loadDatabaseRows(B, s4, server([]));
+  check('but an empty answer against nothing held is simply nothing', rowsOf(s4), []);
+
+  /**
+   * A failure returns TRUE -- "something changed" -- which reads oddly and is
+   * right: the caller uses it to decide whether to back off, and backing off
+   * from an unreachable server is backing off from the thing that needs retrying.
+   */
+  const s5 = mk([{ id: 'r1', Name: 'Ada' }]);
+  check('A FAILED READ DOES NOT SLOW THE POLLING DOWN',
+    await loadDatabaseRows(B, s5, async () => ({ error: { message: 'no' } })), true);
+  check('and it leaves the rows it already had alone', rowsOf(s5), [{ id: 'r1', Name: 'Ada' }]);
+  const s6 = mk([{ id: 'r1', Name: 'Ada' }]);
+  check('and neither does one that throws',
+    await loadDatabaseRows(B, s6, async () => { throw new Error('down'); }), true);
+  check('which also leaves them alone', rowsOf(s6), [{ id: 'r1', Name: 'Ada' }]);
+
+  // The workflow only fires when the answer really moved, or a page with a
+  // Database on it would re-run its wires for ever.
+  let fired = 0;
+  const s7 = mk();
+  await loadDatabaseRows(B, s7, server([{ id: 'r1', row_data: {} }]), () => { fired++; });
+  await loadDatabaseRows(B, s7, server([{ id: 'r1', row_data: {} }]), () => { fired++; });
+  check('THE BLOCK ONLY TELLS THE PAGE WHEN SOMETHING ACTUALLY MOVED', fired, 1);
+
+  check('a stored row is its own id with the saved fields on top',
+    parseRows([{ id: 7, row_data: { Name: 'Ada' } }]), [{ id: '7', Name: 'Ada' }]);
+  check('and nothing at all is no rows, not a crash', parseRows(undefined), []);
+}
+
+/**
  * HOW MANY CHECKS THERE ARE, WRITTEN DOWN.
  *
  * Not a vanity number. Two runs an hour apart reported 1737 and 1736 with
@@ -10591,7 +10694,7 @@ group('the question a branch asks');
  * Raise it in the same commit that adds the checks, the way the drift budget
  * above is raised: a number changed where it can be seen in a diff.
  */
-const EXPECTED_CHECKS = 2369;
+const EXPECTED_CHECKS = 2386;
 reachedTheEnd = true;
 if (passed + failed !== EXPECTED_CHECKS) {
   failed++;

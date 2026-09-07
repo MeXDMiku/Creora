@@ -1569,6 +1569,58 @@ const CONTROLS = [
     with: `              // control: the drag forgets its port`,
     expect: ['and a new wire carries the one it was dragged from'],
   },
+
+  // --- one row loader for both sides -----------------------------------------
+  {
+    name: 'rows: an empty answer wipes the rows already held',
+    file: 'src/lib/databaseRows.ts',
+    find: `    if (parsedRows.length === 0 && currentRows.length > 0) return false;`,
+    with: `    // control: an empty answer is believed`,
+    expect: [
+      'AN EMPTY ANSWER DOES NOT WIPE THE ROWS ALREADY HELD',
+      'and it is not reported as a change either',
+    ],
+  },
+  {
+    name: 'rows: a block is told the page moved even when it did not',
+    file: 'src/lib/databaseRows.ts',
+    find: `    if (changed) onChanged?.();`,
+    with: `    onChanged?.();`,
+    expect: ['THE BLOCK ONLY TELLS THE PAGE WHEN SOMETHING ACTUALLY MOVED'],
+  },
+  {
+    name: 'rows: a stored row loses its own id',
+    file: 'src/lib/databaseRows.ts',
+    find: `  return (data || []).map((item: any) => ({ id: String(item.id), ...item.row_data }));`,
+    with: `  return (data || []).map((item: any) => ({ ...item.row_data })) as StoredRow[];`,
+    expect: [
+      'a stored row is its own id with the saved fields on top',
+      'ROWS ARRIVE AND LAND IN THE BLOCK',
+    ],
+  },
+  {
+    name: 'rows: a failed read stops asking again',
+    file: 'src/lib/databaseRows.ts',
+    find: `    if (error) return true;`,
+    with: `    if (error) return false;`,
+    expect: ['reading rows may still fail quietly, since nothing was written'],
+  },
+  {
+    name: 'rows: the published page goes back to its own copy of the loader',
+    file: 'src/components/PublishedRenderer.tsx',
+    find: `    const loadRows = () => loadDatabaseRows(
+      block.id,`,
+    with: `    const loadRows = () => itsOwnCopyOfRowLoading(
+      block.id,`,
+    expect: ['AND SO DOES THE PUBLISHED PAGE, which is where the two used to drift'],
+  },
+  {
+    name: 'rows: the engine keeps its own copy of what a stored row looks like',
+    file: 'src/lib/bindingEngine.ts',
+    find: `            const parsedRows = parseRows(data);`,
+    with: `            const parsedRows = (data || []).map((item) => ({ id: item.id, ...item.row_data }));`,
+    expect: ['AND NOBODY KEEPS THEIR OWN COPY OF WHAT A STORED ROW LOOKS LIKE'],
+  },
 ];
 
 /**

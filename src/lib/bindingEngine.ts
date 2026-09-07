@@ -16,6 +16,7 @@ import { addFacets, evaluateExpression, truthy, type FormulaValue, explainUnread
 import { describeRowWriteError, withoutRow } from './rowWrite';
 import { functionNameFor, argsFor, describeActionError } from './actions';
 import { planFormulas, circleMessage } from './formulaOrder';
+import { parseRows } from './databaseRows';
 import { answerBranch, portForAnswer } from './branch';
 import { portOf } from './ports';
 export { evaluateCondition };
@@ -1801,10 +1802,7 @@ export function fetchListBlockRows(
               });
               return;
             }
-            const parsedRows = (data || []).map((item: any) => ({
-              id: item.id,
-              ...item.row_data
-            }));
+            const parsedRows = parseRows(data);
             const currentListRows = currentListState?.rows || [];
             /**
              * The old rows are kept when a read comes back empty and there were
