@@ -108,6 +108,7 @@ function DataSourceComponent({ node }: NodeViewProps) {
 
   return (
     <NodeViewWrapper
+      data-block-id={blockId}
       as="div"
       ref={wrapperRef as any}
       className="datasource-block-wrapper"

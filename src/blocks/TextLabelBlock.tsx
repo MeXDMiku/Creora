@@ -71,6 +71,7 @@ const TextLabelBlockComponent = (props: NodeViewProps) => {
 
   return (
     <NodeViewWrapper 
+      data-block-id={blockId}
       as="div" 
       className="text-label-block-wrapper" 
       style={outerStyle}

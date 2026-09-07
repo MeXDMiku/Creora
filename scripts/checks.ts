@@ -2552,6 +2552,29 @@ group('ports do not agree on where they sit, which is why the rule above exists'
   check('NO BLOCK MOUNTS A PORT ONLY WHILE IT IS HOVERED, or its wires cannot be measured',
     hoverMounted, []);
 
+  /**
+   * AND EVERY BLOCK SAYS WHICH BLOCK IT IS.
+   *
+   * The hidden-edge overlay used to find a block's box THROUGH A PORT, because
+   * ports carried the block id and the wrappers did not. That silently drew
+   * nothing for a List, which has no ports at all -- and a List pointed at a
+   * table through `trackedBlockId` is the commonest hidden dependency there is,
+   * and the worked example in that file's own notes. Found by building one and
+   * watching no line appear.
+   *
+   * Every wrapper carries `data-block-id` now. A block without it is invisible
+   * to anything that measures the canvas, which is a whole class of silence.
+   */
+  const noId = readdirSync('src/blocks')
+    .filter(f => f.endsWith('.tsx') && !f.endsWith('.inspector.tsx'))
+    .filter(f => readFileSync(`src/blocks/${f}`, 'utf8').includes('<NodeViewWrapper'))
+    .filter(f => !readFileSync(`src/blocks/${f}`, 'utf8').includes('data-block-id={blockId}'))
+    .sort();
+  check('EVERY BLOCK WRAPPER SAYS WHICH BLOCK IT IS, or nothing can measure it', noId, []);
+  check('and there are blocks to check, or the line above proves nothing',
+    readdirSync('src/blocks').filter(f => f.endsWith('.tsx') && !f.endsWith('.inspector.tsx')).length > 10,
+    true);
+
   check('there are ports to find', ports > 0, true);
   // Both sides non-zero is the whole point: the day this stops being true a
   // transform in the shared rule becomes safe, and not before.
@@ -4101,6 +4124,36 @@ group('deleting a page says what it costs first');
   check('and every row in them', full.rowCount, 3);
   check('a button is not a table', full.tables.some(t => t.name === 'Submit'), false);
   check('the count is complete', full.countIsComplete, true);
+
+  /**
+   * A LIST HOLDS NOTHING. IT SHOWS WHAT A TABLE HOLDS.
+   *
+   * `fetchListBlockRows` keeps a copy of the rows a List is displaying in that
+   * List's own runtime state. The Health panel had its own second copy of this
+   * count that summed `rows` on EVERY block, so a table with two rows and one
+   * List showing it reported four -- two inches from the table's own
+   * "Count: 2" -- and fed that doubled number to the cost estimate under a
+   * heading reading WHAT THIS COSTS TO KEEP ONLINE.
+   *
+   * The panel asks this function now. The second copy was the one that was
+   * wrong, which is what a second copy is for.
+   */
+  const withList: Record<string, any> = {
+    ...state,
+    'listBlock__l1': { blockName: 'Orders list', trackedBlockId: 'databaseBlock__d1', rows: [{ Name: 'Ada', Total: 10 }, { Name: 'Grace', Total: 20 }] },
+  };
+  const mirrored = summarisePageData(
+    ['databaseBlock__d1', 'listBlock__l1'],
+    (id: string) => withList[id],
+    isDb,
+  );
+  check('A LIST SHOWING TWO ROWS DOES NOT MAKE THEM FOUR', mirrored.rowCount, 2);
+  check('and it is not counted as a table of its own', mirrored.tableCount, 1);
+  check('THE HEALTH PANEL ASKS THIS FUNCTION, rather than keeping a second count',
+    readFileSync('src/components/HealthPanel.tsx', 'utf8').includes('summarisePageData('), true);
+  check('and no longer sums rows on every block itself',
+    /const rows = store\.get\(blockRuntimeAtom\(id\)\)\?\.rows/.test(
+      readFileSync('src/components/HealthPanel.tsx', 'utf8')), false);
 
   /**
    * A table whose rows were never fetched must not contribute a confident zero.
@@ -10392,7 +10445,7 @@ group('which page opens, and whether one has to be made');
  * Raise it in the same commit that adds the checks, the way the drift budget
  * above is raised: a number changed where it can be seen in a diff.
  */
-const EXPECTED_CHECKS = 2328;
+const EXPECTED_CHECKS = 2334;
 reachedTheEnd = true;
 if (passed + failed !== EXPECTED_CHECKS) {
   failed++;

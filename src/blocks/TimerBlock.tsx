@@ -91,6 +91,7 @@ const TimerBlockComponent = (props: NodeViewProps) => {
 
   return (
     <NodeViewWrapper 
+      data-block-id={blockId}
       as="div" 
       className="timer-block-wrapper" 
       style={{ 

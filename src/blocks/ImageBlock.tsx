@@ -148,6 +148,7 @@ const ImageBlockComponent = (props: NodeViewProps) => {
 
   return (
     <NodeViewWrapper
+      data-block-id={blockId}
       as="div"
       ref={wrapperRef as any}
       className="image-block-wrapper"

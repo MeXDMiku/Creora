@@ -19,6 +19,8 @@ import { hiddenLinks } from '../lib/hiddenEdges'
 import { nodeName } from '../lib/blockDependents'
 import { costLines, inlinedImages } from '../lib/pageCost'
 import { measurePage } from '../lib/pageSize'
+import { summarisePageData } from '../lib/pageDelete'
+import { nodeTypeFromBlockId } from '../lib/blockRegistry'
 
 /**
  * The Operations layer: what this page is, and what is wrong with it.
@@ -55,14 +57,34 @@ export function HealthPanel({ onClose }: { onClose: () => void }) {
     return sortProblems(diagnosePage({ blockIds, states, workflows, formulas, connections, pages: pagesList, isPublished }))
   }, [blockIds, workflows, formulas, connections, store, isPublished])
 
-  const rowCount = useMemo(() => {
-    let total = 0
-    for (const id of blockIds) {
-      const rows = store.get(blockRuntimeAtom(id))?.rows
-      if (Array.isArray(rows)) total += rows.length
-    }
-    return total
-  }, [blockIds, store])
+  /**
+   * ROWS HELD, WHICH USED TO COUNT THE SAME ROWS TWICE.
+   *
+   * This summed `rows` on EVERY block. A List keeps a copy of the rows it is
+   * showing in its own runtime state -- `fetchListBlockRows` writes them there
+   * -- so a table with two rows and one List showing it reported four. A page
+   * with three Lists on one table would have reported eight. Seen on a real
+   * page: the table said "Count: 2" and the panel said "ROWS HELD 4" two inches
+   * away from it.
+   *
+   * That number is not decoration. It is fed to `costLines` as
+   * `rowsOnThisPage`, under a heading that says WHAT THIS COSTS TO KEEP ONLINE
+   * and a note saying these are measured here, for this page.
+   *
+   * `summarisePageData` already counted this correctly, for the page-delete
+   * warning, by asking which blocks are Database blocks -- a List displays
+   * rows, it does not hold them. This is the second copy, and the second copy
+   * is the one that was wrong.
+   */
+  const held = useMemo(
+    () => summarisePageData(
+      blockIds,
+      (id) => store.get(blockRuntimeAtom(id)),
+      (id) => nodeTypeFromBlockId(id) === 'databaseBlock',
+    ),
+    [blockIds, store],
+  )
+  const rowCount = held.rowCount
 
   /**
    * What this page costs to keep online.
@@ -152,7 +174,9 @@ export function HealthPanel({ onClose }: { onClose: () => void }) {
           ['Blocks', String(blockIds.length)],
           ['Wires', String((workflows || []).length)],
           ['Formulas', String((formulas || []).length)],
-          ['Rows held', String(rowCount)],
+          // "at least" when a table's rows were never fetched, which summarisePageData
+    // already knows and this panel used to have no way of saying.
+    ['Rows held', held.countIsComplete ? String(rowCount) : `at least ${rowCount}`],
         ].map(([label, value]) => (
           <div key={label} style={{ background: '#1e293b', borderRadius: '6px', padding: '8px' }}>
             <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em', color: '#64748b' }}>{label}</div>

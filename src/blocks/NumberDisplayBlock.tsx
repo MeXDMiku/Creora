@@ -71,6 +71,7 @@ const NumberDisplayBlockComponent = (props: NodeViewProps) => {
 
   return (
     <NodeViewWrapper 
+      data-block-id={blockId}
       as="div" 
       className="number-display-block-wrapper" 
       style={outerStyle}

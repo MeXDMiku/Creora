@@ -76,6 +76,7 @@ function CustomHtmlComponent({ node }: NodeViewProps) {
 
   return (
     <NodeViewWrapper
+      data-block-id={blockId}
       as="div"
       ref={wrapperRef as any}
       className="customhtml-block-wrapper"

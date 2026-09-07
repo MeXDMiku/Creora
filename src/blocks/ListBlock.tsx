@@ -99,6 +99,7 @@ const ListBlockComponent = (props: NodeViewProps) => {
 
   return (
     <NodeViewWrapper
+      data-block-id={blockId}
       ref={wrapperRef}
       className="list-block-wrapper"
       style={{

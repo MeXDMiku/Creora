@@ -131,6 +131,7 @@ const HistoryChartBlockComponent = (props: NodeViewProps) => {
 
   return (
     <NodeViewWrapper
+      data-block-id={blockId}
       ref={wrapperRef}
       as="div"
       className="history-chart-block-wrapper"

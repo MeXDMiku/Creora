@@ -1437,6 +1437,52 @@ const CONTROLS = [
     with: `    // control: save anyway`,
     expect: ['and a save with no page goes nowhere rather than to a default'],
   },
+
+  {
+    name: 'canvas: a block stops saying which block it is, so nothing can measure it',
+    file: 'src/blocks/ListBlock.tsx',
+    find: `      data-block-id={blockId}`,
+    with: `      data-control-not-an-id={blockId}`,
+    expect: ['EVERY BLOCK WRAPPER SAYS WHICH BLOCK IT IS, or nothing can measure it'],
+  },
+
+  {
+    name: 'rows: a List is treated as a table, so its copy of the rows is counted again',
+    file: 'src/lib/pageDelete.ts',
+    find: `    if (!isDatabase(blockId)) continue;`,
+    with: `    // control: everything with rows counts`,
+    expect: [
+      'A LIST SHOWING TWO ROWS DOES NOT MAKE THEM FOUR',
+      'and it is not counted as a table of its own',
+      'only tables are counted',
+    ],
+  },
+  {
+    name: 'rows: the Health panel goes back to counting rows itself',
+    file: 'src/components/HealthPanel.tsx',
+    find: `  const held = useMemo(
+    () => summarisePageData(
+      blockIds,
+      (id) => store.get(blockRuntimeAtom(id)),
+      (id) => nodeTypeFromBlockId(id) === 'databaseBlock',
+    ),
+    [blockIds, store],
+  )
+  const rowCount = held.rowCount`,
+    with: `  const held = { countIsComplete: true }
+  const rowCount = useMemo(() => {
+    let total = 0
+    for (const id of blockIds) {
+      const rows = store.get(blockRuntimeAtom(id))?.rows
+      if (Array.isArray(rows)) total += rows.length
+    }
+    return total
+  }, [blockIds, store])`,
+    expect: [
+      'THE HEALTH PANEL ASKS THIS FUNCTION, rather than keeping a second count',
+      'and no longer sums rows on every block itself',
+    ],
+  },
 ];
 
 /**

@@ -373,6 +373,7 @@ const DatabaseBlockComponent = (props: NodeViewProps) => {
 
   return (
     <NodeViewWrapper
+      data-block-id={blockId}
       ref={wrapperRef}
       as="div"
       className="database-block-wrapper"

@@ -108,6 +108,7 @@ const ButtonBlockComponent = (props: NodeViewProps) => {
 
   return (
     <NodeViewWrapper 
+      data-block-id={blockId}
       as="div" 
       className="button-block-wrapper" 
       style={outerStyle}

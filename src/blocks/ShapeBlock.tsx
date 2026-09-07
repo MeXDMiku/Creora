@@ -131,6 +131,7 @@ const ShapeBlockComponent = (props: NodeViewProps) => {
 
   return (
     <NodeViewWrapper
+      data-block-id={blockId}
       ref={wrapperRef}
       as="div"
       className="shape-block-wrapper"

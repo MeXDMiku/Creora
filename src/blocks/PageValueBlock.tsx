@@ -82,6 +82,7 @@ const PageValueComponent = ({ node }: NodeViewProps) => {
 
   return (
     <NodeViewWrapper
+      data-block-id={blockId}
       as="div"
       ref={wrapperRef as any}
       className="page-value-block-wrapper"

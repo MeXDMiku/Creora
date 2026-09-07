@@ -78,6 +78,7 @@ const FormulaDisplayBlockComponent = (props: NodeViewProps) => {
 
   return (
     <NodeViewWrapper 
+      data-block-id={blockId}
       ref={wrapperRef}
       as="div" 
       className="formula-display-block-wrapper" 
