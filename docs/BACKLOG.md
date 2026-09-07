@@ -390,9 +390,14 @@ And the primitives that matter more than block types:
   reimplement Timer, Database and List wholesale, including Database's Supabase
   writes. That is where the two sides silently drift — and Database is the one
   that writes real data.
-- `TODO` **Accessibility divergence.** In the editor a button renders as a
-  `<div>`; on published pages as a `<button>`. Cosmetically identical, and only
-  one is keyboard-accessible.
+- `NOTED` **Accessibility divergence.** In the editor a button renders as a
+  `<div>`; on published pages as a `<button>`. *(Checked 7 Sep: the PUBLISHED
+  side is already right -- a real `<button>`, with `disabled` and `aria-busy`.
+  So the gap only affects the editor, which one builder uses with a mouse,
+  while section 8 of this same file says the published output and the editor
+  have opposite urgency. Making a TipTap node view a real `<button>` risks its
+  drag and wiring behaviour for a benefit nobody outside the builder's own
+  chair sees. Deliberately not done; revisit if a second person ever edits.)*
 - `TODO` `supabase login && supabase link` has never been run, which is why every
   DDL change is still a manual dashboard operation.
 - `TODO` Custom SMTP before real users — the built-in sender allows **2 auth
