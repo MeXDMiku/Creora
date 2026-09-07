@@ -7,6 +7,7 @@ import { measurePage, verdictForPage } from './lib/pageSize'
 import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, queriesAtom, actionsAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, slotNameOf, slotNameForNodeType, getCanvasBlocks, shapeRoleDataType, currentPageIdAtom, currentPageIsPublishedAtom, pagesListAtom, switchPageFnAtom, isPreviewModeAtom, canvasModeAtom, editingBreakpointAtom, canvasZoomAtom } from './state/atoms'
 import { canWire } from './lib/wireTypes'
 import { workflowsAfterDeleting, whatBreaksIfDeleted, breakageSummary, nodeName, type Breakage } from './lib/blockDependents'
+import { chooseFirstPage } from './lib/firstPage'
 import { summarisePageData, describeWhatWillBeLost, downloadPageData, deletePage } from './lib/pageDelete'
 import { newBlockId, defaultRuntimeForNodeType, defaultAttrsForNodeType, BLOCK_FOOTPRINT, nodeTypeFromBlockId, shortBlockId, isBlockNodeType, withoutVisitorState, portableTypeFromNodeType, nodeTypeFromPortableType, type BlockNodeType } from './lib/blockRegistry'
 import { ButtonBlock } from './blocks/ButtonBlock'
@@ -1869,7 +1870,16 @@ function ConnectionContextMenu() {
   )
 }
 
-const PAGE_ID = '00000000-0000-0000-0000-000000000001'
+/**
+ * KEPT ONLY SO THE ID THAT CAUSED THIS IS WRITTEN DOWN SOMEWHERE.
+ *
+ * It used to be the id of every first page, for everybody. Nothing chooses it
+ * any more -- `chooseFirstPage` makes a fresh uuid instead -- and nothing
+ * should: two people cannot own one row, and the second to try is the one who
+ * finds out, with a duplicate-key error and an app that will not save.
+ */
+const LEGACY_SHARED_PAGE_ID = '00000000-0000-0000-0000-000000000001'
+void LEGACY_SHARED_PAGE_ID
 
 
 /**
@@ -2004,9 +2014,19 @@ function App() {
   const [showActions, setShowActions] = useState(false)
   const [zoom, setZoom] = useAtom(canvasZoomAtom)
 
-  const activePageIdRef = useRef(PAGE_ID)
+  /**
+   * Empty, not a hardcoded page id.
+   *
+   * This used to fall back to PAGE_ID, the uuid every copy of Creora shared.
+   * `activePageIdRef` is what the save path writes to, so before init resolved
+   * -- or any time the active page was null -- a save went to a page this
+   * person very likely did not own, and came back "Only the person who owns
+   * this page can save changes to it". Saving to nowhere is better than saving
+   * to somebody else's page, and `savePageData` refuses an empty id.
+   */
+  const activePageIdRef = useRef('')
   useEffect(() => {
-    activePageIdRef.current = activePageId || PAGE_ID
+    activePageIdRef.current = activePageId || ''
   }, [activePageId])
 
   // Ref to hold saveToSupabase callback to break mutual dependency with editor hook
@@ -3398,6 +3418,9 @@ function App() {
 
   const savePageData = async (pageId: string) => {
     if (!editor) return
+    // No page yet means there is nowhere to save. It used to mean "save to the
+    // shared default id", which is how work went to a page somebody else owned.
+    if (!pageId) return
     try {
       const docJson = editor.getJSON()
       const blockIds: string[] = []
@@ -3700,9 +3723,24 @@ function App() {
         if (fetchErr) throw fetchErr
 
         let pages = allPagesList || []
-        const hasDefaultPage = pages.some((p: any) => p.id === PAGE_ID)
-        
-        if (!hasDefaultPage) {
+
+        /**
+         * WHICH PAGE TO OPEN, AND WHETHER ONE HAS TO BE MADE.
+         *
+         * This used to look for a HARDCODED page id -- the same uuid for
+         * everybody -- and create it when it was not in the list. `list_pages`
+         * is filtered by ownership, so for the second person ever to run this
+         * the row existed, was invisible, and could not be created: duplicate
+         * key on pages_pkey, start-up thrown, and then every save refused
+         * because the active page was one they did not own. See firstPage.ts.
+         */
+        const choice = chooseFirstPage(
+          pages.map((p: any) => p.id),
+          localStorage.getItem('creora_active_page_id'),
+          () => crypto.randomUUID(),
+        )
+
+        if (choice.mustCreate) {
           const defaultBlocks = {
             documentContent: {
               type: 'doc',
@@ -3725,15 +3763,15 @@ function App() {
             queries: [],
             pageName: 'Page 1'
           }
-          
+
           const { error: insertError } = await supabase
             .rpc('create_page', {
-              p_id: PAGE_ID,
+              p_id: choice.open,
               p_blocks: defaultBlocks
             })
 
           if (insertError) throw insertError
-          
+
           // Re-fetch list
           const { data: refreshedList, error: refreshErr } = await supabase
             .rpc('list_pages')
@@ -3747,11 +3785,8 @@ function App() {
         }))
         setPagesList(list)
 
-        // 2. Resolve active page ID
-        let lastActiveId = localStorage.getItem('creora_active_page_id')
-        if (!lastActiveId || !pages.some((p: any) => p.id === lastActiveId)) {
-          lastActiveId = PAGE_ID
-        }
+        // 2. The page to open is already decided above.
+        const lastActiveId = choice.open
         setActivePageId(lastActiveId)
         localStorage.setItem('creora_active_page_id', lastActiveId)
 
@@ -4036,7 +4071,7 @@ function App() {
             maxWidth: 'min(520px, 40vw)', overflowX: 'auto', flexShrink: 1,
           }}>
             {pagesList.map((page) => {
-              const isActive = page.id === (activePageId || PAGE_ID);
+              const isActive = page.id === activePageId;
               return (
                 <button
                   key={page.id}

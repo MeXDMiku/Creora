@@ -1401,6 +1401,42 @@ const CONTROLS = [
       'the block at the other end sees the same link the other way up',
     ],
   },
+
+  // --- the first page, which every copy used to share ------------------------
+  {
+    name: 'page: a remembered id is opened even when you cannot see it',
+    file: 'src/lib/firstPage.ts',
+    find: `  if (remembered && visible.includes(remembered)) return { open: remembered, mustCreate: false };`,
+    with: `  if (remembered) return { open: remembered, mustCreate: false };`,
+    expect: [
+      'A REMEMBERED PAGE YOU CANNOT SEE IS NOT RECREATED, which is the whole bug',
+      'anything of yours, when the remembered one is gone',
+    ],
+  },
+  {
+    name: 'page: having pages of your own no longer stops a new one being made',
+    file: 'src/lib/firstPage.ts',
+    find: `  if (visible.length) return { open: visible[0], mustCreate: false };`,
+    with: `  // control: always make a new one`,
+    expect: [
+      'anything of yours, when the remembered one is gone',
+      'and having pages of your own means no new one is made, however stale the memory',
+    ],
+  },
+  {
+    name: 'page: an empty id in the list counts as somewhere to open',
+    file: 'src/lib/firstPage.ts',
+    find: `  const visible = (visiblePageIds ?? []).filter(Boolean);`,
+    with: `  const visible = visiblePageIds ?? [];`,
+    expect: ['an empty id in the list is not somewhere to open'],
+  },
+  {
+    name: 'page: the save path goes back to a default page when there is none',
+    file: 'src/App.tsx',
+    find: `    if (!pageId) return`,
+    with: `    // control: save anyway`,
+    expect: ['and a save with no page goes nowhere rather than to a default'],
+  },
 ];
 
 /**

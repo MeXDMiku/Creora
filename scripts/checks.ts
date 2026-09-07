@@ -29,6 +29,7 @@ import { hiddenLinks, reasonWords, hiddenLinksTouching } from '../src/lib/hidden
 import { RUNTIME_BLOCK_ID_FIELDS } from '../src/lib/remapBlockIds';
 import { whatBreaksIfDeleted, breakageSummary, workflowsAfterDeleting, nodeName } from '../src/lib/blockDependents';
 import { planFormulas, circleMessage } from '../src/lib/formulaOrder';
+import { chooseFirstPage } from '../src/lib/firstPage';
 import {
   resolveLayout,
   layoutPage,
@@ -10320,6 +10321,61 @@ group('formulas are worked out in an order, not in two passes');
 }
 
 /**
+ * THE FIRST PAGE, WHICH EVERY COPY OF CREORA USED TO SHARE.
+ *
+ * The first page had a hardcoded uuid -- the same one for everybody -- while
+ * every later page got `crypto.randomUUID()`. That works for exactly one user.
+ * `list_pages` is filtered by ownership, so for the SECOND person the row
+ * existed, was invisible, and could not be created: duplicate key on
+ * pages_pkey, start-up thrown. Then the active page fell back to that same id,
+ * so `get_page` returned nothing and every save came back "Only the person who
+ * owns this page can save changes to it".
+ *
+ * Found by reading the console of a dev session that had been showing "Error
+ * saving" for hours while I was looking at something else on the same page.
+ */
+group('which page opens, and whether one has to be made');
+{
+  const MINE = '11111111-1111-1111-1111-111111111111';
+  const ALSO_MINE = '22222222-2222-2222-2222-222222222222';
+  const SHARED = '00000000-0000-0000-0000-000000000001';
+  const fresh = () => 'fresh-id';
+
+  check('where you were, when you can still get to it',
+    chooseFirstPage([MINE, ALSO_MINE], ALSO_MINE, fresh), { open: ALSO_MINE, mustCreate: false });
+  check('anything of yours, when the remembered one is gone',
+    chooseFirstPage([MINE], ALSO_MINE, fresh), { open: MINE, mustCreate: false });
+  check('and when nothing was remembered at all',
+    chooseFirstPage([MINE], null, fresh), { open: MINE, mustCreate: false });
+
+  check('A PAGE IS MADE ONLY WHEN YOU HAVE NONE',
+    chooseFirstPage([], null, fresh), { open: 'fresh-id', mustCreate: true });
+  check('AND IT IS A FRESH ID, never the one everybody shared',
+    chooseFirstPage([], SHARED, fresh).open === SHARED, false);
+
+  /**
+   * The case that broke it. A page you cannot see is not a page that does not
+   * exist -- the database filtered it out because it belongs to somebody else.
+   * Remembering its id must not make this try to create it.
+   */
+  check('A REMEMBERED PAGE YOU CANNOT SEE IS NOT RECREATED, which is the whole bug',
+    chooseFirstPage([], SHARED, fresh), { open: 'fresh-id', mustCreate: true });
+  check('and having pages of your own means no new one is made, however stale the memory',
+    chooseFirstPage([MINE], SHARED, fresh), { open: MINE, mustCreate: false });
+
+  check('an empty id in the list is not somewhere to open',
+    chooseFirstPage([''], null, fresh), { open: 'fresh-id', mustCreate: true });
+  check('nor is a missing list', chooseFirstPage(undefined as any, null, fresh).mustCreate, true);
+
+  // And the app no longer chooses the shared id anywhere.
+  const appSrcPage = readFileSync('src/App.tsx', 'utf8');
+  check('APP.TSX NEVER OPENS OR SAVES TO THE SHARED ID ANY MORE',
+    /\|\| PAGE_ID|p_id: PAGE_ID|useRef\(PAGE_ID\)/.test(appSrcPage), false);
+  check('and a save with no page goes nowhere rather than to a default',
+    /if \(!pageId\) return/.test(appSrcPage), true);
+}
+
+/**
  * HOW MANY CHECKS THERE ARE, WRITTEN DOWN.
  *
  * Not a vanity number. Two runs an hour apart reported 1737 and 1736 with
@@ -10336,7 +10392,7 @@ group('formulas are worked out in an order, not in two passes');
  * Raise it in the same commit that adds the checks, the way the drift budget
  * above is raised: a number changed where it can be seen in a diff.
  */
-const EXPECTED_CHECKS = 2317;
+const EXPECTED_CHECKS = 2328;
 reachedTheEnd = true;
 if (passed + failed !== EXPECTED_CHECKS) {
   failed++;
