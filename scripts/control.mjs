@@ -1290,6 +1290,52 @@ const CONTROLS = [
       'AND THERE ARE ONLY THE THREE CALLS TO THE UNGUARDED ONE THAT SHOULD EXIST',
     ],
   },
+
+  // --- the order formulas are worked out in ----------------------------------
+  {
+    name: 'order: the plan is ignored and the formulas run as declared',
+    file: 'src/lib/bindingEngine.ts',
+    find: `  for (const binding of plan.order) {`,
+    with: `  for (const binding of formulas) {`,
+    expect: [
+      'and declaring them backwards changes nothing',
+      'nor does shuffling them',
+    ],
+  },
+  {
+    name: 'order: an answer is not fed forward, so the next formula reads a stale one',
+    file: 'src/lib/bindingEngine.ts',
+    find: `        scope[binding.targetBlockId] = calculatedValue;`,
+    with: `        // control: the next formula reads the old value`,
+    expect: ['A CHAIN FOUR DEEP COMES OUT RIGHT, which two passes could not do'],
+  },
+  {
+    name: 'order: a circle shows whatever number it last had, instead of saying so',
+    file: 'src/lib/bindingEngine.ts',
+    find: `  for (const blockId of plan.inCircle) {`,
+    with: `  for (const blockId of []) {`,
+    expect: [
+      'A BLOCK IN A CIRCLE SHOWS AN ERROR, NOT A NUMBER',
+      'and says which kind of stuck it is',
+    ],
+  },
+  {
+    name: 'order: a formula naming itself is not treated as a circle',
+    file: 'src/lib/formulaOrder.ts',
+    find: `      if (targets.has(id)) needs.add(id);`,
+    with: `      if (targets.has(id) && id !== f.targetBlockId) needs.add(id);`,
+    expect: [
+      'a formula reading its OWN answer is a circle of one',
+    ],
+  },
+  {
+    name: 'order: ties stop keeping the order they were written in',
+    file: 'src/lib/formulaOrder.ts',
+    find: `    if (!ready.length) break;`,
+    with: `    if (!ready.length) break;
+    ready.reverse(); // control: ties come out backwards`,
+    expect: ['two formulas that need nothing keep the order they were written in'],
+  },
 ];
 
 /**

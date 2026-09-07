@@ -15,6 +15,7 @@ import { evaluateCondition } from './conditions';
 import { addFacets, evaluateExpression, truthy, type FormulaValue, explainUnreadableFormula, type TableScope } from './formula';
 import { describeRowWriteError, withoutRow } from './rowWrite';
 import { functionNameFor, argsFor, describeActionError } from './actions';
+import { planFormulas, circleMessage } from './formulaOrder';
 export { evaluateCondition };
 import { renderTemplate } from './format';
 import { supabase } from './supabase';
@@ -1491,40 +1492,68 @@ export function recalculateAllFormulas(
    */
   const tables = tableScope(store);
 
-  // Execute formula evaluation in 2 successive passes to resolve chained formula dependencies
-  for (let pass = 1; pass <= 2; pass++) {
-    // 1. Build variables scope
-    scope = formulaScope(store);
+  /**
+   * IN DEPENDENCY ORDER, ONCE -- IT USED TO BE TWO PASSES, WHATEVER THE PAGE.
+   *
+   * A pass rebuilt the scope at its start, so it advanced a chain by exactly
+   * one link. Two passes therefore resolved a chain two deep and no further:
+   * B=A+1, C=B+1, D=C+1, E=D+1 came out [2,3,2,2] instead of [2,3,4,5], and D
+   * showed 2 -- not an error, not a blank, a plausible number on a page whose
+   * author had no reason to doubt it. Measured before this was written.
+   *
+   * `planFormulas` works the order out instead of guessing at a pass count, so
+   * one pass is right at any depth and costs less than the two did. And what
+   * no number of passes could do: it tells a deep chain from a CIRCLE, so a
+   * block that waits for itself says so rather than showing whatever the last
+   * pass happened to leave behind.
+   */
+  const plan = planFormulas(formulas);
+  scope = formulaScope(store);
 
+  for (const binding of plan.order) {
+    // Only calculate if the target block exists
+    if (allBlockIds.includes(binding.targetBlockId)) {
+      const targetAtom = blockRuntimeAtom(binding.targetBlockId);
+      const currentTargetState = store.get(targetAtom);
 
-    // 2. Evaluate all formula bindings
-    for (const binding of formulas) {
-      // Only calculate if the target block exists
-      if (allBlockIds.includes(binding.targetBlockId)) {
-        const targetAtom = blockRuntimeAtom(binding.targetBlockId);
-        const currentTargetState = store.get(targetAtom);
-
-        try {
-          const calculatedValue = evaluateFormula(binding.formula, scope, tables);
-          if (currentTargetState.value !== calculatedValue || currentTargetState.error !== null) {
-            store.set(targetAtom, {
-              ...currentTargetState,
-              value: calculatedValue,
-              error: null,
-            });
-          }
-        } catch (err: any) {
-          console.error('Error evaluating formula for block:', binding.targetBlockId, err);
-          const errMsg = err?.message || 'Error';
-          if (currentTargetState.value !== 'Error' || currentTargetState.error !== errMsg) {
-            store.set(targetAtom, {
-              ...currentTargetState,
-              value: 'Error',
-              error: errMsg,
-            });
-          }
+      try {
+        const calculatedValue = evaluateFormula(binding.formula, scope, tables);
+        // Into the scope as well as the store: the next formula in the order is
+        // one that was waiting for this, and it reads the scope, not the store.
+        scope[binding.targetBlockId] = calculatedValue;
+        if (currentTargetState.value !== calculatedValue || currentTargetState.error !== null) {
+          store.set(targetAtom, {
+            ...currentTargetState,
+            value: calculatedValue,
+            error: null,
+          });
+        }
+      } catch (err: any) {
+        console.error('Error evaluating formula for block:', binding.targetBlockId, err);
+        const errMsg = err?.message || 'Error';
+        if (currentTargetState.value !== 'Error' || currentTargetState.error !== errMsg) {
+          store.set(targetAtom, {
+            ...currentTargetState,
+            value: 'Error',
+            error: errMsg,
+          });
         }
       }
+    }
+  }
+
+  /**
+   * And the circle, said out loud. These are the blocks no order can reach --
+   * each waiting on another that is waiting on it. The old code showed them a
+   * number, because a pass cannot tell "still improving" from "never will".
+   */
+  for (const blockId of plan.inCircle) {
+    if (!allBlockIds.includes(blockId)) continue;
+    const targetAtom = blockRuntimeAtom(blockId);
+    const state = store.get(targetAtom);
+    const message = circleMessage(blockId, plan.inCircle);
+    if (state.value !== 'Error' || state.error !== message) {
+      store.set(targetAtom, { ...state, value: 'Error', error: message });
     }
   }
 

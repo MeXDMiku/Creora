@@ -27,6 +27,7 @@ import { canWire, typeWords } from '../src/lib/wireTypes';
 import { edgesOf, blocksOf } from '../src/lib/pageGraph';
 import { hiddenLinks, reasonWords } from '../src/lib/hiddenEdges';
 import { whatBreaksIfDeleted, breakageSummary, workflowsAfterDeleting, nodeName } from '../src/lib/blockDependents';
+import { planFormulas, circleMessage } from '../src/lib/formulaOrder';
 import {
   resolveLayout,
   layoutPage,
@@ -10132,6 +10133,104 @@ group('what breaks if this block goes');
 }
 
 /**
+ * THE ORDER FORMULAS ARE WORKED OUT IN, AND THE THREE THAT WERE WRONG.
+ *
+ * `recalculateAllFormulas` ran a fixed TWO passes with the scope rebuilt at the
+ * start of each, so a pass advanced a chain by exactly one link. Measured
+ * before any of this was written, with A = 1:
+ *
+ *   B = A + 1, C = B + 1, D = C + 1, E = D + 1   ->   [2, 3, 2, 2]
+ *
+ * where the answer is [2, 3, 4, 5]. The same three wrong numbers whatever
+ * order the formulas were declared in, because the limit was the pass count.
+ * And D showed 2 -- not an error, not a blank. A plausible number.
+ */
+group('formulas are worked out in an order, not in two passes');
+{
+  const A = 'numberDisplayBlock__or00000001';
+  const B = 'formulaDisplayBlock__or00000002';
+  const C = 'formulaDisplayBlock__or00000003';
+  const D = 'formulaDisplayBlock__or00000004';
+  const E = 'formulaDisplayBlock__or00000005';
+  const base = { visible: true, disabled: false, loading: false, error: null };
+  const chain: Record<string, any> = {
+    [B]: { targetBlockId: B, formula: `${A} + 1` },
+    [C]: { targetBlockId: C, formula: `${B} + 1` },
+    [D]: { targetBlockId: D, formula: `${C} + 1` },
+    [E]: { targetBlockId: E, formula: `${D} + 1` },
+  };
+  const runChain = (declared: string[]) => {
+    const store = createStore();
+    store.set(allBlockIdsAtom, [A, B, C, D, E]);
+    store.set(blockRuntimeAtom(A), { ...base, value: 1 });
+    for (const id of [B, C, D, E]) store.set(blockRuntimeAtom(id), { ...base, value: 0 });
+    store.set(formulasAtom, declared.map(id => chain[id]) as any);
+    store.set(workflowsAtom, []);
+    recalculateAllFormulas(store);
+    return [B, C, D, E].map(id => store.get(blockRuntimeAtom(id)).value);
+  };
+
+  check('A CHAIN FOUR DEEP COMES OUT RIGHT, which two passes could not do',
+    runChain([B, C, D, E]), [2, 3, 4, 5]);
+  check('and declaring them backwards changes nothing', runChain([E, D, C, B]), [2, 3, 4, 5]);
+  check('nor does shuffling them', runChain([C, E, B, D]), [2, 3, 4, 5]);
+
+  // The plan itself, without running anything.
+  const plan = planFormulas([chain[E], chain[C], chain[B], chain[D]]);
+  check('THE PLAN PUTS INPUTS BEFORE THE THINGS THAT USE THEM',
+    plan.order.map(f => f.targetBlockId), [B, C, D, E]);
+  check('and nothing is caught in a circle', plan.inCircle, []);
+  check('a formula reading a block that is NOT a formula waits for nothing',
+    planFormulas([chain[B]]).order.length, 1);
+  check('two formulas that need nothing keep the order they were written in',
+    planFormulas([chain[B], { targetBlockId: 'formulaDisplayBlock__or00000009', formula: `${A} * 2` }])
+      .order.map(f => f.targetBlockId), [B, 'formulaDisplayBlock__or00000009']);
+  check('an empty page plans nothing and does not throw', planFormulas([]).order.length, 0);
+  check('a formula with no target is not planned', planFormulas([{ formula: '1 + 1' } as any]).order.length, 0);
+
+  /**
+   * THE CIRCLE, WHICH NO NUMBER OF PASSES COULD EVER HAVE TOLD APART FROM A
+   * DEEP CHAIN. Both just stop improving; an ordering knows the difference.
+   */
+  const circle = planFormulas([
+    chain[B],
+    { targetBlockId: D, formula: `${E} + 1` },
+    { targetBlockId: E, formula: `${D} + 1` },
+  ]);
+  check('TWO BLOCKS WAITING FOR EACH OTHER ARE BOTH LEFT OUT OF THE ORDER',
+    circle.order.map(f => f.targetBlockId), [B]);
+  check('and both are named as the circle', circle.inCircle, [D, E].sort());
+  check('a formula reading its OWN answer is a circle of one',
+    planFormulas([{ targetBlockId: D, formula: `${D} + 1` }]).inCircle, [D]);
+  check('and it is told that in those words', circleMessage(D, [D]),
+    'This reads its own answer, so there is nothing to work out from.');
+  check('two say it as two', circleMessage(D, [D, E]),
+    'This and one other block each wait for the other, so neither can be worked out.');
+  check('and three as three', circleMessage(D, [D, E, C]),
+    'This and 2 other blocks wait for each other in a circle, so none can be worked out.');
+
+  // What the page actually ends up showing, which is the half that matters.
+  const store = createStore();
+  store.set(allBlockIdsAtom, [A, B, C, D, E]);
+  store.set(blockRuntimeAtom(A), { ...base, value: 1 });
+  for (const id of [B, C, D, E]) store.set(blockRuntimeAtom(id), { ...base, value: 0 });
+  store.set(formulasAtom, [
+    chain[B],
+    { targetBlockId: D, formula: `${E} + 1` },
+    { targetBlockId: E, formula: `${D} + 1` },
+  ] as any);
+  store.set(workflowsAtom, []);
+  recalculateAllFormulas(store);
+  check('A BLOCK IN A CIRCLE SHOWS AN ERROR, NOT A NUMBER — a number here is a guess',
+    store.get(blockRuntimeAtom(D)).value, 'Error');
+  check('and says which kind of stuck it is',
+    store.get(blockRuntimeAtom(D)).error,
+    'This and one other block each wait for the other, so neither can be worked out.');
+  check('while a formula that has nothing to do with the circle still works',
+    store.get(blockRuntimeAtom(B)).value, 2);
+}
+
+/**
  * HOW MANY CHECKS THERE ARE, WRITTEN DOWN.
  *
  * Not a vanity number. Two runs an hour apart reported 1737 and 1736 with
@@ -10148,7 +10247,7 @@ group('what breaks if this block goes');
  * Raise it in the same commit that adds the checks, the way the drift budget
  * above is raised: a number changed where it can be seen in a diff.
  */
-const EXPECTED_CHECKS = 2286;
+const EXPECTED_CHECKS = 2304;
 reachedTheEnd = true;
 if (passed + failed !== EXPECTED_CHECKS) {
   failed++;
