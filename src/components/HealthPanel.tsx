@@ -16,6 +16,7 @@ import {
 } from '../state/atoms'
 import { diagnosePage, sortProblems, type Problem } from '../lib/diagnose'
 import { hiddenLinks } from '../lib/hiddenEdges'
+import { nodeName } from '../lib/blockDependents'
 import { costLines, inlinedImages } from '../lib/pageCost'
 import { measurePage } from '../lib/pageSize'
 
@@ -94,21 +95,14 @@ export function HealthPanel({ onClose }: { onClose: () => void }) {
     })
   }, [blockIds, store, rowCount, pagesList])
 
-  const nameOf = (id: string) => {
-    // A question and an action are nodes in the dependency graph but not blocks,
-    // so there is no runtime state to ask. Without this they printed their raw
-    // internal id into a panel whose whole point is words a person can read.
-    if (id.startsWith('query:')) {
-      const q = queries.find((x: any) => `query:${x.id}` === id)
-      return `the question "${q?.name || q?.def?.from || 'unnamed'}"`
-    }
-    if (id.startsWith('action:')) {
-      const a = actions.find((x: any) => `action:${x.id}` === id)
-      return `the action "${a?.name || 'unnamed'}"`
-    }
-    const st = store.get(blockRuntimeAtom(id))
-    return st?.blockName || slotNameOf(id, st)
-  }
+  // A question and an action are nodes in the dependency graph but not blocks,
+  // so there is no runtime state to ask them for a name. `nodeName` handles all
+  // three, and the delete warning in App.tsx says it the same way from the same
+  // function rather than from a second copy of it.
+  const nameOf = (id: string) => nodeName(id, (blockId) => {
+    const st = store.get(blockRuntimeAtom(blockId))
+    return st?.blockName || slotNameOf(blockId, st)
+  }, queries, actions)
 
   /**
    * THE DEPENDENCIES THIS PAGE HAS AND DOES NOT DRAW.

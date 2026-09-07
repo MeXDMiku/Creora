@@ -125,3 +125,29 @@ export function workflowsAfterDeleting<T extends { sourceId?: string; steps?: an
   }
   return out;
 }
+
+/**
+ * What to call a node in a sentence a person reads.
+ *
+ * A block has runtime state to ask for its name; a question and an action do
+ * not, and without this they printed their raw internal id -- `query:q1` --
+ * into panels whose whole point is words. Shared rather than written twice,
+ * because the Health panel and the delete warning say the same thing and two
+ * copies of a sentence drift the same way two copies of a cleanup do.
+ */
+export function nodeName(
+  id: string,
+  blockName: (blockId: string) => string,
+  queries: { id?: string; name?: string; def?: { from?: any } }[] = [],
+  actions: { id?: string; name?: string }[] = [],
+): string {
+  if (id.startsWith('query:')) {
+    const q = queries.find((x) => `query:${x?.id}` === id);
+    return `the question "${q?.name || (typeof q?.def?.from === 'string' ? q.def.from : '') || 'unnamed'}"`;
+  }
+  if (id.startsWith('action:')) {
+    const a = actions.find((x) => `action:${x?.id}` === id);
+    return `the action "${a?.name || 'unnamed'}"`;
+  }
+  return blockName(id);
+}

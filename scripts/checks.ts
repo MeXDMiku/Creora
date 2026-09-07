@@ -26,7 +26,7 @@ import { wireSentence, actionWords, eventWords, outputMeaning, PORT_OUT_HINT, PO
 import { canWire, typeWords } from '../src/lib/wireTypes';
 import { edgesOf, blocksOf } from '../src/lib/pageGraph';
 import { hiddenLinks, reasonWords } from '../src/lib/hiddenEdges';
-import { whatBreaksIfDeleted, breakageSummary, workflowsAfterDeleting } from '../src/lib/blockDependents';
+import { whatBreaksIfDeleted, breakageSummary, workflowsAfterDeleting, nodeName } from '../src/lib/blockDependents';
 import {
   resolveLayout,
   layoutPage,
@@ -10076,6 +10076,59 @@ group('what breaks if this block goes');
     /w\.steps\.some\(step => step\.targetId === blockId\)/.test(appSrcDel), false);
   check('it calls the checked one instead, in both places',
     (appSrcDel.match(/workflowsAfterDeleting\(prev, blockId\)/g) || []).length, 2);
+
+  /**
+   * AND THE NAMES, WHICH ARE THE HALF A PERSON ACTUALLY READS.
+   *
+   * A block has runtime state to ask for its name. A question and an action do
+   * not, and until this existed they printed `query:q1` into a panel whose
+   * whole point is words. Written once: the Health panel and the delete
+   * warning say the same sentence, and two copies of a sentence drift the way
+   * two copies of a cleanup do -- which is the bug directly above this one.
+   */
+  const qs = [{ id: 'q9', name: 'Recent', def: { from: 'Orders' } }];
+  const as = [{ id: 'a3', name: 'Book' }];
+  const asBlock = (id: string) => `the block ${id}`;
+  check('a block is named by whoever knows about blocks', nodeName(T, asBlock, qs, as), `the block ${T}`);
+  check('A QUESTION IS NAMED AS A QUESTION, not printed as a tag',
+    nodeName('query:q9', asBlock, qs, as), 'the question "Recent"');
+  check('and an action as an action', nodeName('action:a3', asBlock, qs, as), 'the action "Book"');
+  check('a question with no name falls back to the table it reads',
+    nodeName('query:q1', asBlock, [{ id: 'q1', def: { from: 'Orders' } }], as), 'the question "Orders"');
+  check('and one with neither says so rather than showing a blank',
+    nodeName('query:q1', asBlock, [{ id: 'q1' }], as), 'the question "unnamed"');
+  check('a question the page does not have is still called a question',
+    nodeName('query:gone', asBlock, qs, as), 'the question "unnamed"');
+  check('and nothing throws when there are no questions at all',
+    nodeName('query:q9', asBlock), 'the question "unnamed"');
+  check('THE HEALTH PANEL USES THE SAME ONE, rather than a second copy',
+    readFileSync('src/components/HealthPanel.tsx', 'utf8').includes('nodeName(id,'), true);
+
+  /**
+   * THE GATE, WHICH IS THE ONLY THING THAT MAKES ANY OF THIS REACH ANYBODY.
+   *
+   * `whatBreaksIfDeleted` was a tested library with no caller for a day. Both
+   * ways of deleting a block -- the context menu and the Delete key -- go
+   * through `requestDeleteBlock` now, and the check below is what stops a
+   * third way being added that skips it.
+   */
+  check('THE DELETE KEY ASKS FIRST', /requestDeleteBlock\(selectedId\)/.test(appSrcDel), true);
+  check('and so does the context menu',
+    /<ContextMenu editor=\{editor\} deleteBlock=\{requestDeleteBlock\}/.test(appSrcDel), true);
+  /**
+   * Exactly three calls, and each is one of the three that should exist:
+   *   deleteBlock(menu.blockId)        inside ContextMenu -- its PROP, which the
+   *                                    check above pins to requestDeleteBlock
+   *   deleteBlock(blockId); return }   the gate, when nothing depends on it
+   *   deleteBlock(blockToDelete.id)    the warning's own "delete it anyway"
+   * A fourth is a way round the warning, which is the whole thing this guards.
+   */
+  check('AND THERE ARE ONLY THE THREE CALLS TO THE UNGUARDED ONE THAT SHOULD EXIST',
+    (appSrcDel.match(/[^t]deleteBlock\(/g) || []).length, 3);
+  check('which is the one place the warning itself deletes from',
+    /deleteBlock\(blockToDelete\.id\)/.test(appSrcDel), true);
+  check('a block nothing depends on is deleted without being asked about',
+    /if \(!breaks\.length\) \{ deleteBlock\(blockId\); return \}/.test(appSrcDel), true);
 }
 
 /**
@@ -10095,7 +10148,7 @@ group('what breaks if this block goes');
  * Raise it in the same commit that adds the checks, the way the drift budget
  * above is raised: a number changed where it can be seen in a diff.
  */
-const EXPECTED_CHECKS = 2273;
+const EXPECTED_CHECKS = 2286;
 reachedTheEnd = true;
 if (passed + failed !== EXPECTED_CHECKS) {
   failed++;

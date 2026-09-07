@@ -6,7 +6,7 @@ import { PageStamps, interpretSave, shouldKeepAutosaving } from './lib/savePage'
 import { measurePage, verdictForPage } from './lib/pageSize'
 import { workflowsAtom, blockRuntimeAtom, blockPositionAtom, selectedBlockIdAtom, activeWireAtom, connectionsAtom, snapTargetAtom, pendingConnectionAtom, triggerSaveAtom, contextMenuAtom, getBlockDataType, formulasAtom, queriesAtom, actionsAtom, allBlockIdsAtom, getBlockDefaultValue, connectionContextMenuAtom, getBlockTypeDisplayName, isGarbageName, slotNameOf, slotNameForNodeType, getCanvasBlocks, shapeRoleDataType, currentPageIdAtom, currentPageIsPublishedAtom, pagesListAtom, switchPageFnAtom, isPreviewModeAtom, canvasModeAtom, editingBreakpointAtom, canvasZoomAtom } from './state/atoms'
 import { canWire } from './lib/wireTypes'
-import { workflowsAfterDeleting } from './lib/blockDependents'
+import { workflowsAfterDeleting, whatBreaksIfDeleted, breakageSummary, nodeName, type Breakage } from './lib/blockDependents'
 import { summarisePageData, describeWhatWillBeLost, downloadPageData, deletePage } from './lib/pageDelete'
 import { newBlockId, defaultRuntimeForNodeType, defaultAttrsForNodeType, BLOCK_FOOTPRINT, nodeTypeFromBlockId, shortBlockId, isBlockNodeType, withoutVisitorState, portableTypeFromNodeType, nodeTypeFromPortableType, type BlockNodeType } from './lib/blockRegistry'
 import { ButtonBlock } from './blocks/ButtonBlock'
@@ -2530,6 +2530,46 @@ function App() {
     setTriggerSave(prev => prev + 1)
   }, [editor, store, setConnections, setWorkflows, setTriggerSave, setSelectedBlockId])
 
+  /**
+   * DELETING A BLOCK, AFTER SAYING WHAT ELSE STOPS WORKING.
+   *
+   * `deleteBlock` above cleans up four things and every one of them is a place
+   * the block is the TARGET. Nothing cleaned up, or even mentioned, the places
+   * it is the SOURCE: a formula somewhere else naming it, a List pointed at it
+   * through a setting, a condition asking about it, a question drawn from it.
+   * About two thirds of those draw no wire, so the canvas shows no reason why
+   * the other thing broke. That is the reported "I deleted something and
+   * something else stopped working".
+   *
+   * The warning is modelled on the page-delete one below, and for the same
+   * stated reason: "are you sure" with no number is not a warning, it is a
+   * formality people click through. So this only appears when something DOES
+   * depend on the block, and it names what.
+   */
+  const [blockToDelete, setBlockToDelete] = useState<{ id: string; breaks: Breakage[] } | null>(null)
+
+  const requestDeleteBlock = useCallback((blockId: string) => {
+    const runtimeStates: Record<string, any> = {}
+    for (const id of store.get(allBlockIdsAtom)) runtimeStates[id] = store.get(blockRuntimeAtom(id))
+    const breaks = whatBreaksIfDeleted({
+      runtimeStates,
+      connections: store.get(connectionsAtom),
+      workflows: store.get(workflowsAtom),
+      formulas: store.get(formulasAtom),
+      queries: store.get(queriesAtom),
+      actions: store.get(actionsAtom),
+    }, blockId)
+    // Nothing depends on it, so there is nothing to warn about and asking would
+    // only train somebody to click through the times it matters.
+    if (!breaks.length) { deleteBlock(blockId); return }
+    setBlockToDelete({ id: blockId, breaks })
+  }, [store, deleteBlock])
+
+  const nameOfNode = useCallback((id: string) => nodeName(id, (blockId) => {
+    const st = store.get(blockRuntimeAtom(blockId))
+    return st?.blockName || slotNameOf(blockId, st)
+  }, store.get(queriesAtom), store.get(actionsAtom)), [store])
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const activeEl = document.activeElement
@@ -2551,7 +2591,7 @@ function App() {
         const selectedId = store.get(selectedBlockIdAtom)
         if (selectedId) {
           e.preventDefault()
-          deleteBlock(selectedId)
+          requestDeleteBlock(selectedId)
         }
       }
 
@@ -2568,7 +2608,7 @@ function App() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
     }
-  }, [editor, store, deleteBlock, setSelectedBlockId])
+  }, [editor, store, requestDeleteBlock, setSelectedBlockId])
 
   const commands = useMemo(() => [
     {
@@ -4471,8 +4511,65 @@ function App() {
           <EditorContent editor={editor} style={{ flex: 1, position: 'relative', pointerEvents: activeWire ? 'none' : 'auto' }} />
           {!isPreviewMode && canvasMode === 'action' && <WireOverlay />}
           {!isPreviewMode && <ConnectionPopup editor={editor} />}
-          {!isPreviewMode && <ContextMenu editor={editor} deleteBlock={deleteBlock} />}
+          {!isPreviewMode && <ContextMenu editor={editor} deleteBlock={requestDeleteBlock} />}
           {!isPreviewMode && <ConnectionContextMenu />}
+
+          {/*
+            WHAT ELSE STOPS WORKING, BEFORE IT STOPS WORKING.
+
+            Same shape and the same reasoning as the page-delete warning: a
+            count and the names, not "are you sure". It appears ONLY when
+            something depends on the block, so it never becomes the dialog
+            people learn to click through -- and the ones with no wire are
+            listed first and marked, because those are the ones nobody could
+            have seen coming from the canvas.
+          */}
+          {blockToDelete && (
+            <div style={{
+              position: 'absolute', left: '50%', top: '24px', transform: 'translateX(-50%)',
+              zIndex: 10000, width: 'min(440px, 90%)', textAlign: 'left',
+              background: '#fff', border: '1px solid #fca5a5', borderLeft: '4px solid #dc2626',
+              borderRadius: '6px', padding: '14px 16px',
+              boxShadow: '0 10px 25px -5px rgba(0,0,0,0.35)',
+            }}>
+              <div style={{ fontWeight: 700, color: '#b91c1c', fontSize: '14px', marginBottom: '6px' }}>
+                Delete &ldquo;{nameOfNode(blockToDelete.id)}&rdquo;?
+              </div>
+              <div style={{ fontSize: '13px', color: '#334155', lineHeight: 1.5, marginBottom: '10px' }}>
+                {breakageSummary(blockToDelete.breaks)}
+              </div>
+              <div style={{ fontSize: '12px', color: '#334155', marginBottom: '12px', maxHeight: '160px', overflowY: 'auto' }}>
+                {blockToDelete.breaks.map((b) => (
+                  <div key={b.dependent} style={{ padding: '4px 0', borderTop: '1px solid #f1f5f9' }}>
+                    <span style={{ fontWeight: 600 }}>{nameOfNode(b.dependent)}</span>
+                    <span style={{ opacity: 0.75 }}> — {b.reasons.join(' · ')}</span>
+                    {!b.drawn && (
+                      <span style={{
+                        marginLeft: '6px', fontSize: '10px', fontWeight: 700, letterSpacing: '0.3px',
+                        color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a',
+                        borderRadius: '3px', padding: '1px 4px', textTransform: 'uppercase',
+                      }}>no wire</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  onClick={() => { deleteBlock(blockToDelete.id); setBlockToDelete(null) }}
+                  style={{ padding: '6px 12px', borderRadius: '4px', border: 'none', background: '#dc2626', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}
+                >
+                  Delete it anyway
+                </button>
+                <button
+                  onClick={() => setBlockToDelete(null)}
+                  style={{ padding: '6px 12px', borderRadius: '4px', border: '1px solid #cbd5e1', background: '#fff', color: '#334155', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}
+                >
+                  Keep it
+                </button>
+              </div>
+            </div>
+          )}
+
           {typeMismatch && (
             <div
               style={{

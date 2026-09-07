@@ -1237,6 +1237,59 @@ const CONTROLS = [
       'a yes or no is flipped',
     ],
   },
+
+  // --- the warning before a block is deleted ---------------------------------
+  {
+    name: 'warn: a question goes back to printing its raw id',
+    file: 'src/lib/blockDependents.ts',
+    find: `    return \`the question "\${q?.name || (typeof q?.def?.from === 'string' ? q.def.from : '') || 'unnamed'}"\`;`,
+    with: `    return id;`,
+    expect: [
+      'A QUESTION IS NAMED AS A QUESTION, not printed as a tag',
+      'a question with no name falls back to the table it reads',
+    ],
+  },
+  {
+    name: 'warn: an action does too',
+    file: 'src/lib/blockDependents.ts',
+    find: `    return \`the action "\${a?.name || 'unnamed'}"\`;`,
+    with: `    return id;`,
+    expect: ['and an action as an action'],
+  },
+  {
+    name: 'warn: the Health panel goes back to its own copy of the naming',
+    file: 'src/components/HealthPanel.tsx',
+    find: `  const nameOf = (id: string) => nodeName(id, (blockId) => {`,
+    with: `  const nameOf = (id: string) => ((blockId) => {`,
+    expect: ['THE HEALTH PANEL USES THE SAME ONE, rather than a second copy'],
+  },
+  {
+    name: 'warn: the Delete key skips the warning and deletes straight away',
+    file: 'src/App.tsx',
+    find: `          requestDeleteBlock(selectedId)`,
+    with: `          deleteBlock(selectedId)`,
+    expect: [
+      'THE DELETE KEY ASKS FIRST',
+      'AND THERE ARE ONLY THE THREE CALLS TO THE UNGUARDED ONE THAT SHOULD EXIST',
+    ],
+  },
+  {
+    name: 'warn: the context menu skips it too',
+    file: 'src/App.tsx',
+    find: `<ContextMenu editor={editor} deleteBlock={requestDeleteBlock} />`,
+    with: `<ContextMenu editor={editor} deleteBlock={deleteBlock} />`,
+    expect: ['and so does the context menu'],
+  },
+  {
+    name: 'warn: a block nothing depends on is asked about anyway, which trains clicking through',
+    file: 'src/App.tsx',
+    find: `    if (!breaks.length) { deleteBlock(blockId); return }`,
+    with: `    // control: always ask`,
+    expect: [
+      'a block nothing depends on is deleted without being asked about',
+      'AND THERE ARE ONLY THE THREE CALLS TO THE UNGUARDED ONE THAT SHOULD EXIST',
+    ],
+  },
 ];
 
 /**
